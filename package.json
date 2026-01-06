@@ -8,9 +8,11 @@
     "build": "vite build",
     "preview": "vite preview",
     "deploy": "vite build && wrangler deploy",
-    "cf-typegen": "wrangler types"
+    "cf-typegen": "wrangler types",
+    "postinstall": "patch-package"
   },
   "devDependencies": {
+    "patch-package": "^8.0.1",
     "typescript": "^5.5.2",
     "vite": "^7.3.0",
     "wrangler": "^4.54.0"
