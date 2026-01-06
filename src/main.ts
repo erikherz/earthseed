@@ -64,9 +64,12 @@ function initDeviceButtonFlipper() {
     // Add CSS to invert the visual appearance
     const style = document.createElement("style");
     style.textContent = `
-      /* Reorder buttons: Video first, then Mic, Screen, None */
+      /* Hide the Microphone toggle button (keep audio-only-btn) */
+      hang-publish button[title="Microphone"] { display: none !important; }
+
+      /* Reorder buttons: Video, Audio, Screen, None */
       hang-publish button[title="Camera"] { order: 1 !important; }
-      hang-publish button[title="Microphone"] { order: 2 !important; }
+      hang-publish button.audio-only-btn { order: 2 !important; }
       hang-publish button[title="Screen"] { order: 3 !important; }
       hang-publish button[title="Nothing"] { order: 4 !important; }
 
