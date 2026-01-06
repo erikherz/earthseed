@@ -617,7 +617,7 @@ function updateServerStatusPanel() {
 }
 
 // Relay URL - set dynamically for Safari fallback, static for native WebTransport
-let RELAY_URL = "https://relay.moq.dev"; // Test with Luke's relay (supports 0x20 SessionCompat)
+let RELAY_URL = "https://cdn.moq.dev"; // Luke's MoQ relay
 const NAMESPACE_PREFIX = "earthseed.live";
 
 // Debug logging for connection issues
