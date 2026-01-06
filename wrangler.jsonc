@@ -1,0 +1,27 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "earthseed",
+  "compatibility_date": "2025-01-01",
+  "main": "src/worker/index.ts",
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "earthseed-db",
+      "database_id": "b5065f2f-dc24-4ac2-94bd-b30432f0d288"
+    }
+  ],
+  "routes": [
+    {
+      "pattern": "earthseed.live",
+      "custom_domain": true
+    },
+    {
+      "pattern": "www.earthseed.live",
+      "custom_domain": true
+    }
+  ]
+}
