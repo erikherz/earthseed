@@ -503,6 +503,57 @@ function updateServerStatusPanel() {
 let RELAY_URL = "https://relay-next.cloudflare.mediaoverquic.com"; // Default for Chrome/Firefox
 const NAMESPACE_PREFIX = "earthseed.live";
 
+// Debug logging for connection issues
+console.log("Earthseed config:", {
+  relay: RELAY_URL,
+  namespace: NAMESPACE_PREFIX,
+  userAgent: navigator.userAgent,
+  hasWebTransport: typeof WebTransport !== "undefined",
+  needsPolyfill: typeof WebTransport === "undefined" || /^((?!chrome|android).)*safari/i.test(navigator.userAgent),
+});
+
+// Wrap WebTransport to add detailed connection logging
+if (typeof WebTransport !== "undefined" && !needsPolyfill) {
+  const OriginalWebTransport = WebTransport;
+  // @ts-expect-error - wrapping native WebTransport
+  globalThis.WebTransport = class DebugWebTransport extends OriginalWebTransport {
+    constructor(url: string | URL, options?: WebTransportOptions) {
+      console.log("[WebTransport Debug] Creating connection:", {
+        url: url.toString(),
+        options: JSON.stringify(options, null, 2),
+      });
+      super(url, options);
+
+      const startTime = performance.now();
+
+      this.ready.then(() => {
+        const elapsed = (performance.now() - startTime).toFixed(0);
+        console.log(`[WebTransport Debug] Connection READY after ${elapsed}ms`, {
+          // @ts-expect-error - accessing internal state
+          protocol: this.protocol,
+        });
+      }).catch((err) => {
+        const elapsed = (performance.now() - startTime).toFixed(0);
+        console.error(`[WebTransport Debug] Connection FAILED after ${elapsed}ms:`, err);
+      });
+
+      this.closed.then((info) => {
+        console.log("[WebTransport Debug] Connection CLOSED:", {
+          closeCode: info.closeCode,
+          reason: info.reason,
+        });
+      }).catch((err) => {
+        console.error("[WebTransport Debug] Connection closed with error:", err);
+      });
+
+      // Log when datagrams/streams are accessed
+      const originalIncoming = this.incomingBidirectionalStreams;
+      console.log("[WebTransport Debug] incomingBidirectionalStreams available:", !!originalIncoming);
+    }
+  };
+  console.log("[WebTransport Debug] Wrapped native WebTransport for debugging");
+}
+
 // Dynamic imports for hang components - MUST happen after polyfills are installed
 // ES module static imports are hoisted and execute before any code runs
 const loadHangComponents = async () => {
@@ -837,10 +888,30 @@ function initBroadcastView(streamId: string, user: User | null) {
   }
 
   // Set stream name on publisher
-  const publisher = document.querySelector("hang-publish") as HTMLElement & { video: boolean; device: string };
+  const publisher = document.querySelector("hang-publish") as HTMLElement & { video: boolean; device: string; active?: { connection?: { status?: { peek?: () => string } } } };
   if (publisher) {
+    console.log("[Hang Debug] Setting up publisher:", {
+      url: RELAY_URL,
+      name: streamName,
+    });
     publisher.setAttribute("url", RELAY_URL);
     publisher.setAttribute("name", streamName);
+
+    // Monitor connection status changes
+    const checkConnectionStatus = () => {
+      try {
+        const instance = (publisher as any).active?.peek?.();
+        if (instance?.connection) {
+          const status = instance.connection.status?.peek?.();
+          console.log("[Hang Debug] Publisher connection status:", status);
+        }
+      } catch (e) {
+        // Ignore errors accessing internal state
+      }
+    };
+    // Check status periodically for debugging
+    const statusInterval = setInterval(checkConnectionStatus, 2000);
+    setTimeout(() => clearInterval(statusInterval), 30000); // Stop after 30s
 
     // Track broadcast event
     let broadcastEventId: number | null = null;
@@ -999,8 +1070,28 @@ async function initWatchView(streamId: string, user: User | null) {
   // Set stream name on watcher
   const watcher = document.querySelector("hang-watch");
   if (watcher) {
+    console.log("[Hang Debug] Setting up watcher:", {
+      url: RELAY_URL,
+      name: streamName,
+    });
     watcher.setAttribute("url", RELAY_URL);
     watcher.setAttribute("name", streamName);
+
+    // Monitor connection status changes
+    const checkConnectionStatus = () => {
+      try {
+        const instance = (watcher as any).active?.peek?.();
+        if (instance?.connection) {
+          const status = instance.connection.status?.peek?.();
+          console.log("[Hang Debug] Watcher connection status:", status);
+        }
+      } catch (e) {
+        // Ignore errors accessing internal state
+      }
+    };
+    // Check status periodically for debugging
+    const statusInterval = setInterval(checkConnectionStatus, 2000);
+    setTimeout(() => clearInterval(statusInterval), 30000); // Stop after 30s
 
     // Log watch event
     let watchEventId: number | null = null;
