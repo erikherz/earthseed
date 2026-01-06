@@ -64,6 +64,12 @@ function initDeviceButtonFlipper() {
     // Add CSS to invert the visual appearance
     const style = document.createElement("style");
     style.textContent = `
+      /* Reorder buttons: Video first, then Mic, Screen, None */
+      hang-publish button[title="Camera"] { order: 1 !important; }
+      hang-publish button[title="Microphone"] { order: 2 !important; }
+      hang-publish button[title="Screen"] { order: 3 !important; }
+      hang-publish button[title="Nothing"] { order: 4 !important; }
+
       /* Replace camera emoji with video camera emoji */
       hang-publish button[title="Camera"] {
         font-size: 0 !important;
@@ -72,6 +78,7 @@ function initDeviceButtonFlipper() {
         content: "📹";
         font-size: 1.25rem;
       }
+
       /* Selected device = dim (already chosen, de-emphasized) */
       hang-publish button[title].device-selected {
         filter: grayscale(50%) brightness(0.7) !important;
