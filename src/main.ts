@@ -64,6 +64,14 @@ function initDeviceButtonFlipper() {
     // Add CSS to invert the visual appearance
     const style = document.createElement("style");
     style.textContent = `
+      /* Replace camera emoji with video camera emoji */
+      hang-publish button[title="Camera"] {
+        font-size: 0 !important;
+      }
+      hang-publish button[title="Camera"]::after {
+        content: "📹";
+        font-size: 1.25rem;
+      }
       /* Selected device = dim (already chosen, de-emphasized) */
       hang-publish button[title].device-selected {
         filter: grayscale(50%) brightness(0.7) !important;
