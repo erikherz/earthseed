@@ -617,7 +617,7 @@ function updateServerStatusPanel() {
 }
 
 // Relay URL - set dynamically for Safari fallback, static for native WebTransport
-let RELAY_URL = "https://relay-next.cloudflare.mediaoverquic.com"; // Default for Chrome/Firefox
+let RELAY_URL = "https://relay.moq.dev"; // Test with Luke's relay (supports 0x20 SessionCompat)
 const NAMESPACE_PREFIX = "earthseed.live";
 
 // Debug logging for connection issues
