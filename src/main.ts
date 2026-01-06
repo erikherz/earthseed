@@ -64,10 +64,12 @@ function initDeviceButtonFlipper() {
     // Add CSS to invert the visual appearance
     const style = document.createElement("style");
     style.textContent = `
+      /* Selected device = dim (already chosen, de-emphasized) */
       hang-publish button[title].device-selected {
         filter: grayscale(50%) brightness(0.7) !important;
         opacity: 1 !important;
       }
+      /* Available device = bright with glow (click me!) */
       hang-publish button[title].device-available {
         filter: brightness(1.1) !important;
         opacity: 1 !important;
@@ -83,14 +85,16 @@ function initDeviceButtonFlipper() {
       const buttons = hangPublish.querySelectorAll('button[title]');
       buttons.forEach((btn) => {
         const button = btn as HTMLButtonElement;
-        const currentOpacity = button.style.opacity;
+        const opacity = parseFloat(button.style.opacity);
 
-        // In hang: opacity 1 = selected, opacity 0.5 = available
-        // We want: selected = dim, available = bright
-        if (currentOpacity === "1") {
+        // hang sets opacity: 1 = selected/active, 0.5 = available
+        // User wants INVERTED: selected = dim, available = bright
+        if (opacity >= 0.9 || isNaN(opacity)) {
+          // hang's selected (opacity 1) → make it DIM
           button.classList.remove("device-available");
           button.classList.add("device-selected");
         } else {
+          // hang's available (opacity 0.5) → make it BRIGHT
           button.classList.remove("device-selected");
           button.classList.add("device-available");
         }
