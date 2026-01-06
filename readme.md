@@ -4,9 +4,9 @@ MoQ (Media over QUIC) streaming application using Cloudflare's relay network.
 
 ## Architecture
 
-- **Frontend**: Vite + [@kixelated/hang](https://www.npmjs.com/package/@kixelated/hang) v0.3.12 web components
-- **Relay**: Cloudflare's public MoQ relay (`relay.cloudflare.mediaoverquic.com`)
-- **Protocol**: IETF MoQ Transport draft-07
+- **Frontend**: Vite + [@kixelated/hang](https://www.npmjs.com/package/@kixelated/hang) v0.7.0 web components
+- **Relay**: Cloudflare's public MoQ relay (`relay-next.cloudflare.mediaoverquic.com`)
+- **Protocol**: IETF MoQ Transport draft-14
 - **Hosting**: Cloudflare Workers (static assets only)
 
 ```
@@ -53,7 +53,7 @@ Safari lacks full WebTransport support, so earthseed.live includes a WebSocket p
 
 Each Linode server runs a patched version of [moq-relay](https://github.com/kixelated/moq-rs) with:
 - WebSocket support from the `@kixelated/hang` library
-- A patch that announces to and fetches from Cloudflare's relay (`relay.cloudflare.mediaoverquic.com`)
+- A patch that announces to and fetches from Cloudflare's relay (`relay-next.cloudflare.mediaoverquic.com`)
 - This allows Safari users to watch streams published by Chrome/Firefox users via the native Cloudflare relay
 
 ## Development
@@ -101,7 +101,7 @@ Each 5-character stream ID maps to a unique namespace on the Cloudflare relay, p
 
 ## Interoperability
 
-**Key point:** This project uses `@kixelated/hang@0.3.12` specifically for compatibility with Cloudflare's draft-07 relay. Newer versions (0.4+) use draft-14 and won't connect.
+**Key point:** This project uses the latest `@kixelated/hang` for compatibility with Cloudflare's draft-14 relay (`relay-next.cloudflare.mediaoverquic.com`).
 
 ## Links
 

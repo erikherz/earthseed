@@ -2,7 +2,7 @@
 // The original polyfill throws when requireUnreliable is true, but we want to
 // just warn and continue since MoQ can work without datagrams (streams only)
 
-import WebTransportWs from "@moq/web-transport-ws";
+import WebTransportWs from "@kixelated/web-transport-ws";
 
 // Track active connections for debugging
 const activeConnections: WeakSet<WebTransportWs> = new WeakSet();
