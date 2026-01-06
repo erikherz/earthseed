@@ -32,6 +32,30 @@ if (isSafari) {
   console.log("Safari: Patched MediaStreamTrack.getSettings for channelCount");
 }
 
+// Theme toggle functionality
+function initTheme() {
+  const savedTheme = localStorage.getItem("theme");
+  const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+
+  // Use saved theme, or system preference, default to dark
+  if (savedTheme === "light" || (!savedTheme && !prefersDark)) {
+    document.documentElement.classList.add("light");
+  }
+
+  // Set up toggle button when DOM is ready
+  document.addEventListener("DOMContentLoaded", () => {
+    const themeToggle = document.getElementById("theme-toggle");
+    if (themeToggle) {
+      themeToggle.addEventListener("click", () => {
+        document.documentElement.classList.toggle("light");
+        const isLight = document.documentElement.classList.contains("light");
+        localStorage.setItem("theme", isLight ? "light" : "dark");
+      });
+    }
+  });
+}
+initTheme();
+
 // Safari fallback relay servers (WebSocket-enabled)
 const FALLBACK_RELAYS = [
   "us-central.earthseed.live",
