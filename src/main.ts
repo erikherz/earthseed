@@ -61,39 +61,44 @@ initTheme();
 // We want the inverse: selected=dim (0.5), available=bright (1)
 function initDeviceButtonFlipper() {
   document.addEventListener("DOMContentLoaded", () => {
-    const flipOpacity = () => {
+    let isFlipping = false; // Prevent infinite loop
+
+    const flipButton = (button: HTMLElement) => {
+      if (isFlipping) return;
+      isFlipping = true;
+
+      const currentOpacity = button.style.opacity;
+      if (currentOpacity === "1") {
+        button.style.opacity = "0.5";
+      } else if (currentOpacity === "0.5") {
+        button.style.opacity = "1";
+      }
+
+      // Reset flag after a tick
+      requestAnimationFrame(() => {
+        isFlipping = false;
+      });
+    };
+
+    const flipAllButtons = () => {
       const hangPublish = document.querySelector("hang-publish");
       if (!hangPublish) return;
 
-      // Find device buttons by their title attribute
       const buttons = hangPublish.querySelectorAll('button[title]');
-      buttons.forEach((btn) => {
-        const button = btn as HTMLButtonElement;
-        // Flip the opacity: 1 -> 0.5, 0.5 -> 1
-        const currentOpacity = button.style.opacity;
-        if (currentOpacity === "1") {
-          button.style.opacity = "0.5";
-        } else if (currentOpacity === "0.5" || currentOpacity === "") {
-          button.style.opacity = "1";
-        }
-      });
+      buttons.forEach((btn) => flipButton(btn as HTMLElement));
     };
 
     // Use MutationObserver to watch for style changes on buttons
     const hangPublish = document.querySelector("hang-publish");
     if (hangPublish) {
       const observer = new MutationObserver((mutations) => {
+        if (isFlipping) return;
+
         mutations.forEach((mutation) => {
           if (mutation.type === "attributes" && mutation.attributeName === "style") {
             const target = mutation.target as HTMLElement;
             if (target.tagName === "BUTTON" && target.hasAttribute("title")) {
-              // Flip this button's opacity
-              const currentOpacity = target.style.opacity;
-              if (currentOpacity === "1") {
-                target.style.opacity = "0.5";
-              } else if (currentOpacity === "0.5") {
-                target.style.opacity = "1";
-              }
+              flipButton(target);
             }
           }
         });
@@ -106,8 +111,8 @@ function initDeviceButtonFlipper() {
       });
 
       // Initial flip after a short delay to let hang component render
-      setTimeout(flipOpacity, 100);
-      setTimeout(flipOpacity, 500);
+      setTimeout(flipAllButtons, 100);
+      setTimeout(flipAllButtons, 500);
     }
   });
 }
