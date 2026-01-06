@@ -56,64 +56,73 @@ function initTheme() {
 }
 initTheme();
 
-// Flip device button opacity: selected=dim, available=bright
+// Flip device button appearance: selected=dim, available=bright
 // The hang component sets inline opacity (selected=1, unselected=0.5)
-// We want the inverse: selected=dim (0.5), available=bright (1)
+// We invert this by adding CSS classes based on the opacity value
 function initDeviceButtonFlipper() {
   document.addEventListener("DOMContentLoaded", () => {
-    let isFlipping = false; // Prevent infinite loop
-
-    const flipButton = (button: HTMLElement) => {
-      if (isFlipping) return;
-      isFlipping = true;
-
-      const currentOpacity = button.style.opacity;
-      if (currentOpacity === "1") {
-        button.style.opacity = "0.5";
-      } else if (currentOpacity === "0.5") {
-        button.style.opacity = "1";
+    // Add CSS to invert the visual appearance
+    const style = document.createElement("style");
+    style.textContent = `
+      hang-publish button[title].device-selected {
+        filter: grayscale(50%) brightness(0.7) !important;
+        opacity: 1 !important;
       }
+      hang-publish button[title].device-available {
+        filter: brightness(1.1) !important;
+        opacity: 1 !important;
+        box-shadow: 0 0 8px rgba(59, 130, 246, 0.5);
+      }
+    `;
+    document.head.appendChild(style);
 
-      // Reset flag after a tick
-      requestAnimationFrame(() => {
-        isFlipping = false;
-      });
-    };
-
-    const flipAllButtons = () => {
+    const updateButtonClasses = () => {
       const hangPublish = document.querySelector("hang-publish");
       if (!hangPublish) return;
 
       const buttons = hangPublish.querySelectorAll('button[title]');
-      buttons.forEach((btn) => flipButton(btn as HTMLElement));
+      buttons.forEach((btn) => {
+        const button = btn as HTMLButtonElement;
+        const currentOpacity = button.style.opacity;
+
+        // In hang: opacity 1 = selected, opacity 0.5 = available
+        // We want: selected = dim, available = bright
+        if (currentOpacity === "1") {
+          button.classList.remove("device-available");
+          button.classList.add("device-selected");
+        } else {
+          button.classList.remove("device-selected");
+          button.classList.add("device-available");
+        }
+      });
     };
 
     // Use MutationObserver to watch for style changes on buttons
-    const hangPublish = document.querySelector("hang-publish");
-    if (hangPublish) {
-      const observer = new MutationObserver((mutations) => {
-        if (isFlipping) return;
+    const setupObserver = () => {
+      const hangPublish = document.querySelector("hang-publish");
+      if (!hangPublish) {
+        setTimeout(setupObserver, 100);
+        return;
+      }
 
-        mutations.forEach((mutation) => {
-          if (mutation.type === "attributes" && mutation.attributeName === "style") {
-            const target = mutation.target as HTMLElement;
-            if (target.tagName === "BUTTON" && target.hasAttribute("title")) {
-              flipButton(target);
-            }
-          }
-        });
+      const observer = new MutationObserver(() => {
+        updateButtonClasses();
       });
 
       observer.observe(hangPublish, {
         attributes: true,
         attributeFilter: ["style"],
         subtree: true,
+        childList: true,
       });
 
-      // Initial flip after a short delay to let hang component render
-      setTimeout(flipAllButtons, 100);
-      setTimeout(flipAllButtons, 500);
-    }
+      // Initial update after component renders
+      setTimeout(updateButtonClasses, 100);
+      setTimeout(updateButtonClasses, 300);
+      setTimeout(updateButtonClasses, 500);
+    };
+
+    setupObserver();
   });
 }
 initDeviceButtonFlipper();
