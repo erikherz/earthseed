@@ -2,6 +2,11 @@
 // Using our patched version that handles requireUnreliable gracefully
 import { install as installWebTransportPolyfill } from "./webtransport-polyfill";
 
+// Relay configuration - toggle between relay servers:
+// - "luke": cdn.moq.dev/anon (supports WebSocket fallback, uses standard 0x20/0x21 handshake)
+// - "cloudflare": relay-next.cloudflare-moq.com (WebTransport only, needs 0x40/0x41 patch)
+const RELAY_SERVER: "luke" | "cloudflare" = "luke";
+
 // Detect Safari - even Safari 17+ with WebTransport has compatibility issues with some relays
 const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
 
@@ -173,7 +178,7 @@ interface ServerStatus {
 
 const serverStatus: ServerStatus = {
   mode: needsPolyfill ? "websocket" : "webtransport",
-  selectedServer: "cdn.moq.dev/anon",
+  selectedServer: RELAY_SERVER === "luke" ? "cdn.moq.dev/anon" : "relay-next.cloudflare-moq.com",
   connected: false,
   raceResults: [],
 };
@@ -618,8 +623,12 @@ function updateServerStatusPanel() {
   });
 }
 
-// Relay URL - set dynamically for Safari fallback, static for native WebTransport
-let RELAY_URL = "https://cdn.moq.dev/anon"; // Luke's MoQ relay
+// Relay URL based on RELAY_SERVER config at top of file
+const RELAY_URLS = {
+  luke: "https://cdn.moq.dev/anon",
+  cloudflare: "https://relay-next.cloudflare-moq.com",
+};
+let RELAY_URL = RELAY_URLS[RELAY_SERVER];
 const NAMESPACE_PREFIX = "earthseed.live";
 
 // Debug logging for connection issues
