@@ -1,6 +1,8 @@
 // Safari WebSocket fallback - MUST install before hang components load
 // Using our patched version that handles requireUnreliable gracefully
 import { install as installWebTransportPolyfill } from "./webtransport-polyfill";
+// WebCodecs polyfill for Opus audio encoding on Safari
+import { install as installWebCodecsPolyfill } from "./webcodecs-polyfill";
 
 // Relay configuration - toggle between relay servers:
 // - "luke": cdn.moq.dev/anon (supports WebSocket fallback, uses standard 0x20/0x21 handshake)
@@ -750,7 +752,9 @@ if (typeof WebTransport !== "undefined" && !needsPolyfill) {
 // Dynamic imports for hang components - MUST happen after polyfills are installed
 // ES module static imports are hoisted and execute before any code runs
 const loadHangComponents = async () => {
-  // hang@0.7.0 handles WebCodecs polyfill internally via @kixelated/libavjs-webcodecs-polyfill
+  // Install WebCodecs polyfill for Opus audio encoding (Safari)
+  // This must complete before hang components try to use AudioEncoder
+  await installWebCodecsPolyfill();
   await import("@kixelated/hang/publish/element");
   await import("@kixelated/hang/watch/element");
 };
