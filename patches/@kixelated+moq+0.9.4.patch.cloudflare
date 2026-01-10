@@ -1,8 +1,8 @@
 diff --git a/node_modules/@kixelated/moq/connection/connect.js b/node_modules/@kixelated/moq/connection/connect.js
-index ce99c7b..0a5467e 100644
+index ce99c7b..c181c47 100644
 --- a/node_modules/@kixelated/moq/connection/connect.js
 +++ b/node_modules/@kixelated/moq/connection/connect.js
-@@ -40,18 +40,21 @@ export async function connect(url, props) {
+@@ -40,18 +40,22 @@ export async function connect(url, props) {
      }
      // moq-rs currently requires the ROLE extension to be set.
      const stream = await Stream.open(quic);
@@ -19,8 +19,9 @@ index ce99c7b..0a5467e 100644
 +    params.set(0n, new Uint8Array([1]));
 +    params.set(2n, new Uint8Array([63])); // MaxRequestId
 +    params.set(7n, encoder.encode("moq-lite-js")); // MOQTImplementation
-+    // PATCHED: Send DRAFT_14 version for moq-rs compatibility
-+    const msg = new Ietf.ClientSetup([Ietf.CURRENT_VERSION], params);
++    // PATCHED: Try DRAFT_07 (0xff000007) like moq-js uses
++    const DRAFT_07 = 0xff000007;
++    const msg = new Ietf.ClientSetup([DRAFT_07], params);
      await msg.encode(stream.writer);
 -    // And we expect 0x21 as the response.
 -    const serverCompat = await stream.reader.u53();
