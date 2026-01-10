@@ -693,7 +693,7 @@ function updateServerStatusPanel() {
 // Relay URL based on RELAY_SERVER config at top of file
 const RELAY_URLS = {
   luke: "https://cdn.moq.dev/anon",
-  cloudflare: "https://relay-next.cloudflare-moq.com",
+  cloudflare: "https://relay-next.cloudflare.mediaoverquic.com",
 };
 let RELAY_URL = RELAY_URLS[RELAY_SERVER];
 const NAMESPACE_PREFIX = "earthseed.live";
