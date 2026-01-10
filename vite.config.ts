@@ -1,5 +1,10 @@
 import { defineConfig } from "vite";
 import { resolve } from "path";
+import { fileURLToPath } from "url";
+import { dirname } from "path";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 export default defineConfig({
   build: {
@@ -10,10 +15,14 @@ export default defineConfig({
     port: 3000,
   },
   resolve: {
-    alias: {
+    alias: [
       // Use our patched connect.js instead of the one from node_modules
-      "@kixelated/moq/connection/connect.js": resolve(__dirname, "src/patched-moq/connect.js"),
-    },
+      // Match both with and without .js extension
+      {
+        find: /^@kixelated\/moq\/connection\/connect(\.js)?$/,
+        replacement: resolve(__dirname, "src/patched-moq/connect.js"),
+      },
+    ],
   },
   optimizeDeps: {
     exclude: ["@kixelated/hang", "@kixelated/moq"],

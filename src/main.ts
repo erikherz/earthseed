@@ -1,4 +1,4 @@
-console.log("[Earthseed] Version: 2025-01-10-v5 (vite alias patched connect)");
+console.log("[Earthseed] Version: 2025-01-10-v6 (regex alias)");
 
 // Safari WebSocket fallback - MUST install before hang components load
 // Using our patched version that handles requireUnreliable gracefully
