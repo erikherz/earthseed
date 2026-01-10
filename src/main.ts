@@ -698,6 +698,23 @@ const RELAY_URLS = {
 let RELAY_URL = RELAY_URLS[RELAY_SERVER];
 const NAMESPACE_PREFIX = "earthseed.live";
 
+// Helper to get correct URL and name based on relay type
+function getRelayConfig(streamId: string): { url: string; name: string } {
+  const streamName = `${NAMESPACE_PREFIX}/${streamId}`;
+  if (RELAY_SERVER === "cloudflare") {
+    // moq-rs requires the broadcast path in the WebTransport URL
+    return {
+      url: `${RELAY_URL}/${streamName}`,
+      name: streamName,
+    };
+  }
+  // Luke's relay uses ANNOUNCE messages for path
+  return {
+    url: RELAY_URL,
+    name: streamName,
+  };
+}
+
 // Debug logging for connection issues
 console.log("Earthseed config:", {
   relay: RELAY_URL,
@@ -1128,12 +1145,14 @@ function initBroadcastView(streamId: string, user: User | null) {
   // Set stream name on publisher
   const publisher = document.querySelector("hang-publish") as HTMLElement & { video: boolean; device: string; active?: { connection?: { status?: { peek?: () => string } } } };
   if (publisher) {
+    const relayConfig = getRelayConfig(streamId);
     console.log("[Hang Debug] Setting up publisher:", {
-      url: RELAY_URL,
-      name: streamName,
+      url: relayConfig.url,
+      name: relayConfig.name,
+      relayType: RELAY_SERVER,
     });
-    publisher.setAttribute("url", RELAY_URL);
-    publisher.setAttribute("name", streamName);
+    publisher.setAttribute("url", relayConfig.url);
+    publisher.setAttribute("name", relayConfig.name);
 
     // Monitor connection status changes
     const checkConnectionStatus = () => {
@@ -1389,12 +1408,14 @@ async function initWatchView(streamId: string, user: User | null) {
   // Set stream name on watcher
   const watcher = document.querySelector("hang-watch");
   if (watcher) {
+    const relayConfig = getRelayConfig(streamId);
     console.log("[Hang Debug] Setting up watcher:", {
-      url: RELAY_URL,
-      name: streamName,
+      url: relayConfig.url,
+      name: relayConfig.name,
+      relayType: RELAY_SERVER,
     });
-    watcher.setAttribute("url", RELAY_URL);
-    watcher.setAttribute("name", streamName);
+    watcher.setAttribute("url", relayConfig.url);
+    watcher.setAttribute("name", relayConfig.name);
 
     // Monitor connection status changes
     const checkConnectionStatus = () => {
