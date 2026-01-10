@@ -703,14 +703,7 @@ const NAMESPACE_PREFIX = "earthseed.live";
 // Helper to get correct URL and name based on relay type
 function getRelayConfig(streamId: string): { url: string; name: string } {
   const streamName = `${NAMESPACE_PREFIX}/${streamId}`;
-  if (RELAY_SERVER === "cloudflare") {
-    // moq-rs requires the broadcast path in the WebTransport URL
-    return {
-      url: `${RELAY_URL}/${streamName}`,
-      name: streamName,
-    };
-  }
-  // Luke's relay uses ANNOUNCE messages for path
+  // Both relays: URL is just the relay server, namespace goes in PUBLISH_NAMESPACE/ANNOUNCE
   return {
     url: RELAY_URL,
     name: streamName,

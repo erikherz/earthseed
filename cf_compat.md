@@ -107,16 +107,31 @@ const RELAY_SERVER: "luke" | "cloudflare" = "cloudflare";
 - ✅ Version negotiation
 - ✅ Parameter decoding with int/bytes handling
 
-**Not Working (Cloudflare)**:
-- ❌ ANNOUNCE and subsequent control messages
-- Server responds with STOP_SENDING
-- Control message framing likely needs similar fixes
+**Testing (Cloudflare)**:
+- ⏳ PUBLISH_NAMESPACE flow - needs testing after URL fix
+
+### URL vs Namespace Fix
+
+**Root cause of STOP_SENDING**: The namespace was being sent in BOTH the WebTransport URL AND the PUBLISH_NAMESPACE message.
+
+**Reference from moq-pub**: In `moq-rs/moq-pub/src/main.rs`, URL and namespace are separate:
+```rust
+pub url: Url,    // Just the relay server
+pub name: String, // Broadcast namespace for PUBLISH_NAMESPACE
+```
+
+**Fix applied**: `getRelayConfig()` now returns just the relay URL for both relays:
+```javascript
+return {
+  url: RELAY_URL,      // "https://relay-next.cloudflare.mediaoverquic.com"
+  name: streamName,    // "earthseed.live/streamId" → goes in PUBLISH_NAMESPACE
+};
+```
 
 ## Next Steps
 
-1. Investigate ANNOUNCE message format in moq-rs
-2. Check if control messages need u16 length encoding
-3. Verify ANNOUNCE message type and payload format
+1. Test PUBLISH_NAMESPACE with Cloudflare relay
+2. Debug any remaining control message issues
 
 ## Testing
 
