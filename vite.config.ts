@@ -29,6 +29,11 @@ function patchMoqConnection(): Plugin {
         console.log("[patch-moq] Redirecting ./message.js to patched version");
         return resolve(patchedDir, "message.js");
       }
+      // Intercept ietf/setup.js import from within ietf module
+      if (importer?.includes("@kixelated/moq") && source === "./setup.js" && importer.includes("/ietf/")) {
+        console.log("[patch-moq] Redirecting ./setup.js to patched version");
+        return resolve(patchedDir, "setup.js");
+      }
       // Handle relative imports from our patched files - resolve to moq package
       // The patched files use ../ to go up from their original location to moq root
       if (importer?.includes("src/patched-moq") && source.startsWith("../")) {
