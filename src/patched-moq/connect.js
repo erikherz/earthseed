@@ -1,8 +1,9 @@
 import WebTransportWs from "@kixelated/web-transport-ws";
-import * as Ietf from "@kixelated/moq/ietf/index.js";
-import * as Lite from "@kixelated/moq/lite/index.js";
-import { Stream } from "@kixelated/moq/stream.js";
-import * as Hex from "@kixelated/moq/util/hex.js";
+// These relative imports will be resolved by the Vite plugin to moq package
+import * as Ietf from "../ietf/index.js";
+import * as Lite from "../lite/index.js";
+import { Stream } from "../stream.js";
+import * as Hex from "../util/hex.js";
 // Save if WebSocket won the last race, so we won't give QUIC a head start next time.
 const websocketWon = new Set();
 /**
@@ -12,6 +13,7 @@ const websocketWon = new Set();
  * @returns A promise that resolves to a Connection instance
  */
 export async function connect(url, props) {
+    console.log("[MOQ PATCHED] connect() called with URL:", url.toString());
     // Create a cancel promise to kill whichever is still connecting.
     let done;
     const cancel = new Promise((resolve) => {
