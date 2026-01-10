@@ -1,3 +1,5 @@
+console.log("[Earthseed] Version: 2025-01-10-v3 (Cloudflare draft-14 test)");
+
 // Safari WebSocket fallback - MUST install before hang components load
 // Using our patched version that handles requireUnreliable gracefully
 import { install as installWebTransportPolyfill } from "./webtransport-polyfill";
