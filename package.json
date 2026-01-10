@@ -17,12 +17,12 @@
     "relay:status": "grep 'const RELAY_SERVER' src/main.ts | head -1"
   },
   "devDependencies": {
-    "patch-package": "^8.0.1",
     "typescript": "^5.5.2",
     "vite": "^7.3.0",
     "wrangler": "^4.54.0"
   },
   "dependencies": {
+    "patch-package": "^8.0.1",
     "@kixelated/hang": "^0.7.0",
     "@kixelated/libavjs-webcodecs-polyfill": "^0.5.5",
     "@kixelated/web-transport-ws": "^0.1.2"
