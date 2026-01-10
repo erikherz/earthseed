@@ -24,16 +24,8 @@ function patchMoqConnection(): Plugin {
         console.log("[patch-moq] Redirecting ./connection/index.js to patched version");
         return resolve(patchedDir, "index.js");
       }
-      // Intercept ietf/message.js import from within ietf module
-      if (importer?.includes("@kixelated/moq") && source === "./message.js" && importer.includes("/ietf/")) {
-        console.log("[patch-moq] Redirecting ./message.js to patched version");
-        return resolve(patchedDir, "message.js");
-      }
-      // Intercept ietf/setup.js import from within ietf module
-      if (importer?.includes("@kixelated/moq") && source === "./setup.js" && importer.includes("/ietf/")) {
-        console.log("[patch-moq] Redirecting ./setup.js to patched version");
-        return resolve(patchedDir, "setup.js");
-      }
+      // NOTE: We no longer redirect message.js or setup.js
+      // The connect.js now handles both Luke's and Cloudflare's protocols internally
       // Handle relative imports from our patched files - resolve to moq package
       // The patched files use ../ to go up from their original location to moq root
       if (importer?.includes("src/patched-moq") && source.startsWith("../")) {
