@@ -1,4 +1,4 @@
-console.log("[Earthseed] Version: 2025-01-10-v12 (dual relay support)");
+console.log("[Earthseed] Version: 2025-01-10-v13 (cloudflare mode)");
 
 // Safari WebSocket fallback - MUST install before hang components load
 // Using our patched version that handles requireUnreliable gracefully
@@ -9,7 +9,7 @@ import { install as installWebCodecsPolyfill } from "./webcodecs-polyfill";
 // Relay configuration - toggle between relay servers:
 // - "luke": cdn.moq.dev/anon (moq-lite, supports WebSocket fallback)
 // - "cloudflare": relay-next.cloudflare.mediaoverquic.com (draft-14, WebTransport only)
-const RELAY_SERVER: "luke" | "cloudflare" = "luke";
+const RELAY_SERVER: "luke" | "cloudflare" = "cloudflare";
 
 // Detect Safari - even Safari 17+ with WebTransport has compatibility issues with some relays
 const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);

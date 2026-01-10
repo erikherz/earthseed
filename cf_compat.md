@@ -1,120 +1,140 @@
 # Cloudflare MoQ Relay Compatibility
 
-This document describes the protocol changes required to make the `@kixelated/moq` library work with Cloudflare's draft-14 MoQ relay (`relay-next.cloudflare.mediaoverquic.com`) instead of Luke's relay (`cdn.moq.dev/anon`).
+This document describes the protocol differences between Luke's relay (`cdn.moq.dev/anon`) and Cloudflare's draft-14 relay (`relay-next.cloudflare.mediaoverquic.com`), and how we handle both.
 
 ## Background
 
-The `@kixelated/moq` library was designed for "moq-lite" protocol. Cloudflare's relay implements the IETF MoQ Transport draft-14 specification, which has several differences.
+The `@kixelated/moq` library supports both:
+- **moq-lite** (LITE_01 = 0xff0d0101) - Luke's relay
+- **moq-ietf** (DRAFT_14 = 0xff00000e) - Cloudflare's relay
+
+The library negotiates the version during handshake, but Cloudflare's implementation has additional encoding differences that require special handling.
 
 **Reference**: [cloudflare/moq-rs](https://github.com/cloudflare/moq-rs) - Rust implementation targeting draft-14
+
+## Architecture
+
+The patched `connect.js` auto-detects the relay type from the URL and uses the appropriate handshake:
+
+```javascript
+function isCloudflareRelay(url) {
+    return url.toString().toLowerCase().includes("cloudflare");
+}
+```
+
+- **Luke's relay**: `lukeHandshake()` - sends both versions, uses original library decode
+- **Cloudflare**: `cloudflareHandshake()` - sends DRAFT_14 only, uses custom decode
 
 ## Protocol Differences
 
 ### 1. Setup Message Types
 
-| Message | moq-lite | draft-14 |
-|---------|----------|----------|
-| CLIENT_SETUP | varies | `0x20` |
-| SERVER_SETUP | varies | `0x21` |
+Both use the same message types (drafts 11+):
 
-These message type values are used for drafts 11+.
+| Message | Type |
+|---------|------|
+| CLIENT_SETUP | `0x20` |
+| SERVER_SETUP | `0x21` |
 
-**Source**: `moq-rs/moq-transport/src/setup/client.rs` and `server.rs`
+### 2. Message Length Encoding (Setup Messages)
 
-### 2. Message Length Encoding
+| Relay | Length Encoding |
+|-------|-----------------|
+| Luke (moq-lite) | varint via `u53()` |
+| Cloudflare (draft-14) | **u16** (16-bit big-endian) |
 
-| Protocol | Length Encoding |
-|----------|-----------------|
-| moq-lite | varint |
-| draft-14 | **u16** (16-bit big-endian) |
+**Note**: The library's `ietf/message.js` already uses u16, but Luke's server returns LITE_01 version which uses `lite/message.js` with varint encoding.
 
-moq-rs encodes message body length as a fixed 2-byte u16, not a variable-length integer. Maximum message size is 65,535 bytes.
+### 3. Version Negotiation
 
-**Source**: `moq-rs/moq-transport/src/setup/server.rs` - `encode()` function
-
-### 3. Version Number
-
-```
-DRAFT_14 = 0xff00000e
-```
-
-The version is sent as a varint in CLIENT_SETUP and returned in SERVER_SETUP.
+| Relay | Versions Sent | Version Returned |
+|-------|---------------|------------------|
+| Luke | `[LITE_01, DRAFT_14]` | LITE_01 (0xff0d0101) |
+| Cloudflare | `[DRAFT_14]` | DRAFT_14 (0xff00000e) |
 
 ### 4. Parameter Encoding (KeyValuePairs)
 
-This is a critical difference. moq-rs uses **key parity** to determine value type:
+**Critical difference** - Cloudflare uses **key parity** to determine value type:
 
 | Key Parity | Value Type | Encoding |
 |------------|------------|----------|
 | **Even** (0, 2, 4...) | IntValue | `key (varint) + value (varint)` |
 | **Odd** (1, 3, 5...) | BytesValue | `key (varint) + length (varint) + bytes` |
 
-The `@kixelated/moq` library assumed ALL parameters are bytes with a length prefix, which caused decode failures when the server sent integer parameters (like `MAX_REQUEST_ID = 2`).
+Luke's relay (and the library) assumes ALL parameters are bytes with length prefix.
 
 **Source**: `moq-rs/moq-transport/src/coding/kvp.rs`
 
-**Example**: Server sends param id=2 (even) with value=100
-- moq-rs sends: `[0x02] [0x64]` (key=2, intValue=100)
+**Example**: Cloudflare sends param id=2 (MAX_REQUEST_ID) with value=100
+- Cloudflare sends: `[0x02] [0x64]` (key=2, intValue=100 as varint)
 - Library expected: `[0x02] [length] [bytes...]`
 
-### 5. Parameters Sent by Server
+### 5. Parameters Observed
 
-Observed in SERVER_SETUP:
+**Cloudflare SERVER_SETUP**:
 - `id=2` (MAX_REQUEST_ID): IntValue = 100
+
+**Luke CLIENT_SETUP** (what we send):
+- `id=2`: bytes `[63]` (MAX_REQUEST_ID as byte)
+- `id=5`: bytes `"earthseed"` (implementation name)
 
 ## Files Modified
 
 ### `src/patched-moq/connect.js`
-- Changed message type to `0x20` for CLIENT_SETUP
-- Expects `0x21` for SERVER_SETUP
-- Uses DRAFT_14 version (0xff00000e)
-
-### `src/patched-moq/message.js`
-- Changed length encoding from varint to u16
-- `encode()`: writes 2-byte length prefix
-- `decode()`: reads 2-byte length prefix
-
-### `src/patched-moq/setup.js`
-- Fixed parameter decoding to handle key parity:
-  - Even keys: read value as varint (IntValue)
-  - Odd keys: read length + bytes (BytesValue)
+Main patched file with dual relay support:
+- `isCloudflareRelay(url)` - detects relay type from URL
+- `lukeHandshake()` - original library behavior for Luke's relay
+- `cloudflareHandshake()` - custom handshake for Cloudflare
+- `encodeClientSetupCF()` - u16 length encoding for CLIENT_SETUP
+- `decodeServerSetupCF()` - u16 length + int-param handling for SERVER_SETUP
 
 ### `vite.config.ts`
-- Custom Vite plugin to intercept and redirect module imports
-- Redirects `./connect.js`, `./message.js`, `./setup.js` to patched versions
+Custom Vite plugin to intercept module imports:
+- Redirects `./connect.js` and `./connection/index.js` to patched versions
+- Resolves relative imports from patched files back to moq package
+
+### `src/main.ts`
+Configuration toggle:
+```typescript
+const RELAY_SERVER: "luke" | "cloudflare" = "cloudflare";
+```
 
 ## Current Status
 
 **Working**:
-- WebTransport connection
-- CLIENT_SETUP send (0x20 with draft-14 version)
-- SERVER_SETUP receive and decode (0x21 with u16 length and int params)
-- Handshake completes successfully
+- ✅ Luke's relay (moq-lite) - full functionality
+- ✅ Cloudflare handshake (CLIENT_SETUP/SERVER_SETUP)
+- ✅ Version negotiation
+- ✅ Parameter decoding with int/bytes handling
 
-**Not Working**:
-- ANNOUNCE and subsequent control messages
+**Not Working (Cloudflare)**:
+- ❌ ANNOUNCE and subsequent control messages
 - Server responds with STOP_SENDING
-- Control message framing likely needs similar u16 length fixes
+- Control message framing likely needs similar fixes
 
 ## Next Steps
 
-1. Investigate ANNOUNCE message format differences
-2. Apply u16 length encoding to all control messages
-3. Check for other message type/format differences in the control stream
+1. Investigate ANNOUNCE message format in moq-rs
+2. Check if control messages need u16 length encoding
+3. Verify ANNOUNCE message type and payload format
 
 ## Testing
 
-Deploy to Cloudflare Pages and test with:
+Set `RELAY_SERVER` in `src/main.ts` and deploy:
+
+**Luke's relay**:
 ```
-https://earthseed.live/broadcast
+[MOQ] connect() URL: https://cdn.moq.dev/anon/... isCloudflare: false
+[MOQ] Luke relay handshake - sending CLIENT_SETUP with both versions
+[MOQ] Luke relay - server version: 0xff0d0101
+[MOQ] Luke relay - moq-lite session established
 ```
 
-Console should show:
+**Cloudflare relay**:
 ```
-[MOQ SETUP] ServerSetup.#decode: version = 0xff00000e
-[MOQ SETUP] ServerSetup.#decode: numParams = 1
-[MOQ SETUP] param id = 2n
-[MOQ SETUP] param intValue = 100
-[MOQ SETUP] ServerSetup.#decode: complete
-[MOQ MESSAGE] decode: success
+[MOQ] connect() URL: https://relay-next.cloudflare... isCloudflare: true
+[MOQ] Cloudflare relay handshake - sending CLIENT_SETUP with DRAFT_14 only
+[MOQ CF] ServerSetup version: 0xff00000e
+[MOQ CF] param id=2n intValue=100
+[MOQ] Cloudflare relay - moq-ietf/draft-14 session established
 ```
