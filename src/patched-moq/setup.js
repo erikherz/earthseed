@@ -86,14 +86,29 @@ export class ServerSetup {
         const parameters = new Parameters();
         for (let i = 0; i < numParams; i++) {
             console.log("[MOQ SETUP] ServerSetup.#decode: reading param", i + 1, "of", numParams);
-            // Read message type
             const id = await r.u62();
             console.log("[MOQ SETUP] param id =", id);
-            const size = await r.u53();
-            console.log("[MOQ SETUP] param size =", size);
-            const value = await r.read(size);
-            console.log("[MOQ SETUP] param value length =", value.byteLength);
-            parameters.set(id, value);
+
+            // moq-rs uses key parity to determine value type:
+            // - Even keys: IntValue (value is a varint)
+            // - Odd keys: BytesValue (length + bytes)
+            if (id % 2n === 0n) {
+                // Even key: IntValue - just read the varint value
+                const intValue = await r.u53();
+                console.log("[MOQ SETUP] param intValue =", intValue);
+                // Convert int to bytes for storage in Parameters
+                const bytes = new Uint8Array(8);
+                const view = new DataView(bytes.buffer);
+                view.setBigUint64(0, BigInt(intValue));
+                parameters.set(id, bytes);
+            } else {
+                // Odd key: BytesValue - read length then bytes
+                const size = await r.u53();
+                console.log("[MOQ SETUP] param size =", size);
+                const value = await r.read(size);
+                console.log("[MOQ SETUP] param value length =", value.byteLength);
+                parameters.set(id, value);
+            }
         }
         console.log("[MOQ SETUP] ServerSetup.#decode: complete");
         return new ServerSetup(selectedVersion, parameters);

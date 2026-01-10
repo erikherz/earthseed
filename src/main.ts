@@ -1,4 +1,4 @@
-console.log("[Earthseed] Version: 2025-01-10-v10 (setup decode logging)");
+console.log("[Earthseed] Version: 2025-01-10-v11 (fix int vs bytes params)");
 
 // Safari WebSocket fallback - MUST install before hang components load
 // Using our patched version that handles requireUnreliable gracefully
