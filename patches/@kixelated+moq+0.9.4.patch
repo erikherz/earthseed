@@ -1,3 +1,67 @@
+diff --git a/node_modules/@kixelated/moq/connection/connect.js b/node_modules/@kixelated/moq/connection/connect.js
+index ce99c7b..b771d35 100644
+--- a/node_modules/@kixelated/moq/connection/connect.js
++++ b/node_modules/@kixelated/moq/connection/connect.js
+@@ -40,18 +40,23 @@ export async function connect(url, props) {
+     }
+     // moq-rs currently requires the ROLE extension to be set.
+     const stream = await Stream.open(quic);
+-    // We're encoding 0x20 so it's backwards compatible with moq-transport-10+
+-    await stream.writer.u53(Lite.StreamId.ClientCompat);
+-    const encoder = new TextEncoder();
++    console.log("[MOQ] WebTransport stream opened, sending CLIENT_SETUP");
++    // PATCHED: Use 0x20 (CLIENT_SETUP) - moq-rs uses this
++    await stream.writer.u53(0x20);
+     const params = new Ietf.Parameters();
+-    params.set(2n, new Uint8Array([63])); // Allow some request_ids without delving into varint encoding.
+-    params.set(5n, encoder.encode("moq-lite-js")); // Put the implementation name in the parameters.
+-    const msg = new Ietf.ClientSetup([Lite.CURRENT_VERSION, Ietf.CURRENT_VERSION], params);
++    // PATCHED: Only send ROLE parameter - minimal required for moq-rs
++    params.set(0n, new Uint8Array([2])); // ROLE = subscriber
++    // PATCHED: Use DRAFT_14 (0xff00000e) for Cloudflare relay
++    const DRAFT_14 = 0xff00000e;
++    const msg = new Ietf.ClientSetup([DRAFT_14], params);
++    console.log("[MOQ] Sending CLIENT_SETUP with version 0x" + DRAFT_14.toString(16) + " role=2 (subscriber)");
+     await msg.encode(stream.writer);
+-    // And we expect 0x21 as the response.
+-    const serverCompat = await stream.reader.u53();
+-    if (serverCompat !== Lite.StreamId.ServerCompat) {
+-        throw new Error(`unsupported server message type: ${serverCompat.toString()}`);
++    console.log("[MOQ] CLIENT_SETUP sent, waiting for SERVER_SETUP");
++    // PATCHED: Expect 0x21 (SERVER_SETUP) response - moq-rs uses this
++    const serverSetup = await stream.reader.u53();
++    console.log("[MOQ] Received message type: 0x" + serverSetup.toString(16));
++    if (serverSetup !== 0x21) {
++        throw new Error(`unsupported server message type: 0x${serverSetup.toString(16)}, expected 0x21`);
+     }
+     const server = await Ietf.ServerSetup.decode(stream.reader);
+     if (server.version === Lite.CURRENT_VERSION) {
+diff --git a/node_modules/@kixelated/moq/ietf/message.js b/node_modules/@kixelated/moq/ietf/message.js
+index 36743cb..6d13872 100644
+--- a/node_modules/@kixelated/moq/ietf/message.js
++++ b/node_modules/@kixelated/moq/ietf/message.js
+@@ -30,17 +30,13 @@ export async function encode(writer, f) {
+         temp.close();
+     }
+     await temp.closed;
+-    // Check that message fits in u16
+-    if (scratch.byteLength > 65535) {
+-        throw new Error(`Message too large: ${scratch.byteLength} bytes (max 65535)`);
+-    }
+-    // Write u16 size (2 bytes, big-endian)
+-    await writer.u16(scratch.byteLength);
++    // PATCHED: Use varint for message length - draft-14 spec
++    await writer.u53(scratch.byteLength);
+     await writer.write(scratch);
+ }
+-// Reads a message with a u16 size prefix.
++// PATCHED: Reads a message with varint size prefix - draft-14 spec.
+ export async function decode(reader, f) {
+-    const size = await reader.u16();
++    const size = await reader.u53();
+     const data = await reader.read(size);
+     const limit = new Reader(undefined, data);
+     const msg = await f(limit);
 diff --git a/node_modules/@kixelated/moq/lite/publisher.js b/node_modules/@kixelated/moq/lite/publisher.js
 index ad3b506..1b7bd55 100644
 --- a/node_modules/@kixelated/moq/lite/publisher.js
