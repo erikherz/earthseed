@@ -24,8 +24,13 @@ function patchMoqConnection(): Plugin {
         console.log("[patch-moq] Redirecting ./connection/index.js to patched version");
         return resolve(patchedDir, "index.js");
       }
+      // Intercept ietf/message.js import from within ietf module
+      if (importer?.includes("@kixelated/moq") && source === "./message.js" && importer.includes("/ietf/")) {
+        console.log("[patch-moq] Redirecting ./message.js to patched version");
+        return resolve(patchedDir, "message.js");
+      }
       // Handle relative imports from our patched files - resolve to moq package
-      // The patched files use ../ to go up from connection/ to moq root
+      // The patched files use ../ to go up from their original location to moq root
       if (importer?.includes("src/patched-moq") && source.startsWith("../")) {
         // Remove the leading ../ since we're already at moq root level
         const relativePath = source.replace(/^\.\.\//, "");
