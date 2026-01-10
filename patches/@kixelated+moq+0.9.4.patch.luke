@@ -1,0 +1,14 @@
+diff --git a/node_modules/@kixelated/moq/lite/publisher.js b/node_modules/@kixelated/moq/lite/publisher.js
+index ad3b506..1b7bd55 100644
+--- a/node_modules/@kixelated/moq/lite/publisher.js
++++ b/node_modules/@kixelated/moq/lite/publisher.js
+@@ -62,7 +62,8 @@ export class Publisher {
+             console.debug(`announce: broadcast=${name} active=true`);
+             active.add(suffix);
+         }
+-        const init = new AnnounceInit(active.values().toArray());
++        // PATCHED: Safari doesn't support Iterator.prototype.toArray()
++        const init = new AnnounceInit([...active]);
+         await init.encode(stream.writer);
+         // Wait for updates to the broadcasts.
+         for (;;) {

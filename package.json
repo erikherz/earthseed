@@ -9,7 +9,12 @@
     "preview": "vite preview",
     "deploy": "vite build && wrangler deploy",
     "cf-typegen": "wrangler types",
-    "postinstall": "patch-package"
+    "postinstall": "patch-package",
+    "relay:luke": "./switch-relay.sh luke",
+    "relay:cloudflare": "./switch-relay.sh cloudflare",
+    "relay:luke:deploy": "./switch-relay.sh luke --deploy",
+    "relay:cloudflare:deploy": "./switch-relay.sh cloudflare --deploy",
+    "relay:status": "grep 'const RELAY_SERVER' src/main.ts | head -1"
   },
   "devDependencies": {
     "patch-package": "^8.0.1",
