@@ -63,14 +63,17 @@ export function logout(): void {
   window.location.href = "/api/auth/logout";
 }
 
+// Origin type for broadcast sources
+export type BroadcastOrigin = "cloudflare" | "earthseed";
+
 // Stats logging functions
-export async function logBroadcastStart(streamId: string): Promise<number | null> {
+export async function logBroadcastStart(streamId: string, origin: BroadcastOrigin = "cloudflare"): Promise<number | null> {
   try {
-    console.log("Attempting to log broadcast start for stream:", streamId);
+    console.log("Attempting to log broadcast start for stream:", streamId, "origin:", origin);
     const response = await fetch("/api/stats/broadcast", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ stream_id: streamId }),
+      body: JSON.stringify({ stream_id: streamId, origin }),
     });
     if (!response.ok) {
       const errorText = await response.text();
@@ -78,7 +81,7 @@ export async function logBroadcastStart(streamId: string): Promise<number | null
       return null;
     }
     const data = await response.json();
-    console.log("Broadcast started with geo:", data.geo);
+    console.log("Broadcast started with geo:", data.geo, "origin:", data.origin);
     return data.id;
   } catch (e) {
     console.error("Error logging broadcast start:", e);
@@ -166,6 +169,7 @@ export interface LiveBroadcast {
   id: number;
   stream_id: string;
   started_at: string;
+  origin: BroadcastOrigin;
   user_id: number;
   user_name: string;
   user_email: string;
