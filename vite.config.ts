@@ -5,35 +5,40 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = pathDirname(__filename);
 
-// Custom plugin to redirect moq connection module to our patched version
-function patchMoqConnection(): Plugin {
-  const patchedDir = resolve(__dirname, "src/patched-moq");
-  const moqDir = resolve(__dirname, "node_modules/@kixelated/moq");
-
+// Fix broken .ts imports in @moq/hang compiled JS
+function fixMoqHangWorklets(): Plugin {
   return {
-    name: "patch-moq-connection",
+    name: "fix-moq-hang-worklets",
     enforce: "pre",
     resolveId(source, importer) {
-      // Intercept imports to connection/connect.js from within moq package
-      if (importer?.includes("@kixelated/moq") && source === "./connect.js") {
-        console.log("[patch-moq] Redirecting ./connect.js to patched version");
-        return resolve(patchedDir, "connect.js");
+      // Fix: ./render-worklet.ts?worker&url -> ./render-worklet.js?worker&url
+      if (source === "./render-worklet.ts?worker&url" && importer?.includes("@moq/hang")) {
+        const dir = pathDirname(importer);
+        return { id: resolve(dir, "render-worklet.js") + "?worker&url", external: false };
       }
-      // Intercept the connection/index.js import from moq/index.js
-      if (importer?.includes("@kixelated/moq") && source === "./connection/index.js") {
-        console.log("[patch-moq] Redirecting ./connection/index.js to patched version");
-        return resolve(patchedDir, "index.js");
+      // Fix: ./capture-worklet.ts?worker&url -> ./capture-worklet.js?worker&url
+      if (source === "./capture-worklet.ts?worker&url" && importer?.includes("@moq/hang")) {
+        const dir = pathDirname(importer);
+        return { id: resolve(dir, "capture-worklet.js") + "?worker&url", external: false };
       }
-      // NOTE: We no longer redirect message.js or setup.js
-      // The connect.js now handles both Luke's and Cloudflare's protocols internally
-      // Handle relative imports from our patched files - resolve to moq package
-      // The patched files use ../ to go up from their original location to moq root
-      if (importer?.includes("src/patched-moq") && source.startsWith("../")) {
-        // Remove the leading ../ since we're already at moq root level
-        const relativePath = source.replace(/^\.\.\//, "");
-        const resolved = resolve(moqDir, relativePath);
-        console.log("[patch-moq] Resolving", source, "from patched file to", resolved);
-        return resolved;
+      return null;
+    },
+  };
+}
+
+// Fix broken exports in @moq/hang-ui
+function fixMoqHangUI(): Plugin {
+  const hangUIDir = resolve(__dirname, "node_modules/@moq/hang-ui");
+
+  return {
+    name: "fix-moq-hang-ui",
+    enforce: "pre",
+    resolveId(source) {
+      if (source === "@moq/hang-ui/publish/element") {
+        return resolve(hangUIDir, "publish-controls.esm.js");
+      }
+      if (source === "@moq/hang-ui/watch/element") {
+        return resolve(hangUIDir, "watch-controls.esm.js");
       }
       return null;
     },
@@ -41,7 +46,7 @@ function patchMoqConnection(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [patchMoqConnection()],
+  plugins: [fixMoqHangWorklets(), fixMoqHangUI()],
   build: {
     outDir: "dist",
     emptyDirBeforeWrite: true,
@@ -50,6 +55,6 @@ export default defineConfig({
     port: 3000,
   },
   optimizeDeps: {
-    exclude: ["@kixelated/hang", "@kixelated/moq"],
+    exclude: ["@moq/hang", "@moq/hang-ui", "@moq/lite"],
   },
 });

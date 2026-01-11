@@ -23,7 +23,8 @@
   },
   "dependencies": {
     "patch-package": "^8.0.1",
-    "@kixelated/hang": "^0.7.0",
+    "@moq/hang": "^0.1.1",
+    "@moq/hang-ui": "^0.1.1",
     "@kixelated/libavjs-webcodecs-polyfill": "^0.5.5",
     "@kixelated/web-transport-ws": "^0.1.2"
   }

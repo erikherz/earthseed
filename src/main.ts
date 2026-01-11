@@ -1,4 +1,4 @@
-console.log("[Earthseed] Version: 2025-01-10-v15 (cloudflare mode)");
+console.log("[Earthseed] Version: 2025-01-10-v18 (@moq/hang + hang-ui)");
 
 // Safari WebSocket fallback - MUST install before hang components load
 // Using our patched version that handles requireUnreliable gracefully
@@ -767,8 +767,11 @@ const loadHangComponents = async () => {
   // Install WebCodecs polyfill for Opus audio encoding (Safari)
   // This must complete before hang components try to use AudioEncoder
   await installWebCodecsPolyfill();
-  await import("@kixelated/hang/publish/element");
-  await import("@kixelated/hang/watch/element");
+  await import("@moq/hang/publish/element");
+  await import("@moq/hang/watch/element");
+  // UI controls (device picker, etc.)
+  await import("@moq/hang-ui/publish/element");
+  await import("@moq/hang-ui/watch/element");
 };
 
 import {

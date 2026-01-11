@@ -1164,23 +1164,22 @@
             </div>
 
             <section>
-                <hang-publish
-                    audio
-                    video
-                    controls>
-                    <video muted autoplay playsinline></video>
-                </hang-publish>
+                <hang-publish-ui>
+                    <hang-publish>
+                        <video muted autoplay playsinline></video>
+                    </hang-publish>
+                </hang-publish-ui>
             </section>
         </div>
 
         <!-- Watch View -->
         <div id="watch-view" class="hidden">
             <section>
-                <hang-watch
-                    controls
-                    muted>
-                    <canvas></canvas>
-                </hang-watch>
+                <hang-watch-ui>
+                    <hang-watch muted>
+                        <canvas></canvas>
+                    </hang-watch>
+                </hang-watch-ui>
             </section>
         </div>
 
