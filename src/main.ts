@@ -795,7 +795,8 @@ import {
   type Geo,
   type StreamSettings,
   type LiveBroadcast,
-  type LiveViewer
+  type LiveViewer,
+  type BroadcastOrigin,
 } from "./auth";
 
 type View = "broadcast" | "watch" | "stats" | "stats-map" | "greet" | "stream-stats" | "stream-stats-map" | "admin";
@@ -1173,15 +1174,17 @@ function initBroadcastView(streamId: string, user: User | null) {
     let broadcastEventId: number | null = null;
 
     // Log broadcast start when user starts streaming
+    // Safari uses WebSocket to earthseed relay, Chrome uses WebTransport to CloudFlare
+    const broadcastOrigin: BroadcastOrigin = isSafari ? "earthseed" : "cloudflare";
     const checkBroadcastStatus = () => {
       const statusDiv = publisher.querySelector(":scope > div > div:last-child");
       const statusText = statusDiv?.textContent || "";
       console.log("[Broadcast Status Check] Status:", statusText, "| Event ID:", broadcastEventId);
       if (statusText.includes("🟢") || statusText.includes("Live") || statusText.includes("Audio Only")) {
         if (!broadcastEventId) {
-          logBroadcastStart(streamId).then(id => {
+          logBroadcastStart(streamId, broadcastOrigin).then(id => {
             broadcastEventId = id;
-            console.log("Broadcast started, event ID:", id);
+            console.log("Broadcast started, event ID:", id, "origin:", broadcastOrigin);
           });
         }
       } else if (broadcastEventId && statusText.includes("Select Device")) {
