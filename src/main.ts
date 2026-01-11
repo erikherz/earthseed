@@ -535,6 +535,7 @@ function updateBrowserSupportPanel() {
       <button class="details-btn" id="support-details-btn">Details</button>
     </div>
     <div class="server-details hidden" id="support-details-content">
+      <div id="playback-settings-container" class="playback-settings"></div>
       ${detailsContent}
     </div>
   `;
@@ -1505,6 +1506,35 @@ async function initWatchView(streamId: string, user: User | null) {
     window.addEventListener("beforeunload", () => {
       clearInterval(settingsCheckInterval);
     });
+
+    // Move latency/quality controls from hang-watch-ui Shadow DOM to Browser Support panel
+    const movePlaybackControls = () => {
+      const watchUI = document.querySelector("hang-watch-ui");
+      const shadowRoot = watchUI?.shadowRoot;
+      const targetContainer = document.getElementById("playback-settings-container");
+
+      if (!shadowRoot || !targetContainer) return;
+
+      const latencyContainer = shadowRoot.querySelector(".latencySliderContainer");
+      const qualityContainer = shadowRoot.querySelector(".qualitySelectorContainer");
+
+      if (latencyContainer && !targetContainer.contains(latencyContainer)) {
+        targetContainer.appendChild(latencyContainer);
+      }
+      if (qualityContainer && !targetContainer.contains(qualityContainer)) {
+        targetContainer.appendChild(qualityContainer);
+      }
+    };
+
+    // Try to move controls after hang-watch-ui renders
+    const watchUI = document.querySelector("hang-watch-ui");
+    if (watchUI?.shadowRoot) {
+      const uiObserver = new MutationObserver(() => movePlaybackControls());
+      uiObserver.observe(watchUI.shadowRoot, { childList: true, subtree: true });
+    }
+    setTimeout(movePlaybackControls, 500);
+    setTimeout(movePlaybackControls, 1000);
+    setTimeout(movePlaybackControls, 2000);
   }
 }
 

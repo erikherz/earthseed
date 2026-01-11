@@ -734,6 +734,44 @@
             color: #ef4444;
         }
 
+        /* Playback settings (moved from hang-watch-ui Shadow DOM) */
+        .playback-settings {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            padding-bottom: 1rem;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .playback-settings:empty {
+            display: none;
+        }
+        .playback-settings .latencySliderContainer,
+        .playback-settings .qualitySelectorContainer {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.85rem;
+        }
+        .playback-settings .latencyLabel,
+        .playback-settings .qualityLabel {
+            color: var(--text-secondary);
+            min-width: 60px;
+        }
+        .playback-settings .latencySlider {
+            flex: 1;
+            max-width: 200px;
+            accent-color: #3b82f6;
+        }
+        .playback-settings .qualitySelect {
+            background: var(--input-bg);
+            border: 1px solid var(--input-border);
+            border-radius: 4px;
+            padding: 0.25rem 0.5rem;
+            color: var(--text-primary);
+            font-size: 0.85rem;
+        }
+
         /* Login required overlay */
         #login-overlay {
             position: absolute;
