@@ -1356,15 +1356,24 @@ function initBroadcastView(streamId: string, user: User | null) {
       `;
 
       // Update tooltip on status changes
+      let isUpdating = false;
       const updateTooltip = () => {
+        if (isUpdating) return;
         const fullText = statusOutput.textContent || "";
+        // Only process if there's text after the emoji (not already processed)
+        if (fullText.length <= 2) return;
+
         // Extract emoji (first character) and text (rest)
         const match = fullText.match(/^([\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{1F7E0}-\u{1F7FF}])/u);
         if (match) {
           const emoji = match[1];
           const text = fullText.slice(emoji.length).trim();
-          statusOutput.textContent = emoji;
-          statusOutput.title = text || "Status";
+          if (text) {
+            isUpdating = true;
+            statusOutput.textContent = emoji;
+            statusOutput.title = text;
+            isUpdating = false;
+          }
         }
       };
 
