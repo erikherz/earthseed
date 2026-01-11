@@ -1,4 +1,4 @@
-console.log("[Earthseed] Version: 2025-01-10-v18 (@moq/hang + hang-ui)");
+console.log("[Earthseed] Version: 2025-01-10-v20 (@moq/hang - cloudflare relay)");
 
 // Safari WebSocket fallback - MUST install before hang components load
 // Using our patched version that handles requireUnreliable gracefully
