@@ -1323,16 +1323,75 @@ function initBroadcastView(streamId: string, user: User | null) {
       deviceContainer.appendChild(htmlBtn);
     };
 
+    // Restyle status indicator: move to left, show only ball with tooltip
+    const restyleStatusIndicator = () => {
+      const publisherUI = document.querySelector("hang-publish-ui");
+      const shadowRoot = publisherUI?.shadowRoot;
+      if (!shadowRoot) return;
+
+      const deviceContainer = shadowRoot.querySelector(".publishSourceSelectorContainer");
+      const statusOutput = shadowRoot.querySelector("output");
+      if (!deviceContainer || !statusOutput) return;
+
+      // Skip if already restyled
+      if (statusOutput.classList.contains("status-restyled")) return;
+      statusOutput.classList.add("status-restyled");
+
+      // Hide "Source:" text by wrapping device buttons only
+      const sourceText = deviceContainer.firstChild;
+      if (sourceText?.nodeType === Node.TEXT_NODE && sourceText.textContent?.includes("Source")) {
+        sourceText.textContent = "";
+      }
+
+      // Move status indicator to be first in device container
+      deviceContainer.insertBefore(statusOutput, deviceContainer.firstChild);
+
+      // Style the status indicator
+      statusOutput.style.cssText = `
+        cursor: default;
+        position: relative;
+        font-size: 1.25rem;
+        line-height: 1;
+        margin-right: 8px;
+      `;
+
+      // Update tooltip on status changes
+      const updateTooltip = () => {
+        const fullText = statusOutput.textContent || "";
+        // Extract emoji (first character) and text (rest)
+        const match = fullText.match(/^([\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{1F7E0}-\u{1F7FF}])/u);
+        if (match) {
+          const emoji = match[1];
+          const text = fullText.slice(emoji.length).trim();
+          statusOutput.textContent = emoji;
+          statusOutput.title = text || "Status";
+        }
+      };
+
+      // Initial update
+      updateTooltip();
+
+      // Watch for status text changes
+      const statusObserver = new MutationObserver(updateTooltip);
+      statusObserver.observe(statusOutput, { childList: true, characterData: true, subtree: true });
+    };
+
     // Inject HTML overlay button after component renders
     // Use MutationObserver to catch when hang-publish-ui renders its controls in Shadow DOM
     const publisherUI = document.querySelector("hang-publish-ui");
     if (publisherUI?.shadowRoot) {
-      const uiObserver = new MutationObserver(() => injectHtmlOverlayButton());
+      const uiObserver = new MutationObserver(() => {
+        injectHtmlOverlayButton();
+        restyleStatusIndicator();
+      });
       uiObserver.observe(publisherUI.shadowRoot, { childList: true, subtree: true });
     }
     setTimeout(injectHtmlOverlayButton, 200);
     setTimeout(injectHtmlOverlayButton, 600);
     setTimeout(injectHtmlOverlayButton, 1000);
+    setTimeout(restyleStatusIndicator, 200);
+    setTimeout(restyleStatusIndicator, 600);
+    setTimeout(restyleStatusIndicator, 1000);
   }
 
   // New stream button
