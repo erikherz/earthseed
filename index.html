@@ -955,6 +955,13 @@
             width: 100%;
             max-width: 120px;
         }
+        /* Shrink volume slider on small viewports */
+        @media (max-width: 480px) {
+            hang-watch input[type="range"],
+            hang-publish input[type="range"] {
+                max-width: 60px;
+            }
+        }
         hang-watch input[type="range"]::-webkit-slider-runnable-track,
         hang-publish input[type="range"]::-webkit-slider-runnable-track {
             background: var(--slider-track);
