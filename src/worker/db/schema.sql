@@ -23,6 +23,8 @@ CREATE TABLE IF NOT EXISTS broadcast_events (
   stream_id TEXT NOT NULL,
   started_at TEXT DEFAULT (datetime('now')),
   ended_at TEXT,
+  -- Origin relay: 'cloudflare' (Chrome/QUIC) or 'earthseed' (Safari/WebSocket)
+  origin TEXT DEFAULT 'cloudflare',
   -- Geolocation data from Cloudflare
   geo_country TEXT,
   geo_city TEXT,
