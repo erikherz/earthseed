@@ -1257,10 +1257,11 @@ function initBroadcastView(streamId: string, user: User | null) {
     setTimeout(injectAudioButton, 500);
 
     // Inject HTML overlay button into device selector
-    // Note: With @moq/hang-ui, device buttons are in hang-publish-ui, not hang-publish
+    // Note: With @moq/hang-ui, device buttons are in hang-publish-ui's Shadow DOM
     const injectHtmlOverlayButton = () => {
       const publisherUI = document.querySelector("hang-publish-ui");
-      const deviceContainer = publisherUI?.querySelector(".publishSourceSelectorContainer");
+      const shadowRoot = publisherUI?.shadowRoot;
+      const deviceContainer = shadowRoot?.querySelector(".publishSourceSelectorContainer");
       if (!deviceContainer || deviceContainer.querySelector(".html-overlay-btn")) return;
 
       const htmlBtn = document.createElement("button");
@@ -1322,11 +1323,11 @@ function initBroadcastView(streamId: string, user: User | null) {
     };
 
     // Inject HTML overlay button after component renders
-    // Use MutationObserver to catch when hang-publish-ui renders its controls
+    // Use MutationObserver to catch when hang-publish-ui renders its controls in Shadow DOM
     const publisherUI = document.querySelector("hang-publish-ui");
-    if (publisherUI) {
+    if (publisherUI?.shadowRoot) {
       const uiObserver = new MutationObserver(() => injectHtmlOverlayButton());
-      uiObserver.observe(publisherUI, { childList: true, subtree: true });
+      uiObserver.observe(publisherUI.shadowRoot, { childList: true, subtree: true });
     }
     setTimeout(injectHtmlOverlayButton, 200);
     setTimeout(injectHtmlOverlayButton, 600);
