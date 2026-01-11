@@ -5,6 +5,8 @@ import * as Lite from "../lite/index.js";
 import { Stream, Reader } from "../stream.js";
 import * as Hex from "../util/hex.js";
 import { Parameters } from "../ietf/parameters.js";
+// Patched Connection that doesn't send MaxRequestId (moq-rs doesn't support it)
+import { Connection as CloudflareConnection } from "./connection.js";
 
 // Detect if URL is for Cloudflare relay
 function isCloudflareRelay(url) {
@@ -131,12 +133,10 @@ async function cloudflareHandshake(url, quic, stream) {
     const server = await decodeServerSetupCF(stream.reader);
     console.log("[MOQ] Cloudflare relay - server version: 0x" + server.version.toString(16));
 
-    if (server.version === Lite.CURRENT_VERSION) {
-        console.log("[MOQ] Cloudflare relay - moq-lite session established");
-        return new Lite.Connection(url, quic, stream);
-    } else if (server.version === Ietf.CURRENT_VERSION || server.version === 0xff00000e) {
+    if (server.version === Ietf.CURRENT_VERSION || server.version === 0xff00000e) {
         console.log("[MOQ] Cloudflare relay - moq-ietf/draft-14 session established");
-        return new Ietf.Connection(url, quic, stream);
+        // Use patched Connection that doesn't send MaxRequestId
+        return new CloudflareConnection(url, quic, stream);
     } else {
         throw new Error(`unsupported server version: ${server.version.toString()}`);
     }
