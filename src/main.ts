@@ -9,7 +9,7 @@ import { install as installWebCodecsPolyfill } from "./webcodecs-polyfill";
 // Relay configuration - toggle between relay servers:
 // - "luke": cdn.moq.dev/anon (moq-lite, supports WebSocket fallback)
 // - "cloudflare": relay-next.cloudflare.mediaoverquic.com (draft-14, WebTransport only)
-const RELAY_SERVER: "luke" | "cloudflare" = "cloudflare";
+const RELAY_SERVER: "luke" | "cloudflare" = "luke";
 
 // Detect Safari - even Safari 17+ with WebTransport has compatibility issues with some relays
 const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
@@ -1257,8 +1257,10 @@ function initBroadcastView(streamId: string, user: User | null) {
     setTimeout(injectAudioButton, 500);
 
     // Inject HTML overlay button into device selector
+    // Note: With @moq/hang-ui, device buttons are in hang-publish-ui, not hang-publish
     const injectHtmlOverlayButton = () => {
-      const deviceContainer = publisher.querySelector(":scope > div > div");
+      const publisherUI = document.querySelector("hang-publish-ui");
+      const deviceContainer = publisherUI?.querySelector(".publishSourceSelectorContainer");
       if (!deviceContainer || deviceContainer.querySelector(".html-overlay-btn")) return;
 
       const htmlBtn = document.createElement("button");
@@ -1320,8 +1322,15 @@ function initBroadcastView(streamId: string, user: User | null) {
     };
 
     // Inject HTML overlay button after component renders
+    // Use MutationObserver to catch when hang-publish-ui renders its controls
+    const publisherUI = document.querySelector("hang-publish-ui");
+    if (publisherUI) {
+      const uiObserver = new MutationObserver(() => injectHtmlOverlayButton());
+      uiObserver.observe(publisherUI, { childList: true, subtree: true });
+    }
     setTimeout(injectHtmlOverlayButton, 200);
     setTimeout(injectHtmlOverlayButton, 600);
+    setTimeout(injectHtmlOverlayButton, 1000);
   }
 
   // New stream button
