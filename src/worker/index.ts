@@ -545,7 +545,7 @@ async function handleStatsRoutes(
     const broadcasts = await env.DB
       .prepare(`
         SELECT
-          b.id, b.stream_id, b.started_at,
+          b.id, b.stream_id, b.started_at, b.origin,
           u.name as user_name,
           b.geo_country, b.geo_city, b.geo_region, b.geo_latitude, b.geo_longitude,
           (SELECT COUNT(*) FROM watch_events w WHERE w.stream_id = b.stream_id AND w.ended_at IS NULL) as viewer_count
@@ -570,7 +570,7 @@ async function handleStatsRoutes(
     const broadcasts = await env.DB
       .prepare(`
         SELECT
-          b.id, b.stream_id, b.started_at,
+          b.id, b.stream_id, b.started_at, b.origin,
           u.id as user_id, u.name as user_name, u.email as user_email, u.avatar_url,
           b.geo_country, b.geo_city, b.geo_region, b.geo_latitude, b.geo_longitude, b.geo_timezone
         FROM broadcast_events b
@@ -607,23 +607,27 @@ async function handleStatsRoutes(
       return Response.json({ error: "Authentication required" }, { status: 401 });
     }
 
-    const body = await request.json() as { stream_id: string };
+    const body = await request.json() as { stream_id: string; origin?: string };
     if (!body.stream_id) {
       return Response.json({ error: "stream_id required" }, { status: 400 });
     }
+
+    // Default to 'cloudflare' if not specified (Chrome/QUIC)
+    // Use 'earthseed' for Safari/WebSocket connections
+    const origin = body.origin || 'cloudflare';
 
     const geo = getGeoFromRequest(request);
     console.log("Broadcast geo data:", JSON.stringify(geo));
     const result = await env.DB
       .prepare(`
-        INSERT INTO broadcast_events (user_id, stream_id, geo_country, geo_city, geo_region, geo_latitude, geo_longitude, geo_timezone)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO broadcast_events (user_id, stream_id, origin, geo_country, geo_city, geo_region, geo_latitude, geo_longitude, geo_timezone)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING id
       `)
-      .bind(user.id, body.stream_id, geo.country, geo.city, geo.region, geo.latitude, geo.longitude, geo.timezone)
+      .bind(user.id, body.stream_id, origin, geo.country, geo.city, geo.region, geo.latitude, geo.longitude, geo.timezone)
       .first<{ id: number }>();
 
-    return Response.json({ id: result?.id, stream_id: body.stream_id, geo });
+    return Response.json({ id: result?.id, stream_id: body.stream_id, origin, geo });
   }
 
   // POST /api/stats/broadcast/:id/end - End a broadcast
