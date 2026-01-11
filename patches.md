@@ -1,6 +1,168 @@
 # MoQ Library Patches
 
-This document lists all deviations from the `@kixelated/moq` library required to support different relay servers.
+This document lists all patches and workarounds required to support different MoQ relay servers.
+
+---
+
+# v2.0+ (@moq/hang + @moq/hang-ui)
+
+## Components
+
+| Component | Package | Version |
+|-----------|---------|---------|
+| **Client Transport** | `@moq/lite` | 0.1.x |
+| **Client Media** | `@moq/hang` | 0.1.x |
+| **Client UI** | `@moq/hang-ui` | 0.1.x |
+| **Server (Luke)** | `cdn.moq.dev/anon` | moq-lite |
+| **Server (Cloudflare)** | `relay-next.cloudflare.mediaoverquic.com` | moq-rs (draft-14) |
+
+## Protocol Patches Required: None
+
+The `@moq/lite` package handles both Luke's relay and Cloudflare's relay natively. No protocol patches needed.
+
+## Build Workarounds Required: 2
+
+The packages have build issues that require Vite workarounds.
+
+---
+
+### 1. @moq/hang-ui Broken Exports
+
+**File**: [`vite.config.ts` lines 29-46](https://github.com/erikherz/earthseed/blob/v2.0/vite.config.ts#L29-L46)
+
+**Issue**: The `package.json` exports reference non-existent paths:
+
+```json
+{
+  "exports": {
+    "./publish/element": "./Components/publish/element.js",
+    "./watch/element": "./Components/watch/element.js"
+  }
+}
+```
+
+But the `Components/` directory doesn't exist. Actual files are:
+- `publish-controls.esm.js`
+- `watch-controls.esm.js`
+
+**Workaround**: Vite plugin to redirect imports:
+
+```typescript
+function fixMoqHangUI(): Plugin {
+  const hangUIDir = resolve(__dirname, "node_modules/@moq/hang-ui");
+
+  return {
+    name: "fix-moq-hang-ui",
+    enforce: "pre",
+    resolveId(source) {
+      if (source === "@moq/hang-ui/publish/element") {
+        return resolve(hangUIDir, "publish-controls.esm.js");
+      }
+      if (source === "@moq/hang-ui/watch/element") {
+        return resolve(hangUIDir, "watch-controls.esm.js");
+      }
+      return null;
+    },
+  };
+}
+```
+
+---
+
+### 2. @moq/hang TypeScript Worklet Imports
+
+**File**: [`vite.config.ts` lines 8-27](https://github.com/erikherz/earthseed/blob/v2.0/vite.config.ts#L8-L27)
+
+**Issue**: Compiled JS files reference `.ts` extensions instead of `.js`:
+
+```javascript
+// In node_modules/@moq/hang/watch/audio/source.js
+import RenderWorklet from "./render-worklet.ts?worker&url";  // BROKEN
+
+// In node_modules/@moq/hang/publish/audio/encoder.js
+import CaptureWorklet from "./capture-worklet.ts?worker&url";  // BROKEN
+```
+
+**Workaround**: Vite plugin to rewrite imports:
+
+```typescript
+function fixMoqHangWorklets(): Plugin {
+  return {
+    name: "fix-moq-hang-worklets",
+    enforce: "pre",
+    resolveId(source, importer) {
+      if (source === "./render-worklet.ts?worker&url" && importer?.includes("@moq/hang")) {
+        const dir = pathDirname(importer);
+        return { id: resolve(dir, "render-worklet.js") + "?worker&url", external: false };
+      }
+      if (source === "./capture-worklet.ts?worker&url" && importer?.includes("@moq/hang")) {
+        const dir = pathDirname(importer);
+        return { id: resolve(dir, "capture-worklet.js") + "?worker&url", external: false };
+      }
+      return null;
+    },
+  };
+}
+```
+
+---
+
+## HTML Changes (v1.x → v2.0)
+
+The component API changed:
+
+**Old (`@kixelated/hang`):**
+```html
+<hang-publish audio video controls>
+  <video muted autoplay playsinline></video>
+</hang-publish>
+
+<hang-watch controls muted>
+  <canvas></canvas>
+</hang-watch>
+```
+
+**New (`@moq/hang` + `@moq/hang-ui`):**
+```html
+<hang-publish-ui>
+  <hang-publish>
+    <video muted autoplay playsinline></video>
+  </hang-publish>
+</hang-publish-ui>
+
+<hang-watch-ui>
+  <hang-watch muted>
+    <canvas></canvas>
+  </hang-watch>
+</hang-watch-ui>
+```
+
+---
+
+## Testing
+
+Works with both relays out of the box:
+
+```
+[Earthseed] Version: 2025-01-10-v18 (@moq/hang + hang-ui)
+```
+
+---
+---
+
+# v1.x (Legacy: @kixelated/hang + @kixelated/moq)
+
+> **Note**: This section documents the old approach using `@kixelated/moq` with custom protocol patches.
+> The patched files are preserved in `src/patched-moq/` and `patches-old/` for reference.
+
+## Components
+
+| Component | Package | Version |
+|-----------|---------|---------|
+| **Client Transport** | `@kixelated/moq` | 0.9.4 |
+| **Client Media** | `@kixelated/hang` | 0.7.0 |
+| **Server (Luke)** | `cdn.moq.dev/anon` | moq-lite |
+| **Server (Cloudflare)** | `relay-next.cloudflare.mediaoverquic.com` | moq-rs (draft-14) |
 
 ## Luke's Relay (`cdn.moq.dev/anon`)
 
@@ -189,7 +351,7 @@ if (flags.hasSubgroup || flags.hasSubgroupObject) {
 
 ---
 
-## Patched Files Summary
+## Patched Files Summary (v1.x)
 
 | File | Purpose |
 |------|---------|
@@ -204,7 +366,7 @@ if (flags.hasSubgroup || flags.hasSubgroupObject) {
 
 ---
 
-## Testing
+## Testing (v1.x)
 
 Set `RELAY_SERVER` in `src/main.ts`:
 
