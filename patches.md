@@ -20,6 +20,49 @@ This document lists all patches and workarounds required to support different Mo
 
 The `@moq/lite` package handles both Luke's relay and Cloudflare's relay natively. No protocol patches needed.
 
+## Safari WebSocket Fallback (2026-01-12)
+
+**Issue**: Safari doesn't support WebTransport, which is required for CloudFlare's MoQ CDN.
+
+**Solution**: Automatic fallback to Linode relay (`us-central.earthseed.live`) which supports WebSocket.
+
+**File**: `src/main.ts`
+
+```typescript
+const RELAY_URLS = {
+  luke: "https://cdn.moq.dev/anon",
+  cloudflare: "https://relay-next.cloudflare.mediaoverquic.com",
+  linode: "https://us-central.earthseed.live/anon",
+};
+
+// Safari uses Linode (WebSocket), Chrome uses configured relay
+const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+let RELAY_URL = isSafari ? RELAY_URLS.linode : RELAY_URLS[RELAY_SERVER];
+```
+
+**Architecture**:
+```
+Chrome ──WebTransport──▶ [CloudFlare CDN]
+                              │
+                              ▼
+                    [cloudflare-adapter]
+                      (linode-moq-14)
+                              │
+                              ▼
+Safari ──WebSocket───▶ [moq-relay @ Linode]
+                       us-central.earthseed.live
+```
+
+**Dependencies**: See `linode-moq-14/cf_patch.md` for:
+- Patched moq-lite with `announce_remote()` method
+- cloudflare-adapter service
+- Relay configuration with WebSocket enabled
+
+**Status**:
+- [x] Safari connects via WebSocket
+- [x] moq-lite session established
+- [ ] Stream bridging (pending stream registration fix)
+
 ## Build Workarounds Required: 2
 
 The packages have build issues that require Vite workarounds.
