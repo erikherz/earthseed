@@ -1,4 +1,4 @@
-console.log("[Earthseed] Version: 2026-01-12-v7 (Shadow DOM support)");
+console.log("[Earthseed] Version: 2026-01-12-v8 (Dump publisher content)");
 
 // Safari WebSocket fallback - MUST install before hang components load
 // Using our patched version that handles requireUnreliable gracefully
@@ -1219,6 +1219,14 @@ function initBroadcastView(streamId: string, user: User | null) {
     // Safari uses WebSocket to earthseed relay, Chrome uses WebTransport to CloudFlare
     const broadcastOrigin: BroadcastOrigin = isSafari ? "earthseed" : "cloudflare";
     const checkBroadcastStatus = () => {
+      // Debug: dump all text content in publisher
+      const allText: string[] = [];
+      publisher.querySelectorAll("*").forEach(el => {
+        const t = (el as HTMLElement).textContent?.trim();
+        if (t && t.length < 50) allText.push(t);
+      });
+      console.log("[Broadcast Status Debug] All text in publisher:", [...new Set(allText)]);
+
       // Search for status in both light DOM and shadow DOM
       let fullStatus = "";
 
