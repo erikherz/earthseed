@@ -1,4 +1,4 @@
-console.log("[Earthseed] Version: 2025-01-10-v20 (@moq/hang - cloudflare relay)");
+console.log("[Earthseed] Version: 2026-01-12-v1 (@moq/hang - CloudFlare + Linode Safari fallback)");
 
 // Safari WebSocket fallback - MUST install before hang components load
 // Using our patched version that handles requireUnreliable gracefully
@@ -6,10 +6,11 @@ import { install as installWebTransportPolyfill } from "./webtransport-polyfill"
 // WebCodecs polyfill for Opus audio encoding on Safari
 import { install as installWebCodecsPolyfill } from "./webcodecs-polyfill";
 
-// Relay configuration - toggle between relay servers:
+// Relay configuration - toggle between relay servers for Chrome:
 // - "luke": cdn.moq.dev/anon (moq-lite, supports WebSocket fallback)
 // - "cloudflare": relay-next.cloudflare.mediaoverquic.com (draft-14, WebTransport only)
-const RELAY_SERVER: "luke" | "cloudflare" = "luke";
+// Note: Safari always uses Linode relay (us-central.earthseed.live) via WebSocket
+const RELAY_SERVER: "luke" | "cloudflare" = "cloudflare";
 
 // Detect Safari - even Safari 17+ with WebTransport has compatibility issues with some relays
 const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
@@ -697,8 +698,12 @@ function updateServerStatusPanel() {
 const RELAY_URLS = {
   luke: "https://cdn.moq.dev/anon",
   cloudflare: "https://relay-next.cloudflare.mediaoverquic.com",
+  linode: "https://us-central.earthseed.live",
 };
-let RELAY_URL = RELAY_URLS[RELAY_SERVER];
+
+// Safari uses Linode (WebSocket), Chrome uses configured relay (CloudFlare WebTransport)
+// This enables Chrome→CloudFlare streams to be watched on Safari via the CloudFlare adapter
+let RELAY_URL = isSafari ? RELAY_URLS.linode : RELAY_URLS[RELAY_SERVER];
 const NAMESPACE_PREFIX = "earthseed.live";
 
 // Helper to get correct URL and name based on relay type
@@ -714,10 +719,13 @@ function getRelayConfig(streamId: string): { url: string; name: string } {
 // Debug logging for connection issues
 console.log("Earthseed config:", {
   relay: RELAY_URL,
+  relayServer: RELAY_SERVER,
+  isSafari,
   namespace: NAMESPACE_PREFIX,
   userAgent: navigator.userAgent,
   hasWebTransport: typeof WebTransport !== "undefined",
-  needsPolyfill: typeof WebTransport === "undefined" || /^((?!chrome|android).)*safari/i.test(navigator.userAgent),
+  needsPolyfill,
+  note: isSafari ? "Safari: using Linode relay (WebSocket)" : `Chrome: using ${RELAY_SERVER} relay (WebTransport)`,
 });
 
 // Wrap WebTransport to add detailed connection logging
