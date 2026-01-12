@@ -13,7 +13,7 @@ import { install as installWebCodecsPolyfill } from "./webcodecs-polyfill";
 //             Future: will race multiple Linode servers for lowest latency
 // - "cloudflare-hybrid": CloudFlare for Chrome + Linode for Safari
 //                        Requires cloudflare-adapter bridge running on Linode
-const RELAY_MODE: "luke" | "linode" | "cloudflare-hybrid" = "cloudflare-hybrid";
+const RELAY_MODE: "luke" | "linode" | "cloudflare-hybrid" = "linode";
 
 // Detect Safari - even Safari 17+ with WebTransport has compatibility issues with some relays
 const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
@@ -1219,17 +1219,20 @@ function initBroadcastView(streamId: string, user: User | null) {
     // Safari uses WebSocket to earthseed relay, Chrome uses WebTransport to CloudFlare
     const broadcastOrigin: BroadcastOrigin = isSafari ? "earthseed" : "cloudflare";
     const checkBroadcastStatus = () => {
-      const statusDiv = publisher.querySelector(":scope > div > div:last-child");
+      const statusDiv = publisher.querySelector(":scope > div > div:last-child") as HTMLElement | null;
+      // Check both textContent and data-status-text (after styling, text moves to data attribute)
       const statusText = statusDiv?.textContent || "";
-      console.log("[Broadcast Status Check] Status:", statusText, "| Event ID:", broadcastEventId);
-      if (statusText.includes("🟢") || statusText.includes("Live") || statusText.includes("Audio Only")) {
+      const statusDataText = statusDiv?.getAttribute("data-status-text") || "";
+      const fullStatus = statusText + " " + statusDataText;
+      console.log("[Broadcast Status Check] Status:", fullStatus.trim(), "| Event ID:", broadcastEventId);
+      if (fullStatus.includes("🟢") || fullStatus.includes("Live") || fullStatus.includes("Audio Only")) {
         if (!broadcastEventId) {
           logBroadcastStart(streamId, broadcastOrigin).then(id => {
             broadcastEventId = id;
             console.log("Broadcast started, event ID:", id, "origin:", broadcastOrigin);
           });
         }
-      } else if (broadcastEventId && statusText.includes("Select Device")) {
+      } else if (broadcastEventId && fullStatus.includes("Select Device")) {
         logBroadcastEnd(broadcastEventId);
         console.log("Broadcast ended, event ID:", broadcastEventId);
         broadcastEventId = null;
