@@ -1,4 +1,4 @@
-console.log("[Earthseed] Version: 2026-01-12-v1 (@moq/hang - CloudFlare + Linode Safari fallback)");
+console.log("[Earthseed] Version: 2026-01-12-v2 (@moq/hang - Multi-relay support)");
 
 // Safari WebSocket fallback - MUST install before hang components load
 // Using our patched version that handles requireUnreliable gracefully
@@ -6,11 +6,14 @@ import { install as installWebTransportPolyfill } from "./webtransport-polyfill"
 // WebCodecs polyfill for Opus audio encoding on Safari
 import { install as installWebCodecsPolyfill } from "./webcodecs-polyfill";
 
-// Relay configuration - toggle between relay servers for Chrome:
-// - "luke": cdn.moq.dev/anon (moq-lite, supports WebSocket fallback)
-// - "cloudflare": relay-next.cloudflare.mediaoverquic.com (draft-14, WebTransport only)
-// Note: Safari always uses Linode relay (us-central.earthseed.live) via WebSocket
-const RELAY_SERVER: "luke" | "cloudflare" = "cloudflare";
+// Relay configuration - toggle between relay modes:
+// - "luke": Pure Luke's servers (cdn.moq.dev/anon) - both browsers use Luke's relay
+//           Luke natively supports WebSocket fallback for Safari
+// - "linode": Pure Linode servers (us-central.earthseed.live) - both browsers use Linode
+//             Future: will race multiple Linode servers for lowest latency
+// - "cloudflare-hybrid": CloudFlare for Chrome + Linode for Safari
+//                        Requires cloudflare-adapter bridge running on Linode
+const RELAY_MODE: "luke" | "linode" | "cloudflare-hybrid" = "cloudflare-hybrid";
 
 // Detect Safari - even Safari 17+ with WebTransport has compatibility issues with some relays
 const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
@@ -248,7 +251,13 @@ interface ServerStatus {
 
 const serverStatus: ServerStatus = {
   mode: needsPolyfill ? "websocket" : "webtransport",
-  selectedServer: RELAY_SERVER === "luke" ? "cdn.moq.dev/anon" : "relay-next.cloudflare-moq.com",
+  selectedServer: (() => {
+    switch (RELAY_MODE) {
+      case "luke": return "cdn.moq.dev/anon";
+      case "linode": return "us-central.earthseed.live/anon";
+      case "cloudflare-hybrid": return isSafari ? "us-central.earthseed.live/anon" : "relay-next.cloudflare.mediaoverquic.com";
+    }
+  })(),
   connected: false,
   raceResults: [],
 };
@@ -694,16 +703,33 @@ function updateServerStatusPanel() {
   });
 }
 
-// Relay URL based on RELAY_SERVER config at top of file
+// Relay URLs for each server
 const RELAY_URLS = {
   luke: "https://cdn.moq.dev/anon",
   cloudflare: "https://relay-next.cloudflare.mediaoverquic.com",
   linode: "https://us-central.earthseed.live/anon",
+  // Future Linode servers for racing:
+  // linodeEU: "https://eu-central.earthseed.live/anon",
+  // linodeAP: "https://ap-south.earthseed.live/anon",
 };
 
-// Safari uses Linode (WebSocket), Chrome uses configured relay (CloudFlare WebTransport)
-// This enables Chrome→CloudFlare streams to be watched on Safari via the CloudFlare adapter
-let RELAY_URL = isSafari ? RELAY_URLS.linode : RELAY_URLS[RELAY_SERVER];
+// Determine relay URL based on mode and browser
+// - luke: Both browsers use Luke's relay (he supports WebSocket natively)
+// - linode: Both browsers use Linode relay
+// - cloudflare-hybrid: Chrome→CloudFlare, Safari→Linode (requires bridge)
+function getRelayUrlForMode(): string {
+  switch (RELAY_MODE) {
+    case "luke":
+      return RELAY_URLS.luke;
+    case "linode":
+      return RELAY_URLS.linode;
+    case "cloudflare-hybrid":
+      // Chrome uses CloudFlare (WebTransport), Safari uses Linode (WebSocket)
+      return isSafari ? RELAY_URLS.linode : RELAY_URLS.cloudflare;
+  }
+}
+
+let RELAY_URL = getRelayUrlForMode();
 const NAMESPACE_PREFIX = "earthseed.live";
 
 // Helper to get correct URL and name based on relay type
@@ -718,14 +744,22 @@ function getRelayConfig(streamId: string): { url: string; name: string } {
 
 // Debug logging for connection issues
 console.log("Earthseed config:", {
+  mode: RELAY_MODE,
   relay: RELAY_URL,
-  relayServer: RELAY_SERVER,
   isSafari,
   namespace: NAMESPACE_PREFIX,
   userAgent: navigator.userAgent,
   hasWebTransport: typeof WebTransport !== "undefined",
   needsPolyfill,
-  note: isSafari ? "Safari: using Linode relay (WebSocket)" : `Chrome: using ${RELAY_SERVER} relay (WebTransport)`,
+  note: (() => {
+    switch (RELAY_MODE) {
+      case "luke": return "All browsers → Luke's relay (cdn.moq.dev)";
+      case "linode": return "All browsers → Linode relay (us-central.earthseed.live)";
+      case "cloudflare-hybrid": return isSafari
+        ? "Safari → Linode relay (WebSocket, bridged)"
+        : "Chrome → CloudFlare relay (WebTransport)";
+    }
+  })(),
 });
 
 // Wrap WebTransport to add detailed connection logging
@@ -1157,7 +1191,7 @@ function initBroadcastView(streamId: string, user: User | null) {
     console.log("[Hang Debug] Setting up publisher:", {
       url: relayConfig.url,
       name: relayConfig.name,
-      relayType: RELAY_SERVER,
+      relayMode: RELAY_MODE,
     });
     publisher.setAttribute("url", relayConfig.url);
     publisher.setAttribute("name", relayConfig.name);
@@ -1500,7 +1534,7 @@ async function initWatchView(streamId: string, user: User | null) {
     console.log("[Hang Debug] Setting up watcher:", {
       url: relayConfig.url,
       name: relayConfig.name,
-      relayType: RELAY_SERVER,
+      relayMode: RELAY_MODE,
     });
     watcher.setAttribute("url", relayConfig.url);
     watcher.setAttribute("name", relayConfig.name);
