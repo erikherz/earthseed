@@ -1,4 +1,4 @@
-console.log("[Earthseed] Version: 2026-01-12-v8 (Dump publisher content)");
+console.log("[Earthseed] Version: 2026-01-12-v9 (Search hang-publish-ui)");
 
 // Safari WebSocket fallback - MUST install before hang components load
 // Using our patched version that handles requireUnreliable gracefully
@@ -1219,13 +1219,17 @@ function initBroadcastView(streamId: string, user: User | null) {
     // Safari uses WebSocket to earthseed relay, Chrome uses WebTransport to CloudFlare
     const broadcastOrigin: BroadcastOrigin = isSafari ? "earthseed" : "cloudflare";
     const checkBroadcastStatus = () => {
-      // Debug: dump all text content in publisher
+      // Status is rendered by hang-publish-ui wrapper, not hang-publish itself
+      const publisherUI = document.querySelector("hang-publish-ui") as HTMLElement | null;
+      const searchRoot = publisherUI || publisher;
+
+      // Debug: dump all text content
       const allText: string[] = [];
-      publisher.querySelectorAll("*").forEach(el => {
+      searchRoot.querySelectorAll("*").forEach(el => {
         const t = (el as HTMLElement).textContent?.trim();
         if (t && t.length < 50) allText.push(t);
       });
-      console.log("[Broadcast Status Debug] All text in publisher:", [...new Set(allText)]);
+      console.log("[Broadcast Status Debug] All text in", publisherUI ? "hang-publish-ui" : "hang-publish", ":", [...new Set(allText)]);
 
       // Search for status in both light DOM and shadow DOM
       let fullStatus = "";
@@ -1251,16 +1255,16 @@ function initBroadcastView(streamId: string, user: User | null) {
         return "";
       };
 
-      // Check if publisher has shadow root
-      const hasShadow = !!publisher.shadowRoot;
-      console.log("[Broadcast Status Debug] Publisher shadowRoot:", hasShadow);
+      // Check if searchRoot has shadow root
+      const hasShadow = !!searchRoot.shadowRoot;
+      console.log("[Broadcast Status Debug] searchRoot shadowRoot:", hasShadow);
 
-      // Search starting from publisher's shadow root if it exists, otherwise light DOM
-      if (publisher.shadowRoot) {
-        fullStatus = searchInElement(publisher.shadowRoot);
+      // Search starting from shadow root if it exists, otherwise light DOM
+      if (searchRoot.shadowRoot) {
+        fullStatus = searchInElement(searchRoot.shadowRoot);
       }
       if (!fullStatus) {
-        fullStatus = searchInElement(publisher);
+        fullStatus = searchInElement(searchRoot);
       }
 
       console.log("[Broadcast Status Check] Status:", fullStatus, "| Event ID:", broadcastEventId);
