@@ -1,4 +1,4 @@
-console.log("[Earthseed] Version: 2026-01-12-v6 (Search all elements for status)");
+console.log("[Earthseed] Version: 2026-01-12-v7 (Shadow DOM support)");
 
 // Safari WebSocket fallback - MUST install before hang components load
 // Using our patched version that handles requireUnreliable gracefully
@@ -1219,26 +1219,40 @@ function initBroadcastView(streamId: string, user: User | null) {
     // Safari uses WebSocket to earthseed relay, Chrome uses WebTransport to CloudFlare
     const broadcastOrigin: BroadcastOrigin = isSafari ? "earthseed" : "cloudflare";
     const checkBroadcastStatus = () => {
-      // Find status by searching for emoji indicators in any element
+      // Search for status in both light DOM and shadow DOM
       let fullStatus = "";
-      const allElements = publisher.querySelectorAll("*");
-      for (const el of allElements) {
-        const text = (el as HTMLElement).textContent || "";
-        const dataText = (el as HTMLElement).getAttribute?.("data-status-text") || "";
-        const combined = text + " " + dataText;
-        if (combined.includes("🟢") || combined.includes("🟡") || combined.includes("🔴") ||
-            combined.includes("Live") || combined.includes("Audio Only") || combined.includes("Select")) {
-          fullStatus = combined.trim();
-          break;
-        }
-      }
 
-      // Fallback to original selector
+      // Helper to recursively search elements including shadow roots
+      const searchInElement = (root: Element | ShadowRoot | Document): string => {
+        const elements = root.querySelectorAll("*");
+        for (const el of elements) {
+          const text = (el as HTMLElement).textContent || "";
+          const dataText = (el as HTMLElement).getAttribute?.("data-status-text") || "";
+          const combined = text + " " + dataText;
+          if (combined.includes("🟢") || combined.includes("🟡") || combined.includes("🔴") ||
+              combined.includes("Live") || combined.includes("Audio Only") || combined.includes("Select")) {
+            return combined.trim();
+          }
+          // Recursively check shadow roots
+          const shadowRoot = (el as HTMLElement).shadowRoot;
+          if (shadowRoot) {
+            const result = searchInElement(shadowRoot);
+            if (result) return result;
+          }
+        }
+        return "";
+      };
+
+      // Check if publisher has shadow root
+      const hasShadow = !!publisher.shadowRoot;
+      console.log("[Broadcast Status Debug] Publisher shadowRoot:", hasShadow);
+
+      // Search starting from publisher's shadow root if it exists, otherwise light DOM
+      if (publisher.shadowRoot) {
+        fullStatus = searchInElement(publisher.shadowRoot);
+      }
       if (!fullStatus) {
-        const statusDiv = publisher.querySelector(":scope > div > div:last-child") as HTMLElement | null;
-        const statusText = statusDiv?.textContent || "";
-        const statusDataText = statusDiv?.getAttribute("data-status-text") || "";
-        fullStatus = (statusText + " " + statusDataText).trim();
+        fullStatus = searchInElement(publisher);
       }
 
       console.log("[Broadcast Status Check] Status:", fullStatus, "| Event ID:", broadcastEventId);
