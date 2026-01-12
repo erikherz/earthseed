@@ -698,7 +698,7 @@ function updateServerStatusPanel() {
 const RELAY_URLS = {
   luke: "https://cdn.moq.dev/anon",
   cloudflare: "https://relay-next.cloudflare.mediaoverquic.com",
-  linode: "https://us-central.earthseed.live",
+  linode: "https://us-central.earthseed.live/anon",
 };
 
 // Safari uses Linode (WebSocket), Chrome uses configured relay (CloudFlare WebTransport)
