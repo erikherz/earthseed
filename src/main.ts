@@ -1,4 +1,4 @@
-console.log("[Earthseed] Version: 2026-01-12-v5 (Debug broadcast status)");
+console.log("[Earthseed] Version: 2026-01-12-v6 (Search all elements for status)");
 
 // Safari WebSocket fallback - MUST install before hang components load
 // Using our patched version that handles requireUnreliable gracefully
@@ -1219,12 +1219,29 @@ function initBroadcastView(streamId: string, user: User | null) {
     // Safari uses WebSocket to earthseed relay, Chrome uses WebTransport to CloudFlare
     const broadcastOrigin: BroadcastOrigin = isSafari ? "earthseed" : "cloudflare";
     const checkBroadcastStatus = () => {
-      const statusDiv = publisher.querySelector(":scope > div > div:last-child") as HTMLElement | null;
-      // Check both textContent and data-status-text (after styling, text moves to data attribute)
-      const statusText = statusDiv?.textContent || "";
-      const statusDataText = statusDiv?.getAttribute("data-status-text") || "";
-      const fullStatus = statusText + " " + statusDataText;
-      console.log("[Broadcast Status Check] Status:", fullStatus.trim(), "| Event ID:", broadcastEventId);
+      // Find status by searching for emoji indicators in any element
+      let fullStatus = "";
+      const allElements = publisher.querySelectorAll("*");
+      for (const el of allElements) {
+        const text = (el as HTMLElement).textContent || "";
+        const dataText = (el as HTMLElement).getAttribute?.("data-status-text") || "";
+        const combined = text + " " + dataText;
+        if (combined.includes("🟢") || combined.includes("🟡") || combined.includes("🔴") ||
+            combined.includes("Live") || combined.includes("Audio Only") || combined.includes("Select")) {
+          fullStatus = combined.trim();
+          break;
+        }
+      }
+
+      // Fallback to original selector
+      if (!fullStatus) {
+        const statusDiv = publisher.querySelector(":scope > div > div:last-child") as HTMLElement | null;
+        const statusText = statusDiv?.textContent || "";
+        const statusDataText = statusDiv?.getAttribute("data-status-text") || "";
+        fullStatus = (statusText + " " + statusDataText).trim();
+      }
+
+      console.log("[Broadcast Status Check] Status:", fullStatus, "| Event ID:", broadcastEventId);
       if (fullStatus.includes("🟢") || fullStatus.includes("Live") || fullStatus.includes("Audio Only")) {
         if (!broadcastEventId) {
           logBroadcastStart(streamId, broadcastOrigin).then(id => {
