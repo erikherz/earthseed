@@ -1,4 +1,4 @@
-console.log("[Earthseed] Version: 2026-01-12-v4 (Fixed greet map reinit)");
+console.log("[Earthseed] Version: 2026-01-12-v5 (Debug broadcast status)");
 
 // Safari WebSocket fallback - MUST install before hang components load
 // Using our patched version that handles requireUnreliable gracefully
@@ -1240,8 +1240,18 @@ function initBroadcastView(streamId: string, user: User | null) {
     };
 
     // Observe status changes
-    const statusObserver = new MutationObserver(checkBroadcastStatus);
-    statusObserver.observe(publisher, { childList: true, subtree: true, characterData: true });
+    const statusObserver = new MutationObserver((mutations) => {
+      console.log("[Broadcast Status] Mutation detected, checking status...");
+      checkBroadcastStatus();
+    });
+    statusObserver.observe(publisher, { childList: true, subtree: true, characterData: true, attributes: true });
+
+    // Also check periodically in case mutations are missed
+    const statusCheckInterval = setInterval(checkBroadcastStatus, 3000);
+    // Initial check after component loads
+    setTimeout(checkBroadcastStatus, 1000);
+    setTimeout(checkBroadcastStatus, 2000);
+    setTimeout(checkBroadcastStatus, 5000);
 
     // Log end on page unload
     window.addEventListener("beforeunload", () => {
