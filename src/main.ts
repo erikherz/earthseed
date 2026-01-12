@@ -1,4 +1,4 @@
-console.log("[Earthseed] Version: 2026-01-12-v3 (Fixed broadcast status check)");
+console.log("[Earthseed] Version: 2026-01-12-v4 (Fixed greet map reinit)");
 
 // Safari WebSocket fallback - MUST install before hang components load
 // Using our patched version that handles requireUnreliable gracefully
@@ -2189,6 +2189,10 @@ async function initGreetView() {
     viewer_count: number;
   }
 
+  // Track map instance for proper cleanup on refresh
+  // @ts-expect-error Leaflet types
+  let greetMap: L.Map | null = null;
+
   const renderMap = async () => {
     // Fetch broadcasts from public greet endpoint
     const response = await fetch("/api/stats/greet");
@@ -2204,11 +2208,15 @@ async function initGreetView() {
     const mapEl = document.getElementById("leaflet-map");
     if (!mapEl) return;
 
-    // Clear existing map
-    mapEl.innerHTML = "";
+    // Properly destroy existing map before creating new one
+    if (greetMap) {
+      greetMap.remove();
+      greetMap = null;
+    }
 
     // @ts-expect-error Leaflet loaded from CDN
-    const map = L.map("leaflet-map").setView([20, 0], 2);
+    greetMap = L.map("leaflet-map").setView([20, 0], 2);
+    const map = greetMap;
 
     // @ts-expect-error Leaflet loaded from CDN
     L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
