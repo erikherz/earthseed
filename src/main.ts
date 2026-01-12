@@ -1238,18 +1238,34 @@ function initBroadcastView(streamId: string, user: User | null) {
       const searchInElement = (root: Element | ShadowRoot | Document): string => {
         const elements = root.querySelectorAll("*");
         for (const el of elements) {
-          const text = (el as HTMLElement).textContent || "";
-          const dataText = (el as HTMLElement).getAttribute?.("data-status-text") || "";
-          const combined = text + " " + dataText;
-          if (combined.includes("🟢") || combined.includes("🟡") || combined.includes("🔴") ||
-              combined.includes("Live") || combined.includes("Audio Only") || combined.includes("Select")) {
-            return combined.trim();
+          // Skip style, script, and other non-visible elements
+          const tagName = el.tagName?.toLowerCase();
+          if (tagName === "style" || tagName === "script" || tagName === "link") {
+            continue;
           }
-          // Recursively check shadow roots
+
+          // Recursively check shadow roots first
           const shadowRoot = (el as HTMLElement).shadowRoot;
           if (shadowRoot) {
             const result = searchInElement(shadowRoot);
             if (result) return result;
+          }
+
+          // Check for status indicators - use innerText for visible text only
+          const text = (el as HTMLElement).innerText || "";
+          const dataText = (el as HTMLElement).getAttribute?.("data-status-text") || "";
+          const combined = text + " " + dataText;
+
+          // Look for status emoji indicators
+          if (combined.includes("🟢") || combined.includes("🟡") || combined.includes("🔴")) {
+            console.log("[Broadcast Status Debug] Found status in element:", tagName, combined.substring(0, 100));
+            return combined.trim();
+          }
+          // Look for status text patterns
+          if ((combined.includes("Live") || combined.includes("Audio Only") || combined.includes("Select Device")) &&
+              !combined.includes("{") && combined.length < 200) {
+            console.log("[Broadcast Status Debug] Found status text in element:", tagName, combined.substring(0, 100));
+            return combined.trim();
           }
         }
         return "";
