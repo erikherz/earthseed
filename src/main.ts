@@ -1,4 +1,4 @@
-console.log("[Earthseed] Version: 2026-01-12-v2 (@moq/hang - Multi-relay support)");
+console.log("[Earthseed] Version: 2026-01-12-v3 (Fixed broadcast status check)");
 
 // Safari WebSocket fallback - MUST install before hang components load
 // Using our patched version that handles requireUnreliable gracefully
