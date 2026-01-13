@@ -652,7 +652,7 @@ function updateServerStatusPanel() {
     detailsContent += `
       <p><strong>Latency Test Results:</strong></p>
       <table class="latency-results">
-        <thead><tr><th>Server</th><th>Latency</th></tr></thead>
+        <thead><tr><th>Server</th><th>Latency</th><th></th></tr></thead>
         <tbody>
     `;
 
@@ -670,7 +670,16 @@ function updateServerStatusPanel() {
         ? `${result.latency.toFixed(0)}ms`
         : `Failed: ${result.error || "timeout"}`;
       const rowClass = isSelected ? "selected" : (result.latency === null ? "failed" : "");
-      detailsContent += `<tr class="${rowClass}"><td>${result.domain}</td><td>${latencyText}</td></tr>`;
+
+      // Button column: Current (disabled) or Select (clickable) or nothing (failed)
+      let buttonHtml = "";
+      if (isSelected) {
+        buttonHtml = `<button class="relay-select-btn current" disabled>Current</button>`;
+      } else if (result.latency !== null) {
+        buttonHtml = `<button class="relay-select-btn selectable" data-domain="${result.domain}">Select</button>`;
+      }
+
+      detailsContent += `<tr class="${rowClass}"><td>${result.domain}</td><td>${latencyText}</td><td>${buttonHtml}</td></tr>`;
     }
 
     detailsContent += `</tbody></table>`;
@@ -697,6 +706,51 @@ function updateServerStatusPanel() {
       btn.textContent = isHidden ? "Hide" : "Details";
     }
   });
+
+  // Add relay select handlers
+  document.querySelectorAll(".relay-select-btn.selectable").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      const domain = (e.target as HTMLElement).dataset.domain;
+      if (domain) {
+        switchRelay(domain);
+      }
+    });
+  });
+}
+
+// Switch to a different relay server
+function switchRelay(domain: string) {
+  console.log(`Switching relay to: ${domain}`);
+
+  // Update the global RELAY_URL
+  RELAY_URL = `https://${domain}/anon`;
+
+  // Update server status
+  serverStatus.selectedServer = `${domain}/anon`;
+  serverStatus.connected = true;
+
+  // Update the UI
+  updateServerStatusPanel();
+
+  // Update any active hang-publish or hang-watch components
+  const publisher = document.querySelector("hang-publish");
+  if (publisher) {
+    publisher.setAttribute("url", RELAY_URL);
+    console.log(`Updated publisher URL to: ${RELAY_URL}`);
+  }
+
+  const watcher = document.querySelector("hang-watch");
+  if (watcher) {
+    watcher.setAttribute("url", RELAY_URL);
+    console.log(`Updated watcher URL to: ${RELAY_URL}`);
+  }
+
+  // Show a brief notification
+  const notification = document.createElement("div");
+  notification.className = "relay-switch-notification";
+  notification.textContent = `Switched to ${domain}`;
+  document.body.appendChild(notification);
+  setTimeout(() => notification.remove(), 2000);
 }
 
 // Relay URLs for each server

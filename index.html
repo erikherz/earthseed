@@ -734,6 +734,69 @@
             color: #ef4444;
         }
 
+        /* Relay select buttons */
+        .relay-select-btn {
+            padding: 0.25rem 0.5rem;
+            font-size: 0.75rem;
+            border-radius: 4px;
+            border: none;
+            cursor: pointer;
+            transition: background-color 0.2s, opacity 0.2s;
+        }
+        .relay-select-btn.current {
+            background-color: #4b5563;
+            color: #9ca3af;
+            cursor: default;
+        }
+        .relay-select-btn.selectable {
+            background-color: #3b82f6;
+            color: white;
+        }
+        .relay-select-btn.selectable:hover {
+            background-color: #2563eb;
+        }
+
+        /* Light mode button colors */
+        @media (prefers-color-scheme: light) {
+            .relay-select-btn.current {
+                background-color: #e5e7eb;
+                color: #6b7280;
+            }
+            .relay-select-btn.selectable {
+                background-color: #2563eb;
+                color: white;
+            }
+            .relay-select-btn.selectable:hover {
+                background-color: #1d4ed8;
+            }
+        }
+
+        /* Relay switch notification */
+        .relay-switch-notification {
+            position: fixed;
+            bottom: 2rem;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: #22c55e;
+            color: white;
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            font-weight: 500;
+            z-index: 9999;
+            animation: slideUp 0.3s ease-out;
+        }
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateX(-50%) translateY(1rem);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(-50%) translateY(0);
+            }
+        }
+
         /* Playback settings (moved from hang-watch-ui Shadow DOM) */
         .playback-settings {
             display: flex;
