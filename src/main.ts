@@ -652,7 +652,7 @@ function updateServerStatusPanel() {
     detailsContent += `
       <p><strong>Latency Test Results:</strong></p>
       <table class="latency-results">
-        <thead><tr><th>Server</th><th>Latency</th><th></th></tr></thead>
+        <thead><tr><th>Server</th><th>Latency</th></tr></thead>
         <tbody>
     `;
 
@@ -670,16 +670,7 @@ function updateServerStatusPanel() {
         ? `${result.latency.toFixed(0)}ms`
         : `Failed: ${result.error || "timeout"}`;
       const rowClass = isSelected ? "selected" : (result.latency === null ? "failed" : "");
-
-      // Button column: Current (disabled) or Select (clickable) or nothing (failed)
-      let buttonHtml = "";
-      if (isSelected) {
-        buttonHtml = `<button class="relay-select-btn current" disabled>Current</button>`;
-      } else if (result.latency !== null) {
-        buttonHtml = `<button class="relay-select-btn selectable" data-domain="${result.domain}">Select</button>`;
-      }
-
-      detailsContent += `<tr class="${rowClass}"><td>${result.domain}</td><td>${latencyText}</td><td>${buttonHtml}</td></tr>`;
+      detailsContent += `<tr class="${rowClass}"><td>${result.domain}</td><td>${latencyText}</td></tr>`;
     }
 
     detailsContent += `</tbody></table>`;
@@ -707,34 +698,6 @@ function updateServerStatusPanel() {
     }
   });
 
-  // Add relay select handlers
-  document.querySelectorAll(".relay-select-btn.selectable").forEach(btn => {
-    btn.addEventListener("click", (e) => {
-      const domain = (e.target as HTMLElement).dataset.domain;
-      if (domain) {
-        switchRelay(domain);
-      }
-    });
-  });
-}
-
-// Switch to a different relay server
-function switchRelay(domain: string) {
-  console.log(`Switching relay to: ${domain}`);
-
-  // Store the selected relay in sessionStorage so it persists across reload
-  sessionStorage.setItem("earthseed-relay", domain);
-
-  // Show notification then reload
-  const notification = document.createElement("div");
-  notification.className = "relay-switch-notification";
-  notification.textContent = `Switching to ${domain}...`;
-  document.body.appendChild(notification);
-
-  // Reload after brief delay to show notification
-  setTimeout(() => {
-    window.location.reload();
-  }, 500);
 }
 
 // Relay URLs for each server
@@ -2529,26 +2492,10 @@ async function init() {
   // Detect browser support (async for codec checks)
   browserSupport = await detectBrowserSupport();
 
-  // For linode mode, check for manually selected relay first, then race
+  // For linode mode, race to find the best relay server
   if (RELAY_MODE === "linode") {
-    const savedRelay = sessionStorage.getItem("earthseed-relay");
-    if (savedRelay && LINODE_RELAYS.includes(savedRelay)) {
-      // Use manually selected relay
-      console.log(`Using saved relay preference: ${savedRelay}`);
-      RELAY_URL = `https://${savedRelay}/anon`;
-      serverStatus.selectedServer = `${savedRelay}/anon`;
-      serverStatus.connected = true;
-      // Run race in background to populate latency results, then update UI
-      selectBestLinodeRelay().then(() => {
-        // Override the auto-selected server with our saved preference
-        serverStatus.selectedServer = `${savedRelay}/anon`;
-        updateServerStatusPanel();
-      }).catch(() => {});
-    } else {
-      // Race to find best relay
-      const bestRelay = await selectBestLinodeRelay();
-      RELAY_URL = `https://${bestRelay}/anon`;
-    }
+    const bestRelay = await selectBestLinodeRelay();
+    RELAY_URL = `https://${bestRelay}/anon`;
   } else {
     // Luke and cloudflare-hybrid modes use fixed servers
     serverStatus.connected = true;
