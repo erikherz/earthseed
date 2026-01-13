@@ -722,35 +722,19 @@ function updateServerStatusPanel() {
 function switchRelay(domain: string) {
   console.log(`Switching relay to: ${domain}`);
 
-  // Update the global RELAY_URL
-  RELAY_URL = `https://${domain}/anon`;
+  // Store the selected relay in sessionStorage so it persists across reload
+  sessionStorage.setItem("earthseed-relay", domain);
 
-  // Update server status
-  serverStatus.selectedServer = `${domain}/anon`;
-  serverStatus.connected = true;
-
-  // Update the UI
-  updateServerStatusPanel();
-
-  // Update any active hang-publish or hang-watch components
-  const publisher = document.querySelector("hang-publish");
-  if (publisher) {
-    publisher.setAttribute("url", RELAY_URL);
-    console.log(`Updated publisher URL to: ${RELAY_URL}`);
-  }
-
-  const watcher = document.querySelector("hang-watch");
-  if (watcher) {
-    watcher.setAttribute("url", RELAY_URL);
-    console.log(`Updated watcher URL to: ${RELAY_URL}`);
-  }
-
-  // Show a brief notification
+  // Show notification then reload
   const notification = document.createElement("div");
   notification.className = "relay-switch-notification";
-  notification.textContent = `Switched to ${domain}`;
+  notification.textContent = `Switching to ${domain}...`;
   document.body.appendChild(notification);
-  setTimeout(() => notification.remove(), 2000);
+
+  // Reload after brief delay to show notification
+  setTimeout(() => {
+    window.location.reload();
+  }, 500);
 }
 
 // Relay URLs for each server
@@ -2545,10 +2529,26 @@ async function init() {
   // Detect browser support (async for codec checks)
   browserSupport = await detectBrowserSupport();
 
-  // For linode mode, race to find the best relay server
+  // For linode mode, check for manually selected relay first, then race
   if (RELAY_MODE === "linode") {
-    const bestRelay = await selectBestLinodeRelay();
-    RELAY_URL = `https://${bestRelay}/anon`;
+    const savedRelay = sessionStorage.getItem("earthseed-relay");
+    if (savedRelay && LINODE_RELAYS.includes(savedRelay)) {
+      // Use manually selected relay
+      console.log(`Using saved relay preference: ${savedRelay}`);
+      RELAY_URL = `https://${savedRelay}/anon`;
+      serverStatus.selectedServer = `${savedRelay}/anon`;
+      serverStatus.connected = true;
+      // Run race in background to populate latency results, then update UI
+      selectBestLinodeRelay().then(() => {
+        // Override the auto-selected server with our saved preference
+        serverStatus.selectedServer = `${savedRelay}/anon`;
+        updateServerStatusPanel();
+      }).catch(() => {});
+    } else {
+      // Race to find best relay
+      const bestRelay = await selectBestLinodeRelay();
+      RELAY_URL = `https://${bestRelay}/anon`;
+    }
   } else {
     // Luke and cloudflare-hybrid modes use fixed servers
     serverStatus.connected = true;
