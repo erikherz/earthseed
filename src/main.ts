@@ -563,7 +563,6 @@ function updateBrowserSupportPanel() {
 
 // Race requests to find the lowest-latency Linode relay server
 async function selectBestLinodeRelay(): Promise<string> {
-  const testPath = "/fingerprint";
   const timeout = 5000; // 5 second timeout per server
 
   // Track all results for the status panel
@@ -579,22 +578,19 @@ async function selectBestLinodeRelay(): Promise<string> {
     const startTime = performance.now();
 
     try {
-      // Earthseed relays use port 443 for both relay and fingerprint
-      const response = await fetch(`https://${domain}${testPath}`, {
+      // Earthseed relays use port 443 - just test connectivity (any response is fine)
+      const response = await fetch(`https://${domain}/`, {
         signal: controller.signal,
         cache: "no-store",
+        method: "HEAD", // Faster than GET
       });
       clearTimeout(timeoutId);
 
-      if (response.ok) {
-        const latency = performance.now() - startTime;
-        results[index].latency = latency;
-        console.log(`Relay ${domain} responded in ${latency.toFixed(0)}ms`);
-        return { domain, latency };
-      }
-      const error = `HTTP ${response.status}`;
-      results[index].error = error;
-      throw new Error(error);
+      // Any response means the server is reachable - we just care about latency
+      const latency = performance.now() - startTime;
+      results[index].latency = latency;
+      console.log(`Relay ${domain} responded in ${latency.toFixed(0)}ms (HTTP ${response.status})`);
+      return { domain, latency };
     } catch (error) {
       clearTimeout(timeoutId);
       if (!results[index].error) {
