@@ -227,13 +227,12 @@ function initDeviceButtonFlipper() {
 }
 initDeviceButtonFlipper();
 
-// Safari fallback relay servers (WebSocket-enabled)
-// COMMENTED OUT: Using Luke's cdn.moq.dev which supports both WebTransport and WebSocket
-// const FALLBACK_RELAYS = [
-//   "us-central.earthseed.live",
-//   "eu-central.earthseed.live",
-//   "ap-south.earthseed.live",
-// ];
+// Linode relay servers for racing (used in linode mode)
+const LINODE_RELAYS = [
+  "us-central.earthseed.live",
+  "eu-central.earthseed.live",
+  "ap-south.earthseed.live",
+];
 
 // Server status tracking
 interface RelayResult {
@@ -562,80 +561,80 @@ function updateBrowserSupportPanel() {
   });
 }
 
-// COMMENTED OUT: Race requests to find the lowest-latency relay server
-// Using Luke's cdn.moq.dev which supports both WebTransport and WebSocket
-// async function selectBestFallbackRelay(): Promise<string> {
-//   const testPath = "/fingerprint";
-//   const timeout = 5000; // 5 second timeout per server
-//
-//   // Track all results for the status panel
-//   const results: RelayResult[] = FALLBACK_RELAYS.map(domain => ({
-//     domain,
-//     latency: null,
-//   }));
-//
-//   // Create a promise for each server that resolves with result
-//   const racePromises = FALLBACK_RELAYS.map(async (domain, index) => {
-//     const controller = new AbortController();
-//     const timeoutId = setTimeout(() => controller.abort(), timeout);
-//     const startTime = performance.now();
-//
-//     try {
-//       const response = await fetch(`https://${domain}:8888${testPath}`, {
-//         signal: controller.signal,
-//         cache: "no-store",
-//       });
-//       clearTimeout(timeoutId);
-//
-//       if (response.ok) {
-//         const latency = performance.now() - startTime;
-//         results[index].latency = latency;
-//         console.log(`Relay ${domain} responded in ${latency.toFixed(0)}ms`);
-//         return { domain, latency };
-//       }
-//       const error = `HTTP ${response.status}`;
-//       results[index].error = error;
-//       throw new Error(error);
-//     } catch (error) {
-//       clearTimeout(timeoutId);
-//       if (!results[index].error) {
-//         results[index].error = error instanceof Error ? error.message : "Failed";
-//       }
-//       console.warn(`Relay ${domain} failed:`, error);
-//       throw error;
-//     }
-//   });
-//
-//   // Wait a bit for all results to come in (for display purposes)
-//   // but use Promise.any to select the winner quickly
-//   const winnerPromise = Promise.any(racePromises);
-//
-//   // Also wait for all to settle (with a shorter timeout for UI)
-//   const allSettledPromise = Promise.allSettled(racePromises);
-//
-//   try {
-//     const winner = await winnerPromise;
-//     console.log(`Selected relay: ${winner.domain} (${winner.latency.toFixed(0)}ms)`);
-//
-//     // Wait briefly for other results to populate (for status panel)
-//     await Promise.race([
-//       allSettledPromise,
-//       new Promise(resolve => setTimeout(resolve, 1000)),
-//     ]);
-//
-//     serverStatus.raceResults = results;
-//     serverStatus.selectedServer = winner.domain;
-//     serverStatus.connected = true;
-//
-//     return winner.domain;
-//   } catch {
-//     console.warn("All relay servers failed latency test, using default");
-//     serverStatus.raceResults = results;
-//     serverStatus.selectedServer = FALLBACK_RELAYS[0];
-//     serverStatus.connected = false;
-//     return FALLBACK_RELAYS[0];
-//   }
-// }
+// Race requests to find the lowest-latency Linode relay server
+async function selectBestLinodeRelay(): Promise<string> {
+  const testPath = "/fingerprint";
+  const timeout = 5000; // 5 second timeout per server
+
+  // Track all results for the status panel
+  const results: RelayResult[] = LINODE_RELAYS.map(domain => ({
+    domain,
+    latency: null,
+  }));
+
+  // Create a promise for each server that resolves with result
+  const racePromises = LINODE_RELAYS.map(async (domain, index) => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
+    const startTime = performance.now();
+
+    try {
+      // Earthseed relays use port 443 for both relay and fingerprint
+      const response = await fetch(`https://${domain}${testPath}`, {
+        signal: controller.signal,
+        cache: "no-store",
+      });
+      clearTimeout(timeoutId);
+
+      if (response.ok) {
+        const latency = performance.now() - startTime;
+        results[index].latency = latency;
+        console.log(`Relay ${domain} responded in ${latency.toFixed(0)}ms`);
+        return { domain, latency };
+      }
+      const error = `HTTP ${response.status}`;
+      results[index].error = error;
+      throw new Error(error);
+    } catch (error) {
+      clearTimeout(timeoutId);
+      if (!results[index].error) {
+        results[index].error = error instanceof Error ? error.message : "Failed";
+      }
+      console.warn(`Relay ${domain} failed:`, error);
+      throw error;
+    }
+  });
+
+  // Wait a bit for all results to come in (for display purposes)
+  // but use Promise.any to select the winner quickly
+  const winnerPromise = Promise.any(racePromises);
+
+  // Also wait for all to settle (with a shorter timeout for UI)
+  const allSettledPromise = Promise.allSettled(racePromises);
+
+  try {
+    const winner = await winnerPromise;
+    console.log(`Selected relay: ${winner.domain} (${winner.latency.toFixed(0)}ms)`);
+
+    // Wait briefly for other results to populate (for status panel)
+    await Promise.race([
+      allSettledPromise,
+      new Promise(resolve => setTimeout(resolve, 1000)),
+    ]);
+
+    serverStatus.raceResults = results;
+    serverStatus.selectedServer = `${winner.domain}/anon`;
+    serverStatus.connected = true;
+
+    return winner.domain;
+  } catch {
+    console.warn("All relay servers failed latency test, using default");
+    serverStatus.raceResults = results;
+    serverStatus.selectedServer = `${LINODE_RELAYS[0]}/anon`;
+    serverStatus.connected = false;
+    return LINODE_RELAYS[0];
+  }
+}
 
 // Update the server status panel UI
 function updateServerStatusPanel() {
@@ -652,7 +651,8 @@ function updateServerStatusPanel() {
     <p><strong>Server:</strong> ${serverStatus.selectedServer}</p>
   `;
 
-  if (serverStatus.mode === "websocket" && serverStatus.raceResults.length > 0) {
+  // Show race results if we have them (linode mode with racing)
+  if (serverStatus.raceResults.length > 0) {
     detailsContent += `
       <p><strong>Latency Test Results:</strong></p>
       <table class="latency-results">
@@ -669,7 +669,7 @@ function updateServerStatusPanel() {
     });
 
     for (const result of sorted) {
-      const isSelected = result.domain === serverStatus.selectedServer;
+      const isSelected = serverStatus.selectedServer.includes(result.domain);
       const latencyText = result.latency !== null
         ? `${result.latency.toFixed(0)}ms`
         : `Failed: ${result.error || "timeout"}`;
@@ -2495,18 +2495,14 @@ async function init() {
   // Detect browser support (async for codec checks)
   browserSupport = await detectBrowserSupport();
 
-  // COMMENTED OUT: Race test for earthseed relay servers
-  // Using Luke's cdn.moq.dev which supports both WebTransport and WebSocket
-  // if (needsPolyfill) {
-  //   const bestRelay = await selectBestFallbackRelay();
-  //   RELAY_URL = `https://${bestRelay}`;
-  // } else {
-  //   // WebTransport mode - assume connected
-  //   serverStatus.connected = true;
-  // }
-
-  // cdn.moq.dev supports both WebTransport and WebSocket - no race needed
-  serverStatus.connected = true;
+  // For linode mode, race to find the best relay server
+  if (RELAY_MODE === "linode") {
+    const bestRelay = await selectBestLinodeRelay();
+    RELAY_URL = `https://${bestRelay}/anon`;
+  } else {
+    // Luke and cloudflare-hybrid modes use fixed servers
+    serverStatus.connected = true;
+  }
 
   // Update status panels
   updateBrowserSupportPanel();
