@@ -71,11 +71,12 @@ export default {
     const isStatsPage = url.pathname === "/stats";
     const isStatsMapPage = url.pathname === "/stats/map";
     const isGreetPage = url.pathname === "/greet";
+    const isScrollPage = url.pathname === "/scroll";
     const isStreamStatsPage = /^\/[a-z0-9]{5}\/stats$/.test(url.pathname);
     const isStreamStatsMapPage = /^\/[a-z0-9]{5}\/stats\/map$/.test(url.pathname);
     const isClearDataPage = url.pathname === "/cleardata";
 
-    if (isStreamId || isStatsPage || isStatsMapPage || isGreetPage || isStreamStatsPage || isStreamStatsMapPage || isClearDataPage) {
+    if (isStreamId || isStatsPage || isStatsMapPage || isGreetPage || isScrollPage || isStreamStatsPage || isStreamStatsMapPage || isClearDataPage) {
       const indexUrl = new URL("/index.html", url.origin);
       return env.ASSETS.fetch(new Request(indexUrl.toString(), {
         method: request.method,

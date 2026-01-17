@@ -838,7 +838,7 @@ import {
   type BroadcastOrigin,
 } from "./auth";
 
-type View = "broadcast" | "watch" | "stats" | "stats-map" | "greet" | "stream-stats" | "stream-stats-map" | "admin";
+type View = "broadcast" | "watch" | "stats" | "stats-map" | "greet" | "scroll" | "stream-stats" | "stream-stats-map" | "admin";
 
 // Generate a random stream ID (5 lowercase alphanumeric characters)
 function generateRandomId(): string {
@@ -882,6 +882,11 @@ async function getRouteInfo(): Promise<{ view: View; streamId: string }> {
   // Greet view: /greet (broadcasters map)
   if (path === "/greet") {
     return { view: "greet", streamId: "" };
+  }
+
+  // Scroll view: /scroll (TikTok-style viewer)
+  if (path === "/scroll") {
+    return { view: "scroll", streamId: "" };
   }
 
   // Admin view: /cleardata
@@ -1720,6 +1725,365 @@ async function initWatchView(streamId: string, user: User | null) {
   }
 }
 
+// Scroll view state
+interface ScrollBroadcast {
+  stream_id: string;
+  user_name: string;
+  started_at: string;
+}
+
+// Initialize scroll view (TikTok-style)
+async function initScrollView() {
+  console.log("Earthseed.Live Scroll View");
+
+  // Hide all other views
+  document.getElementById("broadcast-view")?.classList.add("hidden");
+  document.getElementById("watch-view")?.classList.add("hidden");
+  document.getElementById("scroll-view")?.classList.remove("hidden");
+
+  // Hide header and footer for immersive experience
+  const header = document.querySelector("header");
+  const footer = document.querySelector("footer");
+  if (header) header.classList.add("hidden");
+  if (footer) footer.classList.add("hidden");
+
+  // State management
+  let upcomingStreams: ScrollBroadcast[] = [];
+  let historyStreams: ScrollBroadcast[] = []; // Last 10 watched streams
+  let currentStream: ScrollBroadcast | null = null;
+  let currentIndex = -1; // -1 means we're in upcomingStreams[0], negative = history
+  const MAX_HISTORY = 10;
+
+  // DOM elements
+  const scrollView = document.getElementById("scroll-view")!;
+  const videoWrapper = scrollView.querySelector(".scroll-video-wrapper") as HTMLElement;
+  const watcher = document.getElementById("scroll-watcher") as HTMLElement;
+  const streamIdEl = scrollView.querySelector(".scroll-stream-id") as HTMLElement;
+  const broadcasterEl = scrollView.querySelector(".scroll-broadcaster") as HTMLElement;
+  const noStreamsEl = scrollView.querySelector(".scroll-no-streams") as HTMLElement;
+  const hintEl = scrollView.querySelector(".scroll-hint") as HTMLElement;
+
+  // Fetch live broadcasts
+  async function fetchLiveBroadcasts(): Promise<ScrollBroadcast[]> {
+    try {
+      const response = await fetch("/api/stats/greet");
+      if (!response.ok) return [];
+      const data = await response.json();
+      return (data.broadcasts || []).map((b: any) => ({
+        stream_id: b.stream_id,
+        user_name: b.user_name || "Anonymous",
+        started_at: b.started_at,
+      }));
+    } catch (err) {
+      console.error("Failed to fetch broadcasts:", err);
+      return [];
+    }
+  }
+
+  // Load a stream into the player
+  function loadStream(stream: ScrollBroadcast) {
+    currentStream = stream;
+    const relayConfig = getRelayConfig(stream.stream_id);
+
+    console.log(`[Scroll] Loading stream: ${stream.stream_id}`, {
+      url: relayConfig.url,
+      name: relayConfig.name,
+    });
+
+    watcher.setAttribute("url", relayConfig.url);
+    watcher.setAttribute("name", relayConfig.name);
+
+    // Update UI
+    streamIdEl.textContent = stream.stream_id;
+    broadcasterEl.textContent = stream.user_name;
+    noStreamsEl.classList.add("hidden");
+    hintEl.style.opacity = "1";
+
+    // Update hints based on available navigation
+    const hintUp = scrollView.querySelector(".scroll-hint-up") as HTMLElement;
+    const hintDown = scrollView.querySelector(".scroll-hint-down") as HTMLElement;
+
+    // Can go to next (swipe up) if there are more upcoming streams
+    const canGoNext = upcomingStreams.length > 1;
+    // Can go back (swipe down) if there's history
+    const canGoBack = historyStreams.length > 0;
+
+    if (hintUp) hintUp.style.display = canGoNext ? "block" : "none";
+    if (hintDown) hintDown.style.display = canGoBack ? "block" : "none";
+
+    updatePositionIndicator();
+  }
+
+  // Show no streams available
+  function showNoStreams() {
+    currentStream = null;
+    streamIdEl.textContent = "";
+    broadcasterEl.textContent = "";
+    noStreamsEl.classList.remove("hidden");
+    hintEl.style.opacity = "0";
+  }
+
+  // Update position indicator dots
+  function updatePositionIndicator() {
+    let indicator = scrollView.querySelector(".scroll-position-indicator");
+    if (!indicator) {
+      indicator = document.createElement("div");
+      indicator.className = "scroll-position-indicator";
+      videoWrapper.appendChild(indicator);
+    }
+
+    // Show dots for history (max 10) + current + upcoming (max 5 shown)
+    const historyToShow = historyStreams.slice(-5); // Show last 5 of history
+    const upcomingToShow = upcomingStreams.slice(0, 5); // Show first 5 of upcoming
+
+    let dotsHtml = "";
+
+    // History dots
+    historyToShow.forEach((_, i) => {
+      const isActive = currentIndex < 0 && (historyStreams.length + currentIndex) === (historyStreams.length - historyToShow.length + i);
+      dotsHtml += `<div class="scroll-position-dot history ${isActive ? "active" : ""}" title="Previous stream"></div>`;
+    });
+
+    // Current/upcoming dots
+    upcomingToShow.forEach((stream, i) => {
+      const isActive = currentIndex >= 0 && i === currentIndex;
+      const isCurrent = i === 0 && currentIndex < 0 && historyStreams.length === 0;
+      dotsHtml += `<div class="scroll-position-dot ${isActive || isCurrent ? "active" : ""}" title="${stream.stream_id}"></div>`;
+    });
+
+    indicator.innerHTML = dotsHtml;
+  }
+
+  // Navigate to next stream (swipe up)
+  async function goToNextStream() {
+    if (upcomingStreams.length <= 1) {
+      // No more upcoming streams, try to refresh
+      const newStreams = await fetchLiveBroadcasts();
+      if (newStreams.length > 0) {
+        // Add new streams that aren't already in our list or history
+        const existingIds = new Set([
+          ...upcomingStreams.map(s => s.stream_id),
+          ...historyStreams.map(s => s.stream_id),
+        ]);
+        const trulyNew = newStreams.filter(s => !existingIds.has(s.stream_id));
+        upcomingStreams.push(...trulyNew);
+      }
+
+      if (upcomingStreams.length <= 1) {
+        console.log("[Scroll] No more streams available");
+        return false;
+      }
+    }
+
+    // Move current to history
+    if (currentStream) {
+      historyStreams.push(currentStream);
+      if (historyStreams.length > MAX_HISTORY) {
+        historyStreams.shift();
+      }
+    }
+
+    // Remove current from upcoming and load next
+    upcomingStreams.shift();
+    currentIndex = 0;
+
+    if (upcomingStreams.length > 0) {
+      loadStream(upcomingStreams[0]);
+      return true;
+    }
+    return false;
+  }
+
+  // Navigate to previous stream (swipe down)
+  function goToPreviousStream(): boolean {
+    if (historyStreams.length === 0) {
+      console.log("[Scroll] No history to go back to");
+      return false;
+    }
+
+    // Put current stream back at the front of upcoming
+    if (currentStream) {
+      upcomingStreams.unshift(currentStream);
+    }
+
+    // Pop from history
+    const previous = historyStreams.pop()!;
+    currentIndex = -1; // Indicate we're viewing from history
+    loadStream(previous);
+    return true;
+  }
+
+  // Touch/swipe handling
+  let touchStartY = 0;
+  let touchStartTime = 0;
+  let isSwiping = false;
+
+  videoWrapper.addEventListener("touchstart", (e) => {
+    touchStartY = e.touches[0].clientY;
+    touchStartTime = Date.now();
+    isSwiping = true;
+    videoWrapper.classList.remove("swiping-up", "swiping-down");
+  }, { passive: true });
+
+  videoWrapper.addEventListener("touchmove", (e) => {
+    if (!isSwiping) return;
+
+    const deltaY = touchStartY - e.touches[0].clientY;
+    const threshold = 30;
+
+    if (deltaY > threshold) {
+      videoWrapper.classList.add("swiping-up");
+      videoWrapper.classList.remove("swiping-down");
+    } else if (deltaY < -threshold) {
+      videoWrapper.classList.add("swiping-down");
+      videoWrapper.classList.remove("swiping-up");
+    } else {
+      videoWrapper.classList.remove("swiping-up", "swiping-down");
+    }
+  }, { passive: true });
+
+  videoWrapper.addEventListener("touchend", async (e) => {
+    if (!isSwiping) return;
+    isSwiping = false;
+
+    const deltaY = touchStartY - (e.changedTouches[0]?.clientY || touchStartY);
+    const deltaTime = Date.now() - touchStartTime;
+    const velocity = Math.abs(deltaY) / deltaTime;
+
+    // Swipe threshold: either distance > 100px or velocity > 0.5px/ms
+    const isSwipe = Math.abs(deltaY) > 100 || velocity > 0.5;
+
+    if (isSwipe) {
+      if (deltaY > 0) {
+        // Swipe up - go to next stream
+        videoWrapper.classList.add("exiting-up");
+        const success = await goToNextStream();
+        if (success) {
+          setTimeout(() => {
+            videoWrapper.classList.remove("exiting-up");
+            videoWrapper.classList.add("entering-from-bottom");
+            requestAnimationFrame(() => {
+              videoWrapper.classList.remove("entering-from-bottom");
+            });
+          }, 300);
+        } else {
+          videoWrapper.classList.remove("exiting-up");
+        }
+      } else {
+        // Swipe down - go to previous stream
+        videoWrapper.classList.add("exiting-down");
+        const success = goToPreviousStream();
+        if (success) {
+          setTimeout(() => {
+            videoWrapper.classList.remove("exiting-down");
+            videoWrapper.classList.add("entering-from-top");
+            requestAnimationFrame(() => {
+              videoWrapper.classList.remove("entering-from-top");
+            });
+          }, 300);
+        } else {
+          videoWrapper.classList.remove("exiting-down");
+        }
+      }
+    }
+
+    videoWrapper.classList.remove("swiping-up", "swiping-down");
+  });
+
+  // Keyboard navigation (for desktop)
+  document.addEventListener("keydown", async (e) => {
+    if (e.key === "ArrowUp" || e.key === "k") {
+      e.preventDefault();
+      videoWrapper.classList.add("exiting-up");
+      const success = await goToNextStream();
+      setTimeout(() => {
+        videoWrapper.classList.remove("exiting-up");
+      }, 300);
+    } else if (e.key === "ArrowDown" || e.key === "j") {
+      e.preventDefault();
+      videoWrapper.classList.add("exiting-down");
+      goToPreviousStream();
+      setTimeout(() => {
+        videoWrapper.classList.remove("exiting-down");
+      }, 300);
+    }
+  });
+
+  // Mouse wheel navigation
+  let wheelTimeout: number | null = null;
+  videoWrapper.addEventListener("wheel", async (e) => {
+    e.preventDefault();
+
+    // Debounce wheel events
+    if (wheelTimeout) return;
+    wheelTimeout = window.setTimeout(() => {
+      wheelTimeout = null;
+    }, 500);
+
+    if (e.deltaY > 0) {
+      // Scroll down = swipe up = next stream
+      await goToNextStream();
+    } else if (e.deltaY < 0) {
+      // Scroll up = swipe down = previous stream
+      goToPreviousStream();
+    }
+  }, { passive: false });
+
+  // Initial load
+  const broadcasts = await fetchLiveBroadcasts();
+
+  if (broadcasts.length === 0) {
+    showNoStreams();
+  } else {
+    // Sort by started_at descending (most recent first)
+    broadcasts.sort((a, b) =>
+      new Date(b.started_at).getTime() - new Date(a.started_at).getTime()
+    );
+    upcomingStreams = broadcasts;
+    currentIndex = 0;
+    loadStream(upcomingStreams[0]);
+  }
+
+  // Periodic refresh of stream list
+  const refreshInterval = setInterval(async () => {
+    const newBroadcasts = await fetchLiveBroadcasts();
+    if (newBroadcasts.length > 0) {
+      // Add new streams that aren't already in our lists
+      const existingIds = new Set([
+        ...upcomingStreams.map(s => s.stream_id),
+        ...historyStreams.map(s => s.stream_id),
+        currentStream?.stream_id,
+      ].filter(Boolean));
+
+      const trulyNew = newBroadcasts.filter(s => !existingIds.has(s.stream_id));
+      if (trulyNew.length > 0) {
+        console.log(`[Scroll] Found ${trulyNew.length} new streams`);
+        // Sort new streams by started_at (most recent first)
+        trulyNew.sort((a, b) =>
+          new Date(b.started_at).getTime() - new Date(a.started_at).getTime()
+        );
+        // Add at position 1 (after current) to be next in queue
+        upcomingStreams.splice(1, 0, ...trulyNew);
+        updatePositionIndicator();
+      }
+
+      // If we had no streams before, load the first one
+      if (!currentStream && newBroadcasts.length > 0) {
+        newBroadcasts.sort((a, b) =>
+          new Date(b.started_at).getTime() - new Date(a.started_at).getTime()
+        );
+        upcomingStreams = newBroadcasts;
+        loadStream(upcomingStreams[0]);
+      }
+    }
+  }, 15000); // Check every 15 seconds
+
+  // Cleanup on page unload
+  window.addEventListener("beforeunload", () => {
+    clearInterval(refreshInterval);
+  });
+}
+
 // Initialize stats view
 async function initStatsView(user: User | null) {
   console.log("Earthseed.Live Stats");
@@ -2522,6 +2886,8 @@ async function init() {
     await initStatsMapView(user);
   } else if (view === "greet") {
     await initGreetView();
+  } else if (view === "scroll") {
+    await initScrollView();
   } else if (view === "stream-stats") {
     await initStreamStatsView(streamId);
   } else if (view === "stream-stats-map") {

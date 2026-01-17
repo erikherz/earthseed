@@ -1189,6 +1189,174 @@
         hang-watch > div > div {
             justify-content: center !important;
         }
+
+        /* Scroll View (TikTok-style) */
+        #scroll-view {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: #000;
+            z-index: 1000;
+        }
+        .scroll-container {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            touch-action: pan-y;
+        }
+        .scroll-video-wrapper {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            max-width: 100vw;
+            max-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.3s ease-out, opacity 0.3s ease-out;
+        }
+        .scroll-video-wrapper.swiping-up {
+            transform: translateY(-30px);
+            opacity: 0.7;
+        }
+        .scroll-video-wrapper.swiping-down {
+            transform: translateY(30px);
+            opacity: 0.7;
+        }
+        .scroll-video-wrapper.exiting-up {
+            transform: translateY(-100%);
+            opacity: 0;
+        }
+        .scroll-video-wrapper.exiting-down {
+            transform: translateY(100%);
+            opacity: 0;
+        }
+        .scroll-video-wrapper.entering-from-bottom {
+            transform: translateY(100%);
+            opacity: 0;
+        }
+        .scroll-video-wrapper.entering-from-top {
+            transform: translateY(-100%);
+            opacity: 0;
+        }
+        #scroll-view hang-watch {
+            width: 100%;
+            height: 100%;
+        }
+        #scroll-view hang-watch canvas {
+            width: 100%;
+            height: 100%;
+            max-width: 100vw;
+            max-height: 100vh;
+            object-fit: contain;
+            border-radius: 0;
+            background: #000;
+        }
+        .scroll-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 1rem;
+        }
+        .scroll-stream-info {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+            align-self: flex-start;
+            background: rgba(0, 0, 0, 0.6);
+            padding: 0.5rem 0.75rem;
+            border-radius: 8px;
+            pointer-events: auto;
+        }
+        .scroll-stream-id {
+            font-family: monospace;
+            font-size: 1.25rem;
+            color: #22c55e;
+            font-weight: 600;
+        }
+        .scroll-broadcaster {
+            font-size: 0.875rem;
+            color: #a3a3a3;
+        }
+        .scroll-hint {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.5rem;
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 0.75rem;
+            transition: opacity 0.3s ease;
+        }
+        .scroll-hint-up::before {
+            content: '';
+            display: block;
+            width: 0;
+            height: 0;
+            border-left: 8px solid transparent;
+            border-right: 8px solid transparent;
+            border-bottom: 8px solid rgba(255, 255, 255, 0.5);
+            margin: 0 auto 0.25rem;
+        }
+        .scroll-hint-down::after {
+            content: '';
+            display: block;
+            width: 0;
+            height: 0;
+            border-left: 8px solid transparent;
+            border-right: 8px solid transparent;
+            border-top: 8px solid rgba(255, 255, 255, 0.5);
+            margin: 0.25rem auto 0;
+        }
+        .scroll-no-streams {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: #a3a3a3;
+        }
+        .scroll-no-streams p {
+            margin: 0.5rem 0;
+        }
+        .scroll-no-streams .scroll-checking {
+            font-size: 0.875rem;
+            color: #737373;
+        }
+        .scroll-position-indicator {
+            position: absolute;
+            right: 1rem;
+            top: 50%;
+            transform: translateY(-50%);
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            pointer-events: none;
+        }
+        .scroll-position-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.3);
+            transition: background 0.2s ease, transform 0.2s ease;
+        }
+        .scroll-position-dot.active {
+            background: #22c55e;
+            transform: scale(1.3);
+        }
+        .scroll-position-dot.history {
+            background: rgba(255, 255, 255, 0.5);
+        }
     </style>
 </head>
 <body>
@@ -1289,6 +1457,31 @@
                     </hang-watch>
                 </hang-watch-ui>
             </section>
+        </div>
+
+        <!-- Scroll View (TikTok-style) -->
+        <div id="scroll-view" class="hidden">
+            <div class="scroll-container">
+                <div class="scroll-video-wrapper">
+                    <hang-watch id="scroll-watcher" muted>
+                        <canvas></canvas>
+                    </hang-watch>
+                    <div class="scroll-overlay">
+                        <div class="scroll-stream-info">
+                            <span class="scroll-stream-id"></span>
+                            <span class="scroll-broadcaster"></span>
+                        </div>
+                        <div class="scroll-hint">
+                            <span class="scroll-hint-up">Swipe up for next</span>
+                            <span class="scroll-hint-down">Swipe down for previous</span>
+                        </div>
+                    </div>
+                    <div class="scroll-no-streams hidden">
+                        <p>No live streams available</p>
+                        <p class="scroll-checking">Checking for streams...</p>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <footer>
