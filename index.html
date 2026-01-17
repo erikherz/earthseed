@@ -1357,6 +1357,38 @@
         .scroll-position-dot.history {
             background: rgba(255, 255, 255, 0.5);
         }
+
+        /* Deck positions for preloaded streams */
+        .scroll-deck-current {
+            width: 100%;
+            height: 100%;
+        }
+        .scroll-deck-current canvas {
+            width: 100%;
+            height: 100%;
+            max-width: 100vw;
+            max-height: 100vh;
+            object-fit: contain;
+            background: #000;
+        }
+        .scroll-deck-prev,
+        .scroll-deck-next {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            opacity: 0;
+            /* Keep them rendering but invisible so they stay connected */
+        }
+        .scroll-deck-prev canvas,
+        .scroll-deck-next canvas {
+            width: 100%;
+            height: 100%;
+            max-width: 100vw;
+            max-height: 100vh;
+            object-fit: contain;
+            background: #000;
+        }
     </style>
 </head>
 <body>

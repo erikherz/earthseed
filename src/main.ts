@@ -1732,7 +1732,7 @@ interface ScrollBroadcast {
   started_at: string;
 }
 
-// Initialize scroll view (TikTok-style)
+// Initialize scroll view (TikTok-style) with preloading
 async function initScrollView() {
   console.log("Earthseed.Live Scroll View");
 
@@ -1751,17 +1751,47 @@ async function initScrollView() {
   let upcomingStreams: ScrollBroadcast[] = [];
   let historyStreams: ScrollBroadcast[] = []; // Last 10 watched streams
   let currentStream: ScrollBroadcast | null = null;
-  let currentIndex = -1; // -1 means we're in upcomingStreams[0], negative = history
   const MAX_HISTORY = 10;
+
+  // Deck of preloaded video elements: prev, current, next
+  interface DeckSlot {
+    element: HTMLElement | null;
+    stream: ScrollBroadcast | null;
+  }
+  const deck: { prev: DeckSlot; current: DeckSlot; next: DeckSlot } = {
+    prev: { element: null, stream: null },
+    current: { element: null, stream: null },
+    next: { element: null, stream: null },
+  };
 
   // DOM elements
   const scrollView = document.getElementById("scroll-view")!;
   const videoWrapper = scrollView.querySelector(".scroll-video-wrapper") as HTMLElement;
-  const watcher = document.getElementById("scroll-watcher") as HTMLElement;
   const streamIdEl = scrollView.querySelector(".scroll-stream-id") as HTMLElement;
   const broadcasterEl = scrollView.querySelector(".scroll-broadcaster") as HTMLElement;
   const noStreamsEl = scrollView.querySelector(".scroll-no-streams") as HTMLElement;
   const hintEl = scrollView.querySelector(".scroll-hint") as HTMLElement;
+
+  // Remove the static hang-watch from HTML, we'll create them dynamically
+  const staticWatcher = document.getElementById("scroll-watcher");
+  if (staticWatcher) staticWatcher.remove();
+
+  // Create a hang-watch element for a stream
+  function createWatcher(stream: ScrollBroadcast, position: "prev" | "current" | "next"): HTMLElement {
+    const relayConfig = getRelayConfig(stream.stream_id);
+
+    const watcher = document.createElement("hang-watch");
+    watcher.className = `scroll-deck-${position}`;
+    watcher.setAttribute("muted", "");
+    watcher.setAttribute("url", relayConfig.url);
+    watcher.setAttribute("name", relayConfig.name);
+
+    const canvas = document.createElement("canvas");
+    watcher.appendChild(canvas);
+
+    console.log(`[Scroll] Preloading ${position}: ${stream.stream_id}`);
+    return watcher;
+  }
 
   // Fetch live broadcasts
   async function fetchLiveBroadcasts(): Promise<ScrollBroadcast[]> {
@@ -1780,36 +1810,71 @@ async function initScrollView() {
     }
   }
 
-  // Load a stream into the player
-  function loadStream(stream: ScrollBroadcast) {
-    currentStream = stream;
-    const relayConfig = getRelayConfig(stream.stream_id);
-
-    console.log(`[Scroll] Loading stream: ${stream.stream_id}`, {
-      url: relayConfig.url,
-      name: relayConfig.name,
-    });
-
-    // To switch streams, we need to replace the hang-watch element
-    // Just changing attributes doesn't trigger a reconnection
-    const videoWrapper = scrollView.querySelector(".scroll-video-wrapper")!;
-    const oldWatcher = document.getElementById("scroll-watcher");
-
-    if (oldWatcher) {
-      // Create a new hang-watch element
-      const newWatcher = document.createElement("hang-watch");
-      newWatcher.id = "scroll-watcher";
-      newWatcher.setAttribute("muted", "");
-      newWatcher.setAttribute("url", relayConfig.url);
-      newWatcher.setAttribute("name", relayConfig.name);
-
-      // Add canvas inside
-      const canvas = document.createElement("canvas");
-      newWatcher.appendChild(canvas);
-
-      // Replace old with new
-      oldWatcher.replaceWith(newWatcher);
+  // Update the deck - preload next and previous streams
+  function updateDeck() {
+    // Preload next stream if available
+    if (upcomingStreams.length > 1) {
+      const nextStream = upcomingStreams[1];
+      if (deck.next.stream?.stream_id !== nextStream.stream_id) {
+        // Remove old next element
+        if (deck.next.element) {
+          deck.next.element.remove();
+        }
+        // Create new next element
+        deck.next.stream = nextStream;
+        deck.next.element = createWatcher(nextStream, "next");
+        videoWrapper.appendChild(deck.next.element);
+      }
+    } else {
+      // No next stream, clean up
+      if (deck.next.element) {
+        deck.next.element.remove();
+        deck.next.element = null;
+        deck.next.stream = null;
+      }
     }
+
+    // Preload previous stream if in history
+    if (historyStreams.length > 0) {
+      const prevStream = historyStreams[historyStreams.length - 1];
+      if (deck.prev.stream?.stream_id !== prevStream.stream_id) {
+        // Remove old prev element
+        if (deck.prev.element) {
+          deck.prev.element.remove();
+        }
+        // Create new prev element
+        deck.prev.stream = prevStream;
+        deck.prev.element = createWatcher(prevStream, "prev");
+        videoWrapper.appendChild(deck.prev.element);
+      }
+    } else {
+      // No previous stream, clean up
+      if (deck.prev.element) {
+        deck.prev.element.remove();
+        deck.prev.element = null;
+        deck.prev.stream = null;
+      }
+    }
+
+    updateHints();
+    updatePositionIndicator();
+  }
+
+  // Load a stream as the current view
+  function loadCurrentStream(stream: ScrollBroadcast) {
+    currentStream = stream;
+
+    console.log(`[Scroll] Loading current: ${stream.stream_id}`);
+
+    // Remove old current element
+    if (deck.current.element) {
+      deck.current.element.remove();
+    }
+
+    // Create new current element
+    deck.current.stream = stream;
+    deck.current.element = createWatcher(stream, "current");
+    videoWrapper.appendChild(deck.current.element);
 
     // Update UI
     streamIdEl.textContent = stream.stream_id;
@@ -1817,19 +1882,20 @@ async function initScrollView() {
     noStreamsEl.classList.add("hidden");
     hintEl.style.opacity = "1";
 
-    // Update hints based on available navigation
+    // Preload adjacent streams
+    updateDeck();
+  }
+
+  // Update navigation hints
+  function updateHints() {
     const hintUp = scrollView.querySelector(".scroll-hint-up") as HTMLElement;
     const hintDown = scrollView.querySelector(".scroll-hint-down") as HTMLElement;
 
-    // Can go to next (swipe up) if there are more upcoming streams
     const canGoNext = upcomingStreams.length > 1;
-    // Can go back (swipe down) if there's history
     const canGoBack = historyStreams.length > 0;
 
     if (hintUp) hintUp.style.display = canGoNext ? "block" : "none";
     if (hintDown) hintDown.style.display = canGoBack ? "block" : "none";
-
-    updatePositionIndicator();
   }
 
   // Show no streams available
@@ -1850,35 +1916,29 @@ async function initScrollView() {
       videoWrapper.appendChild(indicator);
     }
 
-    // Show dots for history (max 10) + current + upcoming (max 5 shown)
-    const historyToShow = historyStreams.slice(-5); // Show last 5 of history
-    const upcomingToShow = upcomingStreams.slice(0, 5); // Show first 5 of upcoming
+    const historyToShow = historyStreams.slice(-5);
+    const upcomingToShow = upcomingStreams.slice(0, 5);
 
     let dotsHtml = "";
 
-    // History dots
-    historyToShow.forEach((_, i) => {
-      const isActive = currentIndex < 0 && (historyStreams.length + currentIndex) === (historyStreams.length - historyToShow.length + i);
-      dotsHtml += `<div class="scroll-position-dot history ${isActive ? "active" : ""}" title="Previous stream"></div>`;
+    historyToShow.forEach(() => {
+      dotsHtml += `<div class="scroll-position-dot history" title="Previous stream"></div>`;
     });
 
-    // Current/upcoming dots
     upcomingToShow.forEach((stream, i) => {
-      const isActive = currentIndex >= 0 && i === currentIndex;
-      const isCurrent = i === 0 && currentIndex < 0 && historyStreams.length === 0;
-      dotsHtml += `<div class="scroll-position-dot ${isActive || isCurrent ? "active" : ""}" title="${stream.stream_id}"></div>`;
+      const isActive = i === 0;
+      dotsHtml += `<div class="scroll-position-dot ${isActive ? "active" : ""}" title="${stream.stream_id}"></div>`;
     });
 
     indicator.innerHTML = dotsHtml;
   }
 
-  // Navigate to next stream (swipe up)
-  async function goToNextStream() {
+  // Navigate to next stream (swipe up) - INSTANT because it's preloaded
+  async function goToNextStream(): Promise<boolean> {
     if (upcomingStreams.length <= 1) {
-      // No more upcoming streams, try to refresh
+      // Try to fetch more streams
       const newStreams = await fetchLiveBroadcasts();
       if (newStreams.length > 0) {
-        // Add new streams that aren't already in our list or history
         const existingIds = new Set([
           ...upcomingStreams.map(s => s.stream_id),
           ...historyStreams.map(s => s.stream_id),
@@ -1901,33 +1961,87 @@ async function initScrollView() {
       }
     }
 
-    // Remove current from upcoming and load next
-    upcomingStreams.shift();
-    currentIndex = 0;
-
-    if (upcomingStreams.length > 0) {
-      loadStream(upcomingStreams[0]);
-      return true;
+    // Shift the deck: current becomes prev, next becomes current
+    if (deck.prev.element) {
+      deck.prev.element.remove();
     }
-    return false;
+
+    // The preloaded next becomes current (already connected!)
+    deck.prev.element = deck.current.element;
+    deck.prev.stream = deck.current.stream;
+    if (deck.prev.element) {
+      deck.prev.element.className = "scroll-deck-prev";
+    }
+
+    deck.current.element = deck.next.element;
+    deck.current.stream = deck.next.stream;
+    if (deck.current.element) {
+      deck.current.element.className = "scroll-deck-current";
+    }
+
+    deck.next.element = null;
+    deck.next.stream = null;
+
+    // Update state
+    upcomingStreams.shift();
+    currentStream = upcomingStreams[0] || null;
+
+    // Update UI
+    if (currentStream) {
+      streamIdEl.textContent = currentStream.stream_id;
+      broadcasterEl.textContent = currentStream.user_name;
+    }
+
+    // Preload the new next stream
+    updateDeck();
+
+    return true;
   }
 
-  // Navigate to previous stream (swipe down)
+  // Navigate to previous stream (swipe down) - INSTANT because it's preloaded
   function goToPreviousStream(): boolean {
     if (historyStreams.length === 0) {
       console.log("[Scroll] No history to go back to");
       return false;
     }
 
-    // Put current stream back at the front of upcoming
+    // Put current back at front of upcoming
     if (currentStream) {
       upcomingStreams.unshift(currentStream);
     }
 
+    // Shift the deck: current becomes next, prev becomes current
+    if (deck.next.element) {
+      deck.next.element.remove();
+    }
+
+    deck.next.element = deck.current.element;
+    deck.next.stream = deck.current.stream;
+    if (deck.next.element) {
+      deck.next.element.className = "scroll-deck-next";
+    }
+
+    // The preloaded prev becomes current (already connected!)
+    deck.current.element = deck.prev.element;
+    deck.current.stream = deck.prev.stream;
+    if (deck.current.element) {
+      deck.current.element.className = "scroll-deck-current";
+    }
+
+    deck.prev.element = null;
+    deck.prev.stream = null;
+
     // Pop from history
     const previous = historyStreams.pop()!;
-    currentIndex = -1; // Indicate we're viewing from history
-    loadStream(previous);
+    currentStream = previous;
+
+    // Update UI
+    streamIdEl.textContent = currentStream.stream_id;
+    broadcasterEl.textContent = currentStream.user_name;
+
+    // Preload the new prev stream
+    updateDeck();
+
     return true;
   }
 
@@ -2058,8 +2172,7 @@ async function initScrollView() {
       new Date(b.started_at).getTime() - new Date(a.started_at).getTime()
     );
     upcomingStreams = broadcasts;
-    currentIndex = 0;
-    loadStream(upcomingStreams[0]);
+    loadCurrentStream(upcomingStreams[0]);
   }
 
   // Periodic refresh of stream list
@@ -2082,7 +2195,7 @@ async function initScrollView() {
         );
         // Add at position 1 (after current) to be next in queue
         upcomingStreams.splice(1, 0, ...trulyNew);
-        updatePositionIndicator();
+        updateDeck(); // Update preloaded streams
       }
 
       // If we had no streams before, load the first one
@@ -2091,7 +2204,7 @@ async function initScrollView() {
           new Date(b.started_at).getTime() - new Date(a.started_at).getTime()
         );
         upcomingStreams = newBroadcasts;
-        loadStream(upcomingStreams[0]);
+        loadCurrentStream(upcomingStreams[0]);
       }
     }
   }, 15000); // Check every 15 seconds
