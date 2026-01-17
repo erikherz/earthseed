@@ -1358,10 +1358,13 @@
             background: rgba(255, 255, 255, 0.5);
         }
 
-        /* Deck positions for preloaded streams */
+        /* 5-slot deck positions for QUIC zapping */
+
+        /* Current: visible, full size */
         .scroll-deck-current {
             width: 100%;
             height: 100%;
+            z-index: 10;
         }
         .scroll-deck-current canvas {
             width: 100%;
@@ -1371,6 +1374,8 @@
             object-fit: contain;
             background: #000;
         }
+
+        /* Inner ring (prev/next): hidden but video still decoding */
         .scroll-deck-prev,
         .scroll-deck-next {
             position: absolute;
@@ -1378,7 +1383,7 @@
             height: 100%;
             pointer-events: none;
             opacity: 0;
-            /* Keep them rendering but invisible so they stay connected */
+            z-index: 5;
         }
         .scroll-deck-prev canvas,
         .scroll-deck-next canvas {
@@ -1388,6 +1393,26 @@
             max-height: 100vh;
             object-fit: contain;
             background: #000;
+        }
+
+        /* Outer ring (far_prev/far_next): hidden, audio only, minimal footprint */
+        .scroll-deck-far_prev,
+        .scroll-deck-far_next {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            opacity: 0;
+            pointer-events: none;
+            overflow: hidden;
+            z-index: 1;
+            /* Positioned off-screen to prevent any layout impact */
+            top: -9999px;
+            left: -9999px;
+        }
+        .scroll-deck-far_prev canvas,
+        .scroll-deck-far_next canvas {
+            width: 1px;
+            height: 1px;
         }
     </style>
 </head>

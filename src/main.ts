@@ -1732,9 +1732,21 @@ interface ScrollBroadcast {
   started_at: string;
 }
 
-// Initialize scroll view (TikTok-style) with preloading
+// 5-slot deck positions for QUIC zapping
+type DeckPosition = "far_prev" | "prev" | "current" | "next" | "far_next";
+
+// Position configuration: outer ring = audio only, inner ring + current = video + audio
+const DECK_CONFIG: Record<DeckPosition, { videoEnabled: boolean; visible: boolean }> = {
+  far_prev: { videoEnabled: false, visible: false },  // Outer ring: audio only
+  prev:     { videoEnabled: true,  visible: false },  // Inner ring: video ready
+  current:  { videoEnabled: true,  visible: true  },  // Center: visible
+  next:     { videoEnabled: true,  visible: false },  // Inner ring: video ready
+  far_next: { videoEnabled: false, visible: false },  // Outer ring: audio only
+};
+
+// Initialize scroll view (TikTok-style) with 5-slot QUIC zapping
 async function initScrollView() {
-  console.log("Earthseed.Live Scroll View");
+  console.log("Earthseed.Live Scroll View - QUIC Zapping enabled");
 
   // Hide all other views
   document.getElementById("broadcast-view")?.classList.add("hidden");
@@ -1749,19 +1761,23 @@ async function initScrollView() {
 
   // State management
   let upcomingStreams: ScrollBroadcast[] = [];
-  let historyStreams: ScrollBroadcast[] = []; // Last 10 watched streams
+  let historyStreams: ScrollBroadcast[] = [];
   let currentStream: ScrollBroadcast | null = null;
   const MAX_HISTORY = 10;
 
-  // Deck of preloaded video elements: prev, current, next
+  // 5-slot deck for QUIC zapping
   interface DeckSlot {
     element: HTMLElement | null;
     stream: ScrollBroadcast | null;
+    videoEnabled: boolean;
   }
-  const deck: { prev: DeckSlot; current: DeckSlot; next: DeckSlot } = {
-    prev: { element: null, stream: null },
-    current: { element: null, stream: null },
-    next: { element: null, stream: null },
+
+  const deck: Record<DeckPosition, DeckSlot> = {
+    far_prev: { element: null, stream: null, videoEnabled: false },
+    prev:     { element: null, stream: null, videoEnabled: true },
+    current:  { element: null, stream: null, videoEnabled: true },
+    next:     { element: null, stream: null, videoEnabled: true },
+    far_next: { element: null, stream: null, videoEnabled: false },
   };
 
   // DOM elements
@@ -1776,9 +1792,31 @@ async function initScrollView() {
   const staticWatcher = document.getElementById("scroll-watcher");
   if (staticWatcher) staticWatcher.remove();
 
-  // Create a hang-watch element for a stream
-  function createWatcher(stream: ScrollBroadcast, position: "prev" | "current" | "next"): HTMLElement {
+  // Wait for hang-watch broadcast object to be available
+  function waitForBroadcast(element: HTMLElement): Promise<any> {
+    return new Promise((resolve) => {
+      let attempts = 0;
+      const maxAttempts = 100; // 5 seconds max
+      const check = () => {
+        const broadcast = (element as any).broadcast;
+        if (broadcast?.video?.enabled) {
+          resolve(broadcast);
+        } else if (attempts < maxAttempts) {
+          attempts++;
+          setTimeout(check, 50);
+        } else {
+          console.warn("[Scroll] Timeout waiting for broadcast object");
+          resolve(null);
+        }
+      };
+      check();
+    });
+  }
+
+  // Create a hang-watch element for a stream with appropriate video state
+  async function createWatcher(stream: ScrollBroadcast, position: DeckPosition): Promise<HTMLElement> {
     const relayConfig = getRelayConfig(stream.stream_id);
+    const config = DECK_CONFIG[position];
 
     const watcher = document.createElement("hang-watch");
     watcher.className = `scroll-deck-${position}`;
@@ -1789,8 +1827,43 @@ async function initScrollView() {
     const canvas = document.createElement("canvas");
     watcher.appendChild(canvas);
 
-    console.log(`[Scroll] Preloading ${position}: ${stream.stream_id}`);
+    // For outer ring positions, disable video after broadcast initializes
+    if (!config.videoEnabled) {
+      waitForBroadcast(watcher).then((broadcast) => {
+        if (broadcast) {
+          broadcast.video.enabled.set(false);
+          console.log(`[Scroll] ${position}: ${stream.stream_id} - video DISABLED (audio-only)`);
+        }
+      });
+    } else {
+      console.log(`[Scroll] ${position}: ${stream.stream_id} - video ENABLED`);
+    }
+
     return watcher;
+  }
+
+  // Promote a slot: enable video (outer → inner ring)
+  async function promoteSlot(slot: DeckSlot): Promise<void> {
+    if (!slot.element || slot.videoEnabled) return;
+
+    const broadcast = await waitForBroadcast(slot.element);
+    if (broadcast) {
+      broadcast.video.enabled.set(true);
+      slot.videoEnabled = true;
+      console.log(`[Scroll] PROMOTED ${slot.stream?.stream_id}: video ENABLED`);
+    }
+  }
+
+  // Demote a slot: disable video (inner → outer ring)
+  async function demoteSlot(slot: DeckSlot): Promise<void> {
+    if (!slot.element || !slot.videoEnabled) return;
+
+    const broadcast = await waitForBroadcast(slot.element);
+    if (broadcast) {
+      broadcast.video.enabled.set(false);
+      slot.videoEnabled = false;
+      console.log(`[Scroll] DEMOTED ${slot.stream?.stream_id}: video DISABLED`);
+    }
   }
 
   // Fetch live broadcasts
@@ -1810,58 +1883,67 @@ async function initScrollView() {
     }
   }
 
-  // Update the deck - preload next and previous streams
-  function updateDeck() {
-    // Preload next stream if available
-    if (upcomingStreams.length > 1) {
-      const nextStream = upcomingStreams[1];
-      if (deck.next.stream?.stream_id !== nextStream.stream_id) {
-        // Remove old next element
-        if (deck.next.element) {
-          deck.next.element.remove();
-        }
-        // Create new next element
-        deck.next.stream = nextStream;
-        deck.next.element = createWatcher(nextStream, "next");
-        videoWrapper.appendChild(deck.next.element);
-      }
-    } else {
-      // No next stream, clean up
-      if (deck.next.element) {
-        deck.next.element.remove();
-        deck.next.element = null;
-        deck.next.stream = null;
-      }
+  // Update a specific deck slot
+  async function updateSlot(
+    position: DeckPosition,
+    stream: ScrollBroadcast | null
+  ): Promise<void> {
+    const slot = deck[position];
+
+    // If same stream, nothing to do
+    if (slot.stream?.stream_id === stream?.stream_id) return;
+
+    // Remove old element
+    if (slot.element) {
+      slot.element.remove();
     }
 
-    // Preload previous stream if in history
-    if (historyStreams.length > 0) {
-      const prevStream = historyStreams[historyStreams.length - 1];
-      if (deck.prev.stream?.stream_id !== prevStream.stream_id) {
-        // Remove old prev element
-        if (deck.prev.element) {
-          deck.prev.element.remove();
-        }
-        // Create new prev element
-        deck.prev.stream = prevStream;
-        deck.prev.element = createWatcher(prevStream, "prev");
-        videoWrapper.appendChild(deck.prev.element);
-      }
+    // Create new element or clear slot
+    if (stream) {
+      slot.stream = stream;
+      slot.element = await createWatcher(stream, position);
+      slot.videoEnabled = DECK_CONFIG[position].videoEnabled;
+      videoWrapper.appendChild(slot.element);
     } else {
-      // No previous stream, clean up
-      if (deck.prev.element) {
-        deck.prev.element.remove();
-        deck.prev.element = null;
-        deck.prev.stream = null;
-      }
+      slot.stream = null;
+      slot.element = null;
+      slot.videoEnabled = false;
     }
+  }
+
+  // Update the entire deck based on current state
+  async function updateDeck(): Promise<void> {
+    // far_next: upcomingStreams[2] if exists
+    const farNextStream = upcomingStreams.length > 2 ? upcomingStreams[2] : null;
+    await updateSlot("far_next", farNextStream);
+
+    // next: upcomingStreams[1] if exists
+    const nextStream = upcomingStreams.length > 1 ? upcomingStreams[1] : null;
+    await updateSlot("next", nextStream);
+
+    // far_prev: historyStreams[length-2] if exists (second to last)
+    const farPrevStream = historyStreams.length > 1 ? historyStreams[historyStreams.length - 2] : null;
+    await updateSlot("far_prev", farPrevStream);
+
+    // prev: historyStreams[length-1] if exists (last = most recent)
+    const prevStream = historyStreams.length > 0 ? historyStreams[historyStreams.length - 1] : null;
+    await updateSlot("prev", prevStream);
 
     updateHints();
     updatePositionIndicator();
+
+    // Log deck state
+    console.log("[Scroll] Deck state:", {
+      far_prev: deck.far_prev.stream?.stream_id || "(empty)",
+      prev: deck.prev.stream?.stream_id || "(empty)",
+      current: deck.current.stream?.stream_id || "(empty)",
+      next: deck.next.stream?.stream_id || "(empty)",
+      far_next: deck.far_next.stream?.stream_id || "(empty)",
+    });
   }
 
-  // Load a stream as the current view
-  function loadCurrentStream(stream: ScrollBroadcast) {
+  // Load initial current stream
+  async function loadCurrentStream(stream: ScrollBroadcast): Promise<void> {
     currentStream = stream;
 
     console.log(`[Scroll] Loading current: ${stream.stream_id}`);
@@ -1873,7 +1955,8 @@ async function initScrollView() {
 
     // Create new current element
     deck.current.stream = stream;
-    deck.current.element = createWatcher(stream, "current");
+    deck.current.element = await createWatcher(stream, "current");
+    deck.current.videoEnabled = true;
     videoWrapper.appendChild(deck.current.element);
 
     // Update UI
@@ -1883,23 +1966,23 @@ async function initScrollView() {
     hintEl.style.opacity = "1";
 
     // Preload adjacent streams
-    updateDeck();
+    await updateDeck();
   }
 
   // Update navigation hints
-  function updateHints() {
+  function updateHints(): void {
     const hintUp = scrollView.querySelector(".scroll-hint-up") as HTMLElement;
     const hintDown = scrollView.querySelector(".scroll-hint-down") as HTMLElement;
 
-    const canGoNext = upcomingStreams.length > 1;
-    const canGoBack = historyStreams.length > 0;
+    const canGoNext = upcomingStreams.length > 1 || deck.next.stream !== null;
+    const canGoBack = historyStreams.length > 0 || deck.prev.stream !== null;
 
     if (hintUp) hintUp.style.display = canGoNext ? "block" : "none";
     if (hintDown) hintDown.style.display = canGoBack ? "block" : "none";
   }
 
   // Show no streams available
-  function showNoStreams() {
+  function showNoStreams(): void {
     currentStream = null;
     streamIdEl.textContent = "";
     broadcasterEl.textContent = "";
@@ -1908,7 +1991,7 @@ async function initScrollView() {
   }
 
   // Update position indicator dots
-  function updatePositionIndicator() {
+  function updatePositionIndicator(): void {
     let indicator = scrollView.querySelector(".scroll-position-indicator");
     if (!indicator) {
       indicator = document.createElement("div");
@@ -1933,9 +2016,10 @@ async function initScrollView() {
     indicator.innerHTML = dotsHtml;
   }
 
-  // Navigate to next stream (swipe up) - INSTANT because it's preloaded
+  // Navigate to next stream (swipe up) - INSTANT because inner ring has video ready
   async function goToNextStream(): Promise<boolean> {
-    if (upcomingStreams.length <= 1) {
+    // Check if we have a next stream
+    if (!deck.next.stream && upcomingStreams.length <= 1) {
       // Try to fetch more streams
       const newStreams = await fetchLiveBroadcasts();
       if (newStreams.length > 0) {
@@ -1945,9 +2029,10 @@ async function initScrollView() {
         ]);
         const trulyNew = newStreams.filter(s => !existingIds.has(s.stream_id));
         upcomingStreams.push(...trulyNew);
+        await updateDeck();
       }
 
-      if (upcomingStreams.length <= 1) {
+      if (!deck.next.stream) {
         console.log("[Scroll] No more streams available");
         return false;
       }
@@ -1961,30 +2046,55 @@ async function initScrollView() {
       }
     }
 
-    // Shift the deck: current becomes prev, next becomes current
-    if (deck.prev.element) {
-      deck.prev.element.remove();
+    // === ROTATE DECK LEFT ===
+    // 1. Remove far_prev
+    if (deck.far_prev.element) {
+      deck.far_prev.element.remove();
+      console.log(`[Scroll] Removed far_prev: ${deck.far_prev.stream?.stream_id}`);
     }
 
-    // The preloaded next becomes current (already connected!)
+    // 2. Demote prev → far_prev (disable video)
+    deck.far_prev.element = deck.prev.element;
+    deck.far_prev.stream = deck.prev.stream;
+    deck.far_prev.videoEnabled = deck.prev.videoEnabled;
+    if (deck.far_prev.element) {
+      deck.far_prev.element.className = "scroll-deck-far_prev";
+      demoteSlot(deck.far_prev); // Async, don't await
+    }
+
+    // 3. Shift current → prev (keep video, just hide)
     deck.prev.element = deck.current.element;
     deck.prev.stream = deck.current.stream;
+    deck.prev.videoEnabled = deck.current.videoEnabled;
     if (deck.prev.element) {
       deck.prev.element.className = "scroll-deck-prev";
     }
 
+    // 4. Shift next → current (already has video, instant!)
     deck.current.element = deck.next.element;
     deck.current.stream = deck.next.stream;
+    deck.current.videoEnabled = deck.next.videoEnabled;
     if (deck.current.element) {
       deck.current.element.className = "scroll-deck-current";
     }
 
-    deck.next.element = null;
-    deck.next.stream = null;
+    // 5. Promote far_next → next (enable video)
+    deck.next.element = deck.far_next.element;
+    deck.next.stream = deck.far_next.stream;
+    deck.next.videoEnabled = deck.far_next.videoEnabled;
+    if (deck.next.element) {
+      deck.next.element.className = "scroll-deck-next";
+      promoteSlot(deck.next); // Async, don't await - video will enable in background
+    }
+
+    // 6. Clear far_next (will be populated by updateDeck)
+    deck.far_next.element = null;
+    deck.far_next.stream = null;
+    deck.far_next.videoEnabled = false;
 
     // Update state
     upcomingStreams.shift();
-    currentStream = upcomingStreams[0] || null;
+    currentStream = deck.current.stream;
 
     // Update UI
     if (currentStream) {
@@ -1992,15 +2102,15 @@ async function initScrollView() {
       broadcasterEl.textContent = currentStream.user_name;
     }
 
-    // Preload the new next stream
-    updateDeck();
+    // Populate new far_next
+    await updateDeck();
 
     return true;
   }
 
-  // Navigate to previous stream (swipe down) - INSTANT because it's preloaded
-  function goToPreviousStream(): boolean {
-    if (historyStreams.length === 0) {
+  // Navigate to previous stream (swipe down) - INSTANT because inner ring has video ready
+  async function goToPreviousStream(): Promise<boolean> {
+    if (!deck.prev.stream && historyStreams.length === 0) {
       console.log("[Scroll] No history to go back to");
       return false;
     }
@@ -2010,26 +2120,51 @@ async function initScrollView() {
       upcomingStreams.unshift(currentStream);
     }
 
-    // Shift the deck: current becomes next, prev becomes current
-    if (deck.next.element) {
-      deck.next.element.remove();
+    // === ROTATE DECK RIGHT ===
+    // 1. Remove far_next
+    if (deck.far_next.element) {
+      deck.far_next.element.remove();
+      console.log(`[Scroll] Removed far_next: ${deck.far_next.stream?.stream_id}`);
     }
 
+    // 2. Demote next → far_next (disable video)
+    deck.far_next.element = deck.next.element;
+    deck.far_next.stream = deck.next.stream;
+    deck.far_next.videoEnabled = deck.next.videoEnabled;
+    if (deck.far_next.element) {
+      deck.far_next.element.className = "scroll-deck-far_next";
+      demoteSlot(deck.far_next); // Async, don't await
+    }
+
+    // 3. Shift current → next (keep video, just hide)
     deck.next.element = deck.current.element;
     deck.next.stream = deck.current.stream;
+    deck.next.videoEnabled = deck.current.videoEnabled;
     if (deck.next.element) {
       deck.next.element.className = "scroll-deck-next";
     }
 
-    // The preloaded prev becomes current (already connected!)
+    // 4. Shift prev → current (already has video, instant!)
     deck.current.element = deck.prev.element;
     deck.current.stream = deck.prev.stream;
+    deck.current.videoEnabled = deck.prev.videoEnabled;
     if (deck.current.element) {
       deck.current.element.className = "scroll-deck-current";
     }
 
-    deck.prev.element = null;
-    deck.prev.stream = null;
+    // 5. Promote far_prev → prev (enable video)
+    deck.prev.element = deck.far_prev.element;
+    deck.prev.stream = deck.far_prev.stream;
+    deck.prev.videoEnabled = deck.far_prev.videoEnabled;
+    if (deck.prev.element) {
+      deck.prev.element.className = "scroll-deck-prev";
+      promoteSlot(deck.prev); // Async, don't await
+    }
+
+    // 6. Clear far_prev (will be populated by updateDeck)
+    deck.far_prev.element = null;
+    deck.far_prev.stream = null;
+    deck.far_prev.videoEnabled = false;
 
     // Pop from history
     const previous = historyStreams.pop()!;
@@ -2039,8 +2174,8 @@ async function initScrollView() {
     streamIdEl.textContent = currentStream.stream_id;
     broadcasterEl.textContent = currentStream.user_name;
 
-    // Preload the new prev stream
-    updateDeck();
+    // Populate new far_prev
+    await updateDeck();
 
     return true;
   }
