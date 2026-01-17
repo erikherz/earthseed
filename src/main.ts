@@ -1779,6 +1779,7 @@ async function initScrollView() {
   let upcomingStreams: ScrollBroadcast[] = [];
   let historyStreams: ScrollBroadcast[] = [];
   let currentStream: ScrollBroadcast | null = null;
+  let watchEventId: number | null = null;
   const MAX_HISTORY = 10;
 
   // 5-slot deck for QUIC zapping
@@ -1964,6 +1965,12 @@ async function initScrollView() {
 
     console.log(`[Scroll] Loading current: ${stream.stream_id}`);
 
+    // Log watch start for this stream
+    logWatchStart(stream.stream_id).then(id => {
+      watchEventId = id;
+      console.log(`[Scroll] Watch started for ${stream.stream_id}, event ID:`, id);
+    });
+
     // Remove old current element
     if (deck.current.element) {
       deck.current.element.remove();
@@ -2054,6 +2061,18 @@ async function initScrollView() {
       }
     }
 
+    // End watch for current stream, start watch for next
+    if (watchEventId) {
+      logWatchEnd(watchEventId);
+      console.log(`[Scroll] Watch ended for ${currentStream?.stream_id}, event ID:`, watchEventId);
+    }
+    if (deck.next.stream) {
+      logWatchStart(deck.next.stream.stream_id).then(id => {
+        watchEventId = id;
+        console.log(`[Scroll] Watch started for ${deck.next.stream?.stream_id}, event ID:`, id);
+      });
+    }
+
     // Move current to history
     if (currentStream) {
       historyStreams.push(currentStream);
@@ -2129,6 +2148,18 @@ async function initScrollView() {
     if (!deck.prev.stream && historyStreams.length === 0) {
       console.log("[Scroll] No history to go back to");
       return false;
+    }
+
+    // End watch for current stream, start watch for previous
+    if (watchEventId) {
+      logWatchEnd(watchEventId);
+      console.log(`[Scroll] Watch ended for ${currentStream?.stream_id}, event ID:`, watchEventId);
+    }
+    if (deck.prev.stream) {
+      logWatchStart(deck.prev.stream.stream_id).then(id => {
+        watchEventId = id;
+        console.log(`[Scroll] Watch started for ${deck.prev.stream?.stream_id}, event ID:`, id);
+      });
     }
 
     // Put current back at front of upcoming
@@ -2311,6 +2342,13 @@ async function initScrollView() {
       goToPreviousStream();
     }
   }, { passive: false });
+
+  // Log watch end on page unload
+  window.addEventListener("beforeunload", () => {
+    if (watchEventId) {
+      logWatchEnd(watchEventId);
+    }
+  });
 
   // Initial load
   const broadcasts = await fetchLiveBroadcasts();
