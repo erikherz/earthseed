@@ -1790,8 +1790,26 @@ async function initScrollView() {
       name: relayConfig.name,
     });
 
-    watcher.setAttribute("url", relayConfig.url);
-    watcher.setAttribute("name", relayConfig.name);
+    // To switch streams, we need to replace the hang-watch element
+    // Just changing attributes doesn't trigger a reconnection
+    const videoWrapper = scrollView.querySelector(".scroll-video-wrapper")!;
+    const oldWatcher = document.getElementById("scroll-watcher");
+
+    if (oldWatcher) {
+      // Create a new hang-watch element
+      const newWatcher = document.createElement("hang-watch");
+      newWatcher.id = "scroll-watcher";
+      newWatcher.setAttribute("muted", "");
+      newWatcher.setAttribute("url", relayConfig.url);
+      newWatcher.setAttribute("name", relayConfig.name);
+
+      // Add canvas inside
+      const canvas = document.createElement("canvas");
+      newWatcher.appendChild(canvas);
+
+      // Replace old with new
+      oldWatcher.replaceWith(newWatcher);
+    }
 
     // Update UI
     streamIdEl.textContent = stream.stream_id;
