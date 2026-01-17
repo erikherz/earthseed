@@ -541,8 +541,10 @@ async function handleStatsRoutes(
   }
 
   // GET /api/stats/greet - Get live broadcasts with viewer counts (public)
+  // Only returns broadcasts with a heartbeat within the last 15 seconds
   if (method === "GET" && path === "/api/stats/greet") {
-    // Get active broadcasts with viewer counts
+    // Get active broadcasts with recent heartbeats
+    // Streams without a recent heartbeat are considered stale and not returned
     const broadcasts = await env.DB
       .prepare(`
         SELECT
@@ -553,6 +555,8 @@ async function handleStatsRoutes(
         FROM broadcast_events b
         JOIN users u ON b.user_id = u.id
         WHERE b.ended_at IS NULL
+          AND b.last_heartbeat IS NOT NULL
+          AND b.last_heartbeat > datetime('now', '-15 seconds')
         ORDER BY b.started_at DESC
       `)
       .all();
@@ -637,6 +641,18 @@ async function handleStatsRoutes(
     const eventId = parseInt(broadcastEndMatch[1]);
     await env.DB
       .prepare("UPDATE broadcast_events SET ended_at = datetime('now') WHERE id = ?")
+      .bind(eventId)
+      .run();
+
+    return Response.json({ success: true });
+  }
+
+  // POST /api/stats/broadcast/:id/heartbeat - Update broadcaster heartbeat (keeps stream alive)
+  const broadcastHeartbeatMatch = path.match(/^\/api\/stats\/broadcast\/(\d+)\/heartbeat$/);
+  if (method === "POST" && broadcastHeartbeatMatch) {
+    const eventId = parseInt(broadcastHeartbeatMatch[1]);
+    await env.DB
+      .prepare("UPDATE broadcast_events SET last_heartbeat = datetime('now') WHERE id = ? AND ended_at IS NULL")
       .bind(eventId)
       .run();
 

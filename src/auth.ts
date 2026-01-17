@@ -97,6 +97,15 @@ export async function logBroadcastEnd(eventId: number): Promise<void> {
   }
 }
 
+// Send heartbeat to keep broadcast alive (call every 5 seconds)
+export async function sendBroadcastHeartbeat(eventId: number): Promise<void> {
+  try {
+    await fetch(`/api/stats/broadcast/${eventId}/heartbeat`, { method: "POST" });
+  } catch {
+    // Ignore errors - heartbeat is best-effort
+  }
+}
+
 export async function logWatchStart(streamId: string): Promise<number | null> {
   try {
     const response = await fetch("/api/stats/watch", {

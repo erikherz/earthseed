@@ -823,6 +823,7 @@ import {
   logout,
   logBroadcastStart,
   logBroadcastEnd,
+  sendBroadcastHeartbeat,
   logWatchStart,
   logWatchEnd,
   checkStreamExists,
@@ -1216,6 +1217,7 @@ function initBroadcastView(streamId: string, user: User | null) {
 
     // Track broadcast event
     let broadcastEventId: number | null = null;
+    let heartbeatInterval: number | null = null;
 
     // Log broadcast start when user starts streaming
     // Safari uses WebSocket to earthseed relay, Chrome uses WebTransport to CloudFlare
@@ -1291,11 +1293,22 @@ function initBroadcastView(streamId: string, user: User | null) {
           logBroadcastStart(streamId, broadcastOrigin).then(id => {
             broadcastEventId = id;
             console.log("Broadcast started, event ID:", id, "origin:", broadcastOrigin);
+            // Start heartbeat to keep broadcast alive
+            if (id && !heartbeatInterval) {
+              heartbeatInterval = window.setInterval(() => {
+                if (broadcastEventId) sendBroadcastHeartbeat(broadcastEventId);
+              }, 5000);
+            }
           });
         }
       } else if (broadcastEventId && fullStatus.includes("Select Device")) {
         logBroadcastEnd(broadcastEventId);
         console.log("Broadcast ended, event ID:", broadcastEventId);
+        // Stop heartbeat
+        if (heartbeatInterval) {
+          clearInterval(heartbeatInterval);
+          heartbeatInterval = null;
+        }
         broadcastEventId = null;
       }
     };
@@ -1316,6 +1329,9 @@ function initBroadcastView(streamId: string, user: User | null) {
 
     // Log end on page unload
     window.addEventListener("beforeunload", () => {
+      if (heartbeatInterval) {
+        clearInterval(heartbeatInterval);
+      }
       if (broadcastEventId) {
         logBroadcastEnd(broadcastEventId);
       }
