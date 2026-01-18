@@ -1277,6 +1277,7 @@
                 transparent 75%,
                 rgba(0, 0, 0, 0.6) 100%
             );
+            z-index: 100; /* Above all deck positions (current=10, prev/next=5, far=1) */
         }
 
         /* TikTok Top Bar */
@@ -1523,6 +1524,7 @@
             transform: translate(-50%, -50%);
             text-align: center;
             color: #a3a3a3;
+            z-index: 100; /* Above deck positions */
         }
         .scroll-no-streams p {
             margin: 0.5rem 0;
