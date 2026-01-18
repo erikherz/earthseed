@@ -879,6 +879,104 @@ Viewers are deduplicated by:
 
 ---
 
+## TikTok Live UI (January 2026)
+
+The `/scroll` view now features a TikTok Live-style overlay with real data from the database.
+
+### UI Components
+
+```
+┌─────────────────────────────────────────┐
+│ [LIVE 🔴] [👁 1.2K]              [X]    │  ← Top bar
+│                                         │
+│                                   [👤]  │  ← Profile avatar
+│                                   [+]   │     with follow badge
+│                                   [❤️]  │  ← Like button
+│                                   [💬]  │  ← Comments (mock)
+│                                   [🎁]  │  ← Gift (mock)
+│                                   [↗️]  │  ← Share (mock)
+│                                         │
+│ @username                               │  ← Creator name
+│ 🇺🇸 Windsor, US                         │  ← Location with flag
+│ [stream_id]                             │  ← Cyan stream ID badge
+│                                         │
+│               ───────                   │  ← Swipe indicator
+└─────────────────────────────────────────┘
+```
+
+### Real-Time Data
+
+Data populated from `/api/stats/greet` and `/api/stats/stream/:id/viewers`:
+
+| Element | Data Source | Update Frequency |
+|---------|-------------|------------------|
+| Viewer count | `viewer_count` from greet API | Every 10 seconds |
+| Broadcaster name | `user_name` from broadcast | On stream switch |
+| Location | `geo_city`, `geo_country` | On stream switch |
+| Country flag | Derived from `geo_country` code | On stream switch |
+| Stream ID | `stream_id` | On stream switch |
+
+### Z-Index Stacking
+
+Critical for overlay visibility during deck transitions:
+
+```css
+.scroll-overlay {
+  z-index: 100;  /* Above all deck positions */
+}
+
+.scroll-deck-current { z-index: 10; }
+.scroll-deck-prev,
+.scroll-deck-next { z-index: 5; }
+.scroll-deck-far_prev,
+.scroll-deck-far_next { z-index: 1; }
+```
+
+Without explicit z-index on the overlay, dynamically created `hang-watch` elements could stack on top, blocking UI interactions.
+
+### Full-Width Video on Mobile
+
+```css
+#scroll-view hang-watch canvas {
+  object-fit: cover;  /* Fill viewport, crop if needed */
+}
+```
+
+Using `object-fit: cover` instead of `contain` ensures the video fills the full viewport width on mobile devices, cropping top/bottom as needed (TikTok-style).
+
+### Floating Hearts Animation
+
+Tapping the like button spawns animated hearts:
+
+```typescript
+function spawnFloatingHeart(): void {
+  const heart = document.createElement("div");
+  heart.className = "scroll-floating-heart";
+  heart.innerHTML = "❤️";
+  heart.style.setProperty("--drift", `${(Math.random() - 0.5) * 30}px`);
+  floatingHeartsEl.appendChild(heart);
+  setTimeout(() => heart.remove(), 2000);
+}
+```
+
+```css
+@keyframes float-up {
+  0% { opacity: 1; transform: translateY(0) scale(1); }
+  100% { opacity: 0; transform: translateY(-180px) scale(0.5); }
+}
+```
+
+### TikTok Brand Colors
+
+| Color | Hex | Usage |
+|-------|-----|-------|
+| TikTok Red/Pink | `#FE2C55` | LIVE badge, follow button, likes |
+| TikTok Cyan | `#25F4EE` | Stream ID badge |
+| White | `#FFFFFF` | Text, icons |
+| Black | `#000000` | Background |
+
+---
+
 ## References
 
 - [MoQ Protocol Draft](https://datatracker.ietf.org/doc/draft-ietf-moq-transport/)
