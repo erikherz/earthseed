@@ -1926,7 +1926,12 @@ async function initScrollView() {
     const slot = deck[position];
 
     // If same stream, nothing to do
-    if (slot.stream?.stream_id === stream?.stream_id) return;
+    if (slot.stream?.stream_id === stream?.stream_id) {
+      console.log(`[Scroll] updateSlot(${position}): no change, already ${stream?.stream_id || 'empty'}`);
+      return;
+    }
+
+    console.log(`[Scroll] updateSlot(${position}): REPLACING ${slot.stream?.stream_id || 'empty'} with ${stream?.stream_id || 'empty'}`);
 
     // Remove old element
     if (slot.element) {
@@ -1938,7 +1943,9 @@ async function initScrollView() {
       slot.stream = stream;
       slot.element = await createWatcher(stream, position);
       slot.videoEnabled = DECK_CONFIG[position].videoEnabled;
-      videoWrapper.appendChild(slot.element);
+      if (slot.element) {
+        videoWrapper.appendChild(slot.element);
+      }
     } else {
       slot.stream = null;
       slot.element = null;
@@ -2174,9 +2181,30 @@ async function initScrollView() {
 
   // Navigate to previous stream (swipe down) - INSTANT because inner ring has video ready
   async function goToPreviousStream(): Promise<boolean> {
+    console.log("[Scroll] goToPreviousStream called", {
+      "deck.prev.stream": deck.prev.stream?.stream_id,
+      "deck.prev.element": !!deck.prev.element,
+      "deck.far_prev.stream": deck.far_prev.stream?.stream_id,
+      "historyStreams": historyStreams.map(s => s.stream_id),
+      "upcomingStreams": upcomingStreams.map(s => s.stream_id).slice(0, 5),
+    });
+
     if (!deck.prev.stream && historyStreams.length === 0) {
       console.log("[Scroll] No history to go back to");
       return false;
+    }
+
+    // CRITICAL: If deck.prev is empty but we have history, we need to load from history
+    if (!deck.prev.stream && historyStreams.length > 0) {
+      console.log("[Scroll] deck.prev is empty but history exists - rebuilding prev slot");
+      const prevStream = historyStreams[historyStreams.length - 1];
+      deck.prev.stream = prevStream;
+      deck.prev.element = await createWatcher(prevStream, "prev");
+      deck.prev.videoEnabled = true;
+      if (deck.prev.element) {
+        videoWrapper.appendChild(deck.prev.element);
+        await promoteSlot(deck.prev);
+      }
     }
 
     // End watch for current stream, start watch for previous
@@ -2191,9 +2219,12 @@ async function initScrollView() {
       });
     }
 
-    // Put current back at front of upcoming
-    if (currentStream) {
+    // Put current back at front of upcoming (if not already there)
+    if (currentStream && upcomingStreams[0]?.stream_id !== currentStream.stream_id) {
       upcomingStreams.unshift(currentStream);
+      console.log(`[Scroll] Added ${currentStream.stream_id} back to upcomingStreams`);
+    } else {
+      console.log(`[Scroll] ${currentStream?.stream_id} already in upcomingStreams, skipping unshift`);
     }
 
     // === ROTATE DECK RIGHT ===
@@ -2242,16 +2273,40 @@ async function initScrollView() {
     deck.far_prev.stream = null;
     deck.far_prev.videoEnabled = false;
 
-    // Pop from history
-    const previous = historyStreams.pop()!;
-    currentStream = previous;
+    // Pop from history - this should match what's now in deck.current
+    const previous = historyStreams.pop();
+    if (!previous) {
+      console.error("[Scroll] historyStreams was empty when trying to pop!");
+      currentStream = deck.current.stream;
+    } else if (previous.stream_id !== deck.current.stream?.stream_id) {
+      console.warn(`[Scroll] Mismatch! historyStreams.pop()=${previous.stream_id} but deck.current=${deck.current.stream?.stream_id}`);
+      // Use deck.current as source of truth
+      currentStream = deck.current.stream;
+    } else {
+      currentStream = previous;
+    }
 
     // Update UI
-    streamIdEl.textContent = currentStream.stream_id;
-    broadcasterEl.textContent = currentStream.user_name;
+    if (currentStream) {
+      if (streamIdEl) streamIdEl.textContent = currentStream.stream_id;
+      if (broadcasterEl) broadcasterEl.textContent = currentStream.user_name;
+    }
+
+    console.log("[Scroll] After goToPreviousStream rotation:", {
+      currentStream: currentStream?.stream_id,
+      "deck.current": deck.current.stream?.stream_id,
+      "deck.prev": deck.prev.stream?.stream_id,
+      "deck.far_prev": deck.far_prev.stream?.stream_id,
+      historyStreams: historyStreams.map(s => s.stream_id),
+    });
 
     // Populate new far_prev
     await updateDeck();
+
+    console.log("[Scroll] After updateDeck:", {
+      "deck.far_prev": deck.far_prev.stream?.stream_id,
+      "deck.prev": deck.prev.stream?.stream_id,
+    });
 
     return true;
   }
