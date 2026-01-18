@@ -1246,14 +1246,22 @@
         }
         #scroll-view hang-watch {
             display: block;
+            position: absolute;
+            top: 0;
+            left: 0;
             width: 100%;
             height: 100%;
         }
         #scroll-view hang-watch canvas {
             display: block;
-            width: 100%;
-            height: 100%;
-            object-fit: cover; /* Fill viewport, crop if needed (TikTok-style) */
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            min-width: 100%;
+            min-height: 100%;
+            width: auto;
+            height: auto;
             background: #000;
         }
         .scroll-overlay {
@@ -1567,10 +1575,7 @@
             z-index: 10;
         }
         .scroll-deck-current canvas {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            background: #000;
+            /* Canvas sizing handled by #scroll-view hang-watch canvas */
         }
 
         /* Inner ring (prev/next): hidden but video still decoding */
@@ -1587,10 +1592,7 @@
         }
         .scroll-deck-prev canvas,
         .scroll-deck-next canvas {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            background: #000;
+            /* Canvas sizing handled by #scroll-view hang-watch canvas */
         }
 
         /* Outer ring (far_prev/far_next): hidden, audio only, minimal footprint */
