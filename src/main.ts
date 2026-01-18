@@ -1746,6 +1746,10 @@ interface ScrollBroadcast {
   stream_id: string;
   user_name: string;
   started_at: string;
+  geo_city: string | null;
+  geo_country: string | null;
+  geo_region: string | null;
+  viewer_count: number;
 }
 
 // 5-slot deck positions for QUIC zapping
@@ -1813,9 +1817,134 @@ async function initScrollView() {
   const noStreamsEl = scrollView.querySelector(".scroll-no-streams") as HTMLElement;
   const hintEl = scrollView.querySelector(".scroll-hint") as HTMLElement;
 
+  // TikTok UI elements
+  const viewerCountEl = scrollView.querySelector(".viewer-number") as HTMLElement;
+  const locationEl = scrollView.querySelector(".scroll-location") as HTMLElement;
+  const avatarPlaceholder = scrollView.querySelector(".scroll-avatar-placeholder") as HTMLElement;
+  const closeBtn = scrollView.querySelector(".scroll-close-btn") as HTMLElement;
+  const likeBtn = scrollView.querySelector(".scroll-like-btn") as HTMLElement;
+  const likeCountEl = scrollView.querySelector(".scroll-like-count") as HTMLElement;
+
+  // Floating hearts container (add dynamically if not present)
+  let floatingHeartsEl = scrollView.querySelector(".scroll-floating-hearts") as HTMLElement;
+  if (!floatingHeartsEl) {
+    floatingHeartsEl = document.createElement("div");
+    floatingHeartsEl.className = "scroll-floating-hearts";
+    scrollView.querySelector(".scroll-overlay")?.appendChild(floatingHeartsEl);
+  }
+
   if (!videoWrapper) {
     console.error("[Scroll] video-wrapper element not found");
     return;
+  }
+
+  // Wire up close button
+  if (closeBtn) {
+    closeBtn.addEventListener("click", () => {
+      window.location.href = "/";
+    });
+  }
+
+  // Like count state (mock for now since likes aren't stored in DB)
+  let likeCount = 0;
+
+  // Wire up like button with floating heart animation
+  if (likeBtn) {
+    likeBtn.addEventListener("click", () => {
+      likeCount++;
+      if (likeCountEl) likeCountEl.textContent = formatCount(likeCount);
+      likeBtn.classList.add("liked");
+      spawnFloatingHeart();
+    });
+  }
+
+  // Spawn floating heart animation
+  function spawnFloatingHeart(): void {
+    if (!floatingHeartsEl) return;
+    const heart = document.createElement("div");
+    heart.className = "scroll-floating-heart";
+    heart.innerHTML = "❤️";
+    // Random horizontal drift
+    heart.style.setProperty("--drift", `${(Math.random() - 0.5) * 30}px`);
+    floatingHeartsEl.appendChild(heart);
+    // Remove after animation completes
+    setTimeout(() => heart.remove(), 2000);
+  }
+
+  // Format count for display (e.g., 1234 -> "1.2K")
+  function formatCount(count: number): string {
+    if (count >= 1000000) return (count / 1000000).toFixed(1) + "M";
+    if (count >= 1000) return (count / 1000).toFixed(1) + "K";
+    return count.toString();
+  }
+
+  // Get country flag emoji from country code
+  function countryToFlag(countryCode: string | null): string {
+    if (!countryCode || countryCode.length !== 2) return "🌍";
+    const codePoints = countryCode
+      .toUpperCase()
+      .split("")
+      .map(char => 127397 + char.charCodeAt(0));
+    return String.fromCodePoint(...codePoints);
+  }
+
+  // Update TikTok UI with stream data
+  function updateStreamUI(stream: ScrollBroadcast | null): void {
+    if (!stream) return;
+
+    // Update broadcaster name with @ prefix
+    if (broadcasterEl) {
+      broadcasterEl.textContent = `@${stream.user_name}`;
+    }
+
+    // Update stream ID
+    if (streamIdEl) {
+      streamIdEl.textContent = stream.stream_id;
+    }
+
+    // Update location with flag
+    if (locationEl) {
+      const parts = [stream.geo_city, stream.geo_country].filter(Boolean);
+      if (parts.length > 0) {
+        const flag = countryToFlag(stream.geo_country);
+        locationEl.textContent = `${flag} ${parts.join(", ")}`;
+      } else {
+        locationEl.textContent = "";
+      }
+    }
+
+    // Update avatar placeholder with first letter of name
+    if (avatarPlaceholder) {
+      avatarPlaceholder.textContent = stream.user_name.charAt(0).toUpperCase();
+    }
+
+    // Update viewer count from initial data
+    if (viewerCountEl) {
+      // Add 1 for the current viewer (us)
+      const count = stream.viewer_count + 1;
+      viewerCountEl.textContent = formatCount(count);
+    }
+
+    // Reset like count for new stream
+    likeCount = 0;
+    if (likeCountEl) likeCountEl.textContent = "0";
+    likeBtn?.classList.remove("liked");
+  }
+
+  // Periodically refresh viewer count
+  let viewerCountInterval: number | null = null;
+  function startViewerCountRefresh(streamId: string): void {
+    // Clear any existing interval
+    if (viewerCountInterval) {
+      clearInterval(viewerCountInterval);
+    }
+    // Refresh every 10 seconds
+    viewerCountInterval = window.setInterval(async () => {
+      const count = await fetchViewerCount(streamId);
+      if (viewerCountEl) {
+        viewerCountEl.textContent = formatCount(count);
+      }
+    }, 10000);
   }
 
   // Remove the static hang-watch from HTML, we'll create them dynamically
@@ -1911,10 +2040,27 @@ async function initScrollView() {
         stream_id: b.stream_id,
         user_name: b.user_name || "Anonymous",
         started_at: b.started_at,
+        geo_city: b.geo_city || null,
+        geo_country: b.geo_country || null,
+        geo_region: b.geo_region || null,
+        viewer_count: b.viewer_count || 0,
       }));
     } catch (err) {
       console.error("Failed to fetch broadcasts:", err);
       return [];
+    }
+  }
+
+  // Fetch current viewer count for a stream
+  async function fetchViewerCount(streamId: string): Promise<number> {
+    try {
+      const response = await fetch(`/api/stats/stream/${streamId}/viewers`);
+      if (!response.ok) return 0;
+      const data = await response.json();
+      return data.viewers?.length || 0;
+    } catch (err) {
+      console.error("Failed to fetch viewer count:", err);
+      return 0;
     }
   }
 
@@ -2014,11 +2160,12 @@ async function initScrollView() {
       deck.current.videoEnabled = true;
       videoWrapper.appendChild(watcher);
 
-      // Update UI
-      if (streamIdEl) streamIdEl.textContent = stream.stream_id;
-      if (broadcasterEl) broadcasterEl.textContent = stream.user_name;
+      // Update TikTok UI
+      updateStreamUI(stream);
       if (noStreamsEl) noStreamsEl.classList.add("hidden");
-      if (hintEl) hintEl.style.opacity = "1";
+
+      // Start periodic viewer count refresh
+      startViewerCountRefresh(stream.stream_id);
 
       // Preload adjacent streams
       await updateDeck();
@@ -2167,10 +2314,10 @@ async function initScrollView() {
     upcomingStreams.shift();
     currentStream = deck.current.stream;
 
-    // Update UI
+    // Update TikTok UI
+    updateStreamUI(currentStream);
     if (currentStream) {
-      streamIdEl.textContent = currentStream.stream_id;
-      broadcasterEl.textContent = currentStream.user_name;
+      startViewerCountRefresh(currentStream.stream_id);
     }
 
     // Populate new far_next
@@ -2286,10 +2433,10 @@ async function initScrollView() {
       currentStream = previous;
     }
 
-    // Update UI
+    // Update TikTok UI
+    updateStreamUI(currentStream);
     if (currentStream) {
-      if (streamIdEl) streamIdEl.textContent = currentStream.stream_id;
-      if (broadcasterEl) broadcasterEl.textContent = currentStream.user_name;
+      startViewerCountRefresh(currentStream.stream_id);
     }
 
     console.log("[Scroll] After goToPreviousStream rotation:", {

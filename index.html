@@ -1211,13 +1211,10 @@
         }
         .scroll-video-wrapper {
             position: relative;
-            /* DEBUG: Smaller video for testing on iPhone */
-            width: 90%;
-            height: 50vh;
-            max-width: 90vw;
-            max-height: 50vh;
-            border: 3px solid red;
-            /* END DEBUG */
+            width: 100%;
+            height: 100%;
+            max-width: 100vw;
+            max-height: 100vh;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -1272,56 +1269,252 @@
             display: flex;
             flex-direction: column;
             justify-content: space-between;
-            padding: 1rem;
+            padding: env(safe-area-inset-top, 12px) 12px env(safe-area-inset-bottom, 12px) 12px;
+            background: linear-gradient(
+                to bottom,
+                rgba(0, 0, 0, 0.5) 0%,
+                transparent 12%,
+                transparent 75%,
+                rgba(0, 0, 0, 0.6) 100%
+            );
         }
-        .scroll-stream-info {
+
+        /* TikTok Top Bar */
+        .scroll-top-bar {
             display: flex;
-            flex-direction: column;
-            gap: 0.25rem;
-            align-self: flex-start;
-            background: rgba(0, 0, 0, 0.6);
-            padding: 0.5rem 0.75rem;
-            border-radius: 8px;
+            justify-content: space-between;
+            align-items: flex-start;
             pointer-events: auto;
         }
-        .scroll-stream-id {
-            font-family: monospace;
-            font-size: 1.25rem;
-            color: #22c55e;
-            font-weight: 600;
+        .scroll-top-left {
+            display: flex;
+            align-items: center;
+            gap: 10px;
         }
-        .scroll-broadcaster {
-            font-size: 0.875rem;
-            color: #a3a3a3;
+        .scroll-live-badge {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: #FE2C55;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 13px;
+            font-weight: 700;
+            color: #fff;
+            text-transform: uppercase;
         }
-        .scroll-hint {
+        .live-dot {
+            width: 8px;
+            height: 8px;
+            background: #fff;
+            border-radius: 50%;
+            animation: pulse-dot 1.5s ease-in-out infinite;
+        }
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .scroll-viewer-count {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 13px;
+            color: #fff;
+        }
+        .eye-icon {
+            opacity: 0.9;
+        }
+        .scroll-close-btn {
+            background: rgba(0, 0, 0, 0.5);
+            border: none;
+            border-radius: 50%;
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .scroll-close-btn:hover {
+            background: rgba(0, 0, 0, 0.7);
+        }
+
+        /* TikTok Right Action Bar */
+        .scroll-action-bar {
+            position: absolute;
+            right: 12px;
+            bottom: 140px;
             display: flex;
             flex-direction: column;
             align-items: center;
-            gap: 0.5rem;
-            color: rgba(255, 255, 255, 0.5);
-            font-size: 0.75rem;
-            transition: opacity 0.3s ease;
+            gap: 20px;
+            pointer-events: auto;
         }
-        .scroll-hint-up::before {
-            content: '';
-            display: block;
-            width: 0;
-            height: 0;
-            border-left: 8px solid transparent;
-            border-right: 8px solid transparent;
-            border-bottom: 8px solid rgba(255, 255, 255, 0.5);
-            margin: 0 auto 0.25rem;
+        .scroll-profile-btn {
+            position: relative;
         }
+        .scroll-avatar {
+            width: 48px;
+            height: 48px;
+            border: 2px solid #fff;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #FE2C55, #25F4EE);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+        .scroll-avatar-img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: none;
+        }
+        .scroll-avatar-placeholder {
+            color: #fff;
+            font-size: 20px;
+            font-weight: 700;
+        }
+        .scroll-follow-badge {
+            position: absolute;
+            bottom: -6px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 20px;
+            height: 20px;
+            background: #FE2C55;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            font-weight: 700;
+            color: #fff;
+        }
+        .scroll-action-btn {
+            background: transparent;
+            border: none;
+            color: #fff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            cursor: pointer;
+            opacity: 0.9;
+            transition: opacity 0.2s, transform 0.2s;
+        }
+        .scroll-action-btn:hover {
+            opacity: 1;
+        }
+        .scroll-action-btn:active {
+            transform: scale(0.9);
+        }
+        .scroll-action-count {
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .scroll-like-btn.liked svg {
+            color: #FE2C55;
+            fill: #FE2C55;
+        }
+
+        /* TikTok Bottom Creator Info */
+        .scroll-creator-info {
+            position: absolute;
+            left: 12px;
+            bottom: 60px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            max-width: 70%;
+            pointer-events: auto;
+        }
+        .scroll-creator-header {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .scroll-creator-name {
+            font-size: 16px;
+            font-weight: 700;
+            color: #fff;
+            text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+        }
+        .scroll-location-info {
+            font-size: 13px;
+            color: rgba(255, 255, 255, 0.8);
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+        }
+        .scroll-stream-id-badge {
+            display: inline-flex;
+        }
+        .scroll-stream-id {
+            font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+            font-size: 13px;
+            color: #25F4EE;
+            background: rgba(0, 0, 0, 0.4);
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-weight: 500;
+        }
+        .scroll-broadcaster {
+            /* Now part of scroll-creator-name */
+        }
+
+        /* TikTok Swipe Indicator */
+        .scroll-swipe-indicator {
+            display: flex;
+            justify-content: center;
+            padding-bottom: 8px;
+        }
+        .scroll-swipe-line {
+            width: 40px;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.4);
+            border-radius: 2px;
+        }
+
+        /* Floating Hearts Animation */
+        .scroll-floating-hearts {
+            position: absolute;
+            right: 60px;
+            bottom: 200px;
+            width: 50px;
+            height: 200px;
+            pointer-events: none;
+            overflow: visible;
+        }
+        .scroll-floating-heart {
+            position: absolute;
+            bottom: 0;
+            left: 50%;
+            color: #FE2C55;
+            font-size: 24px;
+            animation: float-up 2s ease-out forwards;
+        }
+        @keyframes float-up {
+            0% {
+                opacity: 1;
+                transform: translateX(-50%) translateY(0) scale(1);
+            }
+            100% {
+                opacity: 0;
+                transform: translateX(calc(-50% + var(--drift, 0px))) translateY(-180px) scale(0.5);
+            }
+        }
+
+        /* Legacy hint styles (hidden but kept for compatibility) */
+        .scroll-hint {
+            display: none;
+        }
+        .scroll-hint-up::before,
         .scroll-hint-down::after {
-            content: '';
-            display: block;
-            width: 0;
-            height: 0;
-            border-left: 8px solid transparent;
-            border-right: 8px solid transparent;
-            border-top: 8px solid rgba(255, 255, 255, 0.5);
-            margin: 0.25rem auto 0;
+            display: none;
         }
         .scroll-no-streams {
             position: absolute;
@@ -1521,7 +1714,7 @@
             </section>
         </div>
 
-        <!-- Scroll View (TikTok-style) -->
+        <!-- Scroll View (TikTok Live-style) -->
         <div id="scroll-view" class="hidden">
             <div class="scroll-container">
                 <div class="scroll-video-wrapper">
@@ -1529,13 +1722,78 @@
                         <canvas></canvas>
                     </hang-watch>
                     <div class="scroll-overlay">
-                        <div class="scroll-stream-info">
-                            <span class="scroll-stream-id"></span>
-                            <span class="scroll-broadcaster"></span>
+                        <!-- Top Bar -->
+                        <div class="scroll-top-bar">
+                            <div class="scroll-top-left">
+                                <div class="scroll-live-badge">
+                                    <span class="live-dot"></span>
+                                    <span class="live-text">LIVE</span>
+                                </div>
+                                <div class="scroll-viewer-count">
+                                    <svg class="eye-icon" viewBox="0 0 24 24" width="14" height="14">
+                                        <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z" fill="currentColor"/>
+                                    </svg>
+                                    <span class="viewer-number">0</span>
+                                </div>
+                            </div>
+                            <div class="scroll-top-right">
+                                <button class="scroll-close-btn" title="Close">
+                                    <svg viewBox="0 0 24 24" width="24" height="24">
+                                        <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" fill="currentColor"/>
+                                    </svg>
+                                </button>
+                            </div>
                         </div>
-                        <div class="scroll-hint">
-                            <span class="scroll-hint-up">Swipe up for next</span>
-                            <span class="scroll-hint-down">Swipe down for previous</span>
+
+                        <!-- Right Side Action Bar -->
+                        <div class="scroll-action-bar">
+                            <div class="scroll-profile-btn">
+                                <div class="scroll-avatar">
+                                    <img class="scroll-avatar-img" src="" alt="">
+                                    <span class="scroll-avatar-placeholder">?</span>
+                                </div>
+                                <div class="scroll-follow-badge">+</div>
+                            </div>
+                            <button class="scroll-action-btn scroll-like-btn" title="Like">
+                                <svg viewBox="0 0 24 24" width="32" height="32">
+                                    <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" fill="currentColor"/>
+                                </svg>
+                                <span class="scroll-action-count scroll-like-count">0</span>
+                            </button>
+                            <button class="scroll-action-btn scroll-comment-btn" title="Comments">
+                                <svg viewBox="0 0 24 24" width="32" height="32">
+                                    <path d="M21.99 4c0-1.1-.89-2-1.99-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h14l4 4-.01-18z" fill="currentColor"/>
+                                </svg>
+                                <span class="scroll-action-count">Chat</span>
+                            </button>
+                            <button class="scroll-action-btn scroll-gift-btn" title="Gift">
+                                <svg viewBox="0 0 24 24" width="32" height="32">
+                                    <path d="M20 6h-2.18c.11-.31.18-.65.18-1 0-1.66-1.34-3-3-3-1.05 0-1.96.54-2.5 1.35l-.5.67-.5-.68C10.96 2.54 10.05 2 9 2 7.34 2 6 3.34 6 5c0 .35.07.69.18 1H4c-1.11 0-1.99.89-1.99 2L2 19c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V8c0-1.11-.89-2-2-2zm-5-2c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zM9 4c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zm11 15H4v-2h16v2zm0-5H4V8h5.08L7 10.83 8.62 12 11 8.76l1-1.36 1 1.36L15.38 12 17 10.83 14.92 8H20v6z" fill="currentColor"/>
+                                </svg>
+                            </button>
+                            <button class="scroll-action-btn scroll-share-btn" title="Share">
+                                <svg viewBox="0 0 24 24" width="32" height="32">
+                                    <path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z" fill="currentColor"/>
+                                </svg>
+                            </button>
+                        </div>
+
+                        <!-- Bottom Left Creator Info -->
+                        <div class="scroll-creator-info">
+                            <div class="scroll-creator-header">
+                                <span class="scroll-creator-name scroll-broadcaster">@username</span>
+                            </div>
+                            <div class="scroll-location-info">
+                                <span class="scroll-location"></span>
+                            </div>
+                            <div class="scroll-stream-id-badge">
+                                <span class="scroll-stream-id"></span>
+                            </div>
+                        </div>
+
+                        <!-- Swipe Indicator -->
+                        <div class="scroll-swipe-indicator">
+                            <div class="scroll-swipe-line"></div>
                         </div>
                     </div>
                     <div class="scroll-no-streams hidden">
