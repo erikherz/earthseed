@@ -577,6 +577,308 @@ deck.current.broadcast.video.target.set({ pixels: 1920 * 1080 });
 
 ---
 
+## Page Load Sequence
+
+The `/scroll` view has a complex initialization sequence with multiple async operations:
+
+### 1. Script Execution (Immediate)
+
+```
+Lines 1-46: Runs immediately when script loads
+├── Detect Safari via userAgent regex
+├── If Safari/no WebTransport: installWebTransportPolyfill() [SYNC]
+└── If Safari: Patch MediaStreamTrack.getSettings [SYNC]
+```
+
+### 2. DOMContentLoaded → `init()`
+
+```
+Waits for: document.readyState !== "loading"
+Then calls init() async function
+```
+
+### 3. `init()` Function
+
+```
+├── detectBrowserSupport() [AWAIT - checks codecs]
+│
+├── selectBestLinodeRelay() [AWAIT]
+│   └── Races 3 servers with 5 second timeout each
+│   └── ⚠️ POTENTIAL DELAY: Up to 5s if servers slow/unreachable
+│
+├── loadHangComponents() [AWAIT]
+│   ├── installWebCodecsPolyfill() [AWAIT - Safari audio codec]
+│   ├── import("@moq/hang/publish/element") [AWAIT]
+│   ├── import("@moq/hang/watch/element") [AWAIT]
+│   ├── import("@moq/hang-ui/publish/element") [AWAIT]
+│   └── import("@moq/hang-ui/watch/element") [AWAIT]
+│   └── ⚠️ POTENTIAL DELAY: Network fetch of JS modules
+│
+├── getRouteInfo() [AWAIT - parses URL]
+├── getCurrentUser() [AWAIT - fetch /api/auth/me]
+│
+└── initScrollView() [AWAIT for /scroll route]
+```
+
+### 4. `initScrollView()`
+
+```
+├── customElements.whenDefined("hang-watch") [AWAIT]
+│   └── Waits for custom element registration
+│
+├── DOM element validation [SYNC]
+│   └── Returns early if scroll-view or video-wrapper missing
+│
+├── fetchLiveBroadcasts() [AWAIT - fetch /api/stats/greet]
+│
+├── loadCurrentStream(stream) [AWAIT]
+│   ├── createWatcher() [AWAIT]
+│   └── updateDeck() [AWAIT - preloads adjacent streams]
+│
+├── Setup event listeners [SYNC]
+│
+└── setInterval(refreshInterval, 15000)
+```
+
+---
+
+## Video Loading During Scrolling
+
+### Swipe Up Flow (`goToNextStream`)
+
+```
+STEP 1: Check if next stream exists
+────────────────────────────────────
+├── If deck.next.stream is null AND upcomingStreams.length <= 1:
+│   ├── fetchLiveBroadcasts() [AWAIT - network fetch]
+│   │   └── GET /api/stats/greet
+│   │   └── ⚠️ DELAY: Network latency (typically 50-200ms)
+│   ├── Filter out existing streams
+│   ├── updateDeck() [AWAIT]
+│   └── If still no next stream → return false
+
+STEP 2: Update watch tracking (fire-and-forget)
+───────────────────────────────────────────────
+├── logWatchEnd(watchEventId) [NO AWAIT]
+└── logWatchStart(nextStreamId).then() [NO AWAIT]
+
+STEP 3: Rotate deck LEFT (INSTANT - no awaits)
+──────────────────────────────────────────────
+├── far_prev.element.remove()
+├── prev → far_prev + demoteSlot() [NO AWAIT]
+├── current → prev (keeps video)
+├── next → current ⚡ INSTANT SWITCH
+├── far_next → next + promoteSlot() [NO AWAIT]
+└── far_next = null
+
+STEP 4: Update state & UI (INSTANT)
+───────────────────────────────────
+├── upcomingStreams.shift()
+├── currentStream = deck.current.stream
+├── Update UI text elements
+
+STEP 5: Populate new far_next
+─────────────────────────────
+└── updateDeck() [AWAIT]
+    └── updateSlot("far_next", stream) [AWAIT]
+        └── createWatcher() [AWAIT]
+```
+
+### Timing Breakdown
+
+| Phase | Blocking? | Typical Time | Notes |
+|-------|-----------|--------------|-------|
+| **Swipe to visible** | NO | **<16ms** | CSS class change + reference swap |
+| Video switch | NO | **0ms** | next slot already has video enabled |
+| demoteSlot() | NO | 0-5000ms | Background, polls every 50ms |
+| promoteSlot() | NO | 0-5000ms | Background, polls every 50ms |
+| updateDeck() | **YES** | 50-500ms | Creates new hang-watch element |
+| fetchLiveBroadcasts() | **YES** | 50-200ms | Only if running low on streams |
+
+### Key Timeouts
+
+| Location | Timeout | Purpose |
+|----------|---------|---------|
+| waitForBroadcast() | 50ms × 100 = 5s max | Poll for broadcast object |
+| wheelTimeout | 500ms | Debounce mouse wheel |
+| CSS animation | 300ms | Swipe exit/enter animation |
+| refreshInterval | 15000ms | Periodic stream list refresh |
+
+---
+
+## Stability Fixes (January 2026)
+
+### iPhone Crash on Initial Load
+
+**Problem**: `/scroll` would flash and crash on first load on iPhone, but work on reload.
+
+**Root Causes**:
+1. No wait for custom element registration
+2. Missing null checks on DOM elements
+3. Missing `await` on `loadCurrentStream()`
+4. No error boundaries around element creation
+
+**Fixes Applied**:
+
+```typescript
+// 1. Wait for custom element to be defined
+await customElements.whenDefined("hang-watch");
+
+// 2. Validate DOM elements exist
+const scrollView = document.getElementById("scroll-view");
+if (!scrollView) {
+  console.error("[Scroll] scroll-view element not found");
+  return;
+}
+
+// 3. Await loadCurrentStream
+await loadCurrentStream(upcomingStreams[0]);
+
+// 4. Try-catch in createWatcher
+async function createWatcher(...): Promise<HTMLElement | null> {
+  try {
+    // ... element creation
+    return watcher;
+  } catch (err) {
+    console.error(`[Scroll] Failed to create watcher:`, err);
+    return null;
+  }
+}
+
+// 5. Handle null watcher in loadCurrentStream
+const watcher = await createWatcher(stream, "current");
+if (!watcher) {
+  showNoStreams();
+  return;
+}
+```
+
+---
+
+## Broadcaster Heartbeat System
+
+To prevent stale streams from appearing in `/scroll` and `/greet`, broadcasters send heartbeats:
+
+### Database Schema
+
+```sql
+ALTER TABLE broadcast_events ADD COLUMN last_heartbeat TEXT;
+CREATE INDEX idx_broadcast_events_last_heartbeat ON broadcast_events(last_heartbeat);
+```
+
+### API Endpoint
+
+```
+POST /api/stats/broadcast/:id/heartbeat
+```
+
+Updates `last_heartbeat = datetime('now')` for the broadcast.
+
+### Client Implementation
+
+```typescript
+// Start heartbeat when broadcast starts
+let heartbeatInterval: number | null = null;
+
+logBroadcastStart(streamId, origin).then(id => {
+  broadcastEventId = id;
+  if (id) {
+    heartbeatInterval = window.setInterval(() => {
+      sendBroadcastHeartbeat(broadcastEventId);
+    }, 5000);  // Every 5 seconds
+  }
+});
+
+// Clear on broadcast end or page unload
+if (heartbeatInterval) {
+  clearInterval(heartbeatInterval);
+}
+```
+
+### Stream List Filtering
+
+The `/api/stats/greet` endpoint now filters by recent heartbeat:
+
+```sql
+WHERE b.ended_at IS NULL
+  AND b.last_heartbeat IS NOT NULL
+  AND b.last_heartbeat > datetime('now', '-15 seconds')
+```
+
+Stale streams automatically disappear after ~15 seconds of no heartbeat.
+
+---
+
+## Viewer Tracking
+
+The `/scroll` view tracks watch events for analytics:
+
+### On Stream Load
+
+```typescript
+logWatchStart(stream.stream_id).then(id => {
+  watchEventId = id;
+});
+```
+
+### On Stream Switch
+
+```typescript
+// End watch for current stream
+if (watchEventId) {
+  logWatchEnd(watchEventId);
+}
+
+// Start watch for new stream
+logWatchStart(deck.next.stream.stream_id).then(id => {
+  watchEventId = id;
+});
+```
+
+### On Page Unload
+
+```typescript
+window.addEventListener("beforeunload", () => {
+  if (watchEventId) {
+    logWatchEnd(watchEventId);
+  }
+});
+```
+
+---
+
+## Live Stats Script
+
+A shell script (`live-stats.sh`) provides real-time visibility:
+
+```bash
+./live-stats.sh
+```
+
+Output:
+```
+📡 Live Broadcasts (5)
+=======================
+STREAM  BROADCASTER  LOCATION     ORIGIN      STARTED   HEARTBEAT  VIEWERS
+zit56   Erik Herz    Windsor, US  cloudflare  16:45:12  18:45:12   3
+
+👀 Current Stream Viewers (12)
+============================
+STREAM  VIEWER     LOCATION       STARTED
+zit56   Anonymous  Delhi, IN      18:20:46
+
+👀 Current Location Viewers (7)
+===============================
+VIEWER     LOCATION         STREAMS                        STARTED
+Anonymous  Rennes, FR       rcdnf,a890k,bk4gm,syjwp,zit56  17:03:43
+```
+
+Viewers are deduplicated by:
+- Logged-in users: one entry per user_id per stream
+- Anonymous users: one entry per geo location (lat/long) per stream
+
+---
+
 ## References
 
 - [MoQ Protocol Draft](https://datatracker.ietf.org/doc/draft-ietf-moq-transport/)

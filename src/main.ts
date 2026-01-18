@@ -1764,6 +1764,10 @@ const DECK_CONFIG: Record<DeckPosition, { videoEnabled: boolean; visible: boolea
 async function initScrollView() {
   console.log("Earthseed.Live Scroll View - QUIC Zapping enabled");
 
+  // Wait for hang-watch custom element to be defined
+  await customElements.whenDefined("hang-watch");
+  console.log("[Scroll] hang-watch custom element is ready");
+
   // Hide all other views
   document.getElementById("broadcast-view")?.classList.add("hidden");
   document.getElementById("watch-view")?.classList.add("hidden");
@@ -1797,13 +1801,22 @@ async function initScrollView() {
     far_next: { element: null, stream: null, videoEnabled: false },
   };
 
-  // DOM elements
-  const scrollView = document.getElementById("scroll-view")!;
+  // DOM elements - verify they exist
+  const scrollView = document.getElementById("scroll-view");
+  if (!scrollView) {
+    console.error("[Scroll] scroll-view element not found");
+    return;
+  }
   const videoWrapper = scrollView.querySelector(".scroll-video-wrapper") as HTMLElement;
   const streamIdEl = scrollView.querySelector(".scroll-stream-id") as HTMLElement;
   const broadcasterEl = scrollView.querySelector(".scroll-broadcaster") as HTMLElement;
   const noStreamsEl = scrollView.querySelector(".scroll-no-streams") as HTMLElement;
   const hintEl = scrollView.querySelector(".scroll-hint") as HTMLElement;
+
+  if (!videoWrapper) {
+    console.error("[Scroll] video-wrapper element not found");
+    return;
+  }
 
   // Remove the static hang-watch from HTML, we'll create them dynamically
   const staticWatcher = document.getElementById("scroll-watcher");
@@ -1831,32 +1844,37 @@ async function initScrollView() {
   }
 
   // Create a hang-watch element for a stream with appropriate video state
-  async function createWatcher(stream: ScrollBroadcast, position: DeckPosition): Promise<HTMLElement> {
-    const relayConfig = getRelayConfig(stream.stream_id);
-    const config = DECK_CONFIG[position];
+  async function createWatcher(stream: ScrollBroadcast, position: DeckPosition): Promise<HTMLElement | null> {
+    try {
+      const relayConfig = getRelayConfig(stream.stream_id);
+      const config = DECK_CONFIG[position];
 
-    const watcher = document.createElement("hang-watch");
-    watcher.className = `scroll-deck-${position}`;
-    watcher.setAttribute("muted", "");
-    watcher.setAttribute("url", relayConfig.url);
-    watcher.setAttribute("name", relayConfig.name);
+      const watcher = document.createElement("hang-watch");
+      watcher.className = `scroll-deck-${position}`;
+      watcher.setAttribute("muted", "");
+      watcher.setAttribute("url", relayConfig.url);
+      watcher.setAttribute("name", relayConfig.name);
 
-    const canvas = document.createElement("canvas");
-    watcher.appendChild(canvas);
+      const canvas = document.createElement("canvas");
+      watcher.appendChild(canvas);
 
-    // For outer ring positions, disable video after broadcast initializes
-    if (!config.videoEnabled) {
-      waitForBroadcast(watcher).then((broadcast) => {
-        if (broadcast) {
-          broadcast.video.enabled.set(false);
-          console.log(`[Scroll] ${position}: ${stream.stream_id} - video DISABLED (audio-only)`);
-        }
-      });
-    } else {
-      console.log(`[Scroll] ${position}: ${stream.stream_id} - video ENABLED`);
+      // For outer ring positions, disable video after broadcast initializes
+      if (!config.videoEnabled) {
+        waitForBroadcast(watcher).then((broadcast) => {
+          if (broadcast) {
+            broadcast.video.enabled.set(false);
+            console.log(`[Scroll] ${position}: ${stream.stream_id} - video DISABLED (audio-only)`);
+          }
+        });
+      } else {
+        console.log(`[Scroll] ${position}: ${stream.stream_id} - video ENABLED`);
+      }
+
+      return watcher;
+    } catch (err) {
+      console.error(`[Scroll] Failed to create watcher for ${stream.stream_id}:`, err);
+      return null;
     }
-
-    return watcher;
   }
 
   // Promote a slot: enable video (outer → inner ring)
@@ -1961,35 +1979,46 @@ async function initScrollView() {
 
   // Load initial current stream
   async function loadCurrentStream(stream: ScrollBroadcast): Promise<void> {
-    currentStream = stream;
+    try {
+      currentStream = stream;
 
-    console.log(`[Scroll] Loading current: ${stream.stream_id}`);
+      console.log(`[Scroll] Loading current: ${stream.stream_id}`);
 
-    // Log watch start for this stream
-    logWatchStart(stream.stream_id).then(id => {
-      watchEventId = id;
-      console.log(`[Scroll] Watch started for ${stream.stream_id}, event ID:`, id);
-    });
+      // Log watch start for this stream
+      logWatchStart(stream.stream_id).then(id => {
+        watchEventId = id;
+        console.log(`[Scroll] Watch started for ${stream.stream_id}, event ID:`, id);
+      });
 
-    // Remove old current element
-    if (deck.current.element) {
-      deck.current.element.remove();
+      // Remove old current element
+      if (deck.current.element) {
+        deck.current.element.remove();
+      }
+
+      // Create new current element
+      deck.current.stream = stream;
+      const watcher = await createWatcher(stream, "current");
+      if (!watcher) {
+        console.error(`[Scroll] Failed to create watcher for ${stream.stream_id}`);
+        showNoStreams();
+        return;
+      }
+      deck.current.element = watcher;
+      deck.current.videoEnabled = true;
+      videoWrapper.appendChild(watcher);
+
+      // Update UI
+      if (streamIdEl) streamIdEl.textContent = stream.stream_id;
+      if (broadcasterEl) broadcasterEl.textContent = stream.user_name;
+      if (noStreamsEl) noStreamsEl.classList.add("hidden");
+      if (hintEl) hintEl.style.opacity = "1";
+
+      // Preload adjacent streams
+      await updateDeck();
+    } catch (err) {
+      console.error("[Scroll] Error loading current stream:", err);
+      showNoStreams();
     }
-
-    // Create new current element
-    deck.current.stream = stream;
-    deck.current.element = await createWatcher(stream, "current");
-    deck.current.videoEnabled = true;
-    videoWrapper.appendChild(deck.current.element);
-
-    // Update UI
-    streamIdEl.textContent = stream.stream_id;
-    broadcasterEl.textContent = stream.user_name;
-    noStreamsEl.classList.add("hidden");
-    hintEl.style.opacity = "1";
-
-    // Preload adjacent streams
-    await updateDeck();
   }
 
   // Update navigation hints
@@ -2361,7 +2390,7 @@ async function initScrollView() {
       new Date(b.started_at).getTime() - new Date(a.started_at).getTime()
     );
     upcomingStreams = broadcasts;
-    loadCurrentStream(upcomingStreams[0]);
+    await loadCurrentStream(upcomingStreams[0]);
   }
 
   // Periodic refresh of stream list
@@ -2393,7 +2422,7 @@ async function initScrollView() {
           new Date(b.started_at).getTime() - new Date(a.started_at).getTime()
         );
         upcomingStreams = newBroadcasts;
-        loadCurrentStream(upcomingStreams[0]);
+        await loadCurrentStream(upcomingStreams[0]);
       }
     }
   }, 15000); // Check every 15 seconds
