@@ -1,4 +1,4 @@
-console.log("[Earthseed] Version: 2026-01-22-v1 (Canvas cover fix)");
+console.log("[Earthseed] Version: 2026-01-22-v2 (Canvas cover fix)");
 
 // Safari WebSocket fallback - MUST install before hang components load
 // Using our patched version that handles requireUnreliable gracefully
@@ -1988,13 +1988,21 @@ async function initScrollView() {
       watcher.appendChild(canvas);
 
       // Set up cover-style sizing for the canvas (fill viewport, maintain aspect ratio, crop overflow)
+      // Start with full viewport coverage immediately (may stretch until we know aspect ratio)
+      canvas.style.width = '100vw';
+      canvas.style.height = '100vh';
+
       let lastVideoWidth = 0;
       let lastVideoHeight = 0;
+      let hasDimensions = false;
 
       function updateCanvasCover() {
-        const videoWidth = lastVideoWidth || canvas.width;
-        const videoHeight = lastVideoHeight || canvas.height;
-        if (videoWidth === 0 || videoHeight === 0) return;
+        // Try to get dimensions from: lastVideoWidth/Height, canvas buffer, or default to square
+        const videoWidth = lastVideoWidth || canvas.width || 1;
+        const videoHeight = lastVideoHeight || canvas.height || 1;
+
+        // Skip if we still have no real dimensions (both are default/0)
+        if (lastVideoWidth === 0 && canvas.width <= 1) return;
 
         const videoAspect = videoWidth / videoHeight;
         const viewportAspect = window.innerWidth / window.innerHeight;
@@ -2008,34 +2016,45 @@ async function initScrollView() {
           canvas.style.width = '100vw';
           canvas.style.height = `${100 * viewportAspect / videoAspect}vw`;
         }
+        hasDimensions = true;
       }
 
       // Subscribe to video display dimensions from broadcast
       waitForBroadcast(watcher).then((broadcast) => {
         if (broadcast?.video?.source?.display) {
-          // Use the signals library's effect to react to display changes
           const checkDisplay = () => {
             const display = broadcast.video.source.display.peek?.() || broadcast.video.source.display;
             if (display?.width && display?.height) {
               lastVideoWidth = display.width;
               lastVideoHeight = display.height;
               updateCanvasCover();
+            } else if (canvas.width > 1 && canvas.height > 1) {
+              // Fallback: use canvas buffer dimensions if display signal not ready
+              updateCanvasCover();
             }
           };
-          // Initial check and periodic updates (signals may not have subscribe method exposed)
-          checkDisplay();
-          const intervalId = setInterval(checkDisplay, 500);
-          // Clean up when element is removed
-          const cleanup = () => {
-            clearInterval(intervalId);
-            window.removeEventListener('resize', updateCanvasCover);
-          };
-          watcher.addEventListener('disconnected', cleanup, { once: true });
+
+          // Poll frequently at first (every 50ms for 2 seconds), then slower
+          let pollCount = 0;
+          const fastPoll = setInterval(() => {
+            checkDisplay();
+            pollCount++;
+            if (pollCount >= 40 || hasDimensions) { // 40 * 50ms = 2 seconds
+              clearInterval(fastPoll);
+              // Switch to slower polling for ongoing updates
+              const slowPoll = setInterval(checkDisplay, 1000);
+              watcher.addEventListener('disconnected', () => clearInterval(slowPoll), { once: true });
+            }
+          }, 50);
+
+          watcher.addEventListener('disconnected', () => clearInterval(fastPoll), { once: true });
         }
       });
 
       // Update on window resize
-      window.addEventListener('resize', updateCanvasCover);
+      const resizeHandler = () => updateCanvasCover();
+      window.addEventListener('resize', resizeHandler);
+      watcher.addEventListener('disconnected', () => window.removeEventListener('resize', resizeHandler), { once: true });
 
       // For outer ring positions, disable video after broadcast initializes
       if (!config.videoEnabled) {
