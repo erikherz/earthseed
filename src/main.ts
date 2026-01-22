@@ -1,4 +1,4 @@
-console.log("[Earthseed] Version: 2026-01-12-v9 (Search hang-publish-ui)");
+console.log("[Earthseed] Version: 2026-01-22-v1 (Canvas cover fix)");
 
 // Safari WebSocket fallback - MUST install before hang components load
 // Using our patched version that handles requireUnreliable gracefully
