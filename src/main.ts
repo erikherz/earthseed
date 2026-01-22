@@ -1987,6 +1987,56 @@ async function initScrollView() {
       const canvas = document.createElement("canvas");
       watcher.appendChild(canvas);
 
+      // Set up cover-style sizing for the canvas (fill viewport, maintain aspect ratio, crop overflow)
+      let lastVideoWidth = 0;
+      let lastVideoHeight = 0;
+
+      function updateCanvasCover() {
+        const videoWidth = lastVideoWidth || canvas.width;
+        const videoHeight = lastVideoHeight || canvas.height;
+        if (videoWidth === 0 || videoHeight === 0) return;
+
+        const videoAspect = videoWidth / videoHeight;
+        const viewportAspect = window.innerWidth / window.innerHeight;
+
+        if (videoAspect > viewportAspect) {
+          // Video is wider than viewport - fit to height, overflow width
+          canvas.style.height = '100vh';
+          canvas.style.width = `${100 * videoAspect / viewportAspect}vh`;
+        } else {
+          // Video is taller than viewport - fit to width, overflow height
+          canvas.style.width = '100vw';
+          canvas.style.height = `${100 * viewportAspect / videoAspect}vw`;
+        }
+      }
+
+      // Subscribe to video display dimensions from broadcast
+      waitForBroadcast(watcher).then((broadcast) => {
+        if (broadcast?.video?.source?.display) {
+          // Use the signals library's effect to react to display changes
+          const checkDisplay = () => {
+            const display = broadcast.video.source.display.peek?.() || broadcast.video.source.display;
+            if (display?.width && display?.height) {
+              lastVideoWidth = display.width;
+              lastVideoHeight = display.height;
+              updateCanvasCover();
+            }
+          };
+          // Initial check and periodic updates (signals may not have subscribe method exposed)
+          checkDisplay();
+          const intervalId = setInterval(checkDisplay, 500);
+          // Clean up when element is removed
+          const cleanup = () => {
+            clearInterval(intervalId);
+            window.removeEventListener('resize', updateCanvasCover);
+          };
+          watcher.addEventListener('disconnected', cleanup, { once: true });
+        }
+      });
+
+      // Update on window resize
+      window.addEventListener('resize', updateCanvasCover);
+
       // For outer ring positions, disable video after broadcast initializes
       if (!config.videoEnabled) {
         waitForBroadcast(watcher).then((broadcast) => {
