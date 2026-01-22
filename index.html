@@ -1258,9 +1258,9 @@
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            /* Dimensions computed by JS for object-fit:cover effect */
-            min-width: 100%;
-            min-height: 100%;
+            /* Default to full viewport, JS will refine for proper cover */
+            width: 100vw;
+            height: 100vh;
             background: #000;
         }
         /* Full-viewport placeholder shown until video loads */

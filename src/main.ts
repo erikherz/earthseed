@@ -1,4 +1,4 @@
-console.log("[Earthseed] Version: 2026-01-22-v4 (Placeholder with fallback timeout)");
+console.log("[Earthseed] Version: 2026-01-22-v5 (Direct canvas dimension polling)");
 
 // Safari WebSocket fallback - MUST install before hang components load
 // Using our patched version that handles requireUnreliable gracefully
@@ -2014,85 +2014,60 @@ async function initScrollView() {
       `;
       watcher.appendChild(placeholder);
 
-      // Fallback: hide placeholder after 2 seconds regardless of dimension detection
-      const placeholderTimeout = setTimeout(() => {
-        if (placeholder.parentNode) {
-          placeholder.style.opacity = '0';
-          setTimeout(() => placeholder.remove(), 300);
-        }
-      }, 2000);
-
-      // Set up cover-style sizing for the canvas
-      let lastVideoWidth = 0;
-      let lastVideoHeight = 0;
-      let hasDimensions = false;
-
-      function hidePlaceholder() {
-        if (placeholder.parentNode && !hasDimensions) {
-          clearTimeout(placeholderTimeout);
-          placeholder.style.opacity = '0';
-          setTimeout(() => placeholder.remove(), 300);
-          hasDimensions = true;
-        }
-      }
+      // Track last known canvas dimensions to detect changes
+      let lastCanvasWidth = 0;
+      let lastCanvasHeight = 0;
+      let coverApplied = false;
 
       function updateCanvasCover() {
-        const videoWidth = lastVideoWidth || canvas.width || 1;
-        const videoHeight = lastVideoHeight || canvas.height || 1;
+        // Use canvas buffer dimensions directly (set by renderer when frames arrive)
+        const w = canvas.width;
+        const h = canvas.height;
 
-        // Skip if we still have no real dimensions
-        if (lastVideoWidth === 0 && canvas.width <= 1) return;
+        // Need real dimensions (not default 300x150 or 0x0)
+        if (w <= 1 || h <= 1 || (w === 300 && h === 150)) return;
 
-        const videoAspect = videoWidth / videoHeight;
+        // Skip if dimensions haven't changed
+        if (w === lastCanvasWidth && h === lastCanvasHeight && coverApplied) return;
+        lastCanvasWidth = w;
+        lastCanvasHeight = h;
+
+        const videoAspect = w / h;
         const viewportAspect = window.innerWidth / window.innerHeight;
 
         if (videoAspect > viewportAspect) {
           // Video is wider than viewport - fit to height, overflow width
-          canvas.style.height = '100vh';
           canvas.style.width = `${100 * videoAspect / viewportAspect}vh`;
+          canvas.style.height = '100vh';
         } else {
           // Video is taller than viewport - fit to width, overflow height
           canvas.style.width = '100vw';
           canvas.style.height = `${100 * viewportAspect / videoAspect}vw`;
         }
 
-        hidePlaceholder();
+        // Hide placeholder on first successful cover application
+        if (!coverApplied && placeholder.parentNode) {
+          placeholder.style.opacity = '0';
+          setTimeout(() => placeholder.remove(), 300);
+        }
+        coverApplied = true;
       }
 
-      // Subscribe to video display dimensions from broadcast
-      waitForBroadcast(watcher).then((broadcast) => {
-        if (broadcast?.video?.source?.display) {
-          const checkDisplay = () => {
-            const display = broadcast.video.source.display.peek?.() || broadcast.video.source.display;
-            if (display?.width && display?.height) {
-              lastVideoWidth = display.width;
-              lastVideoHeight = display.height;
-              updateCanvasCover();
-            } else if (canvas.width > 1 && canvas.height > 1) {
-              updateCanvasCover();
-            }
-          };
+      // Poll canvas dimensions frequently - renderer updates them when frames arrive
+      const dimensionPoll = setInterval(updateCanvasCover, 100);
 
-          // Poll frequently at first, then slower
-          let pollCount = 0;
-          const fastPoll = setInterval(() => {
-            checkDisplay();
-            pollCount++;
-            if (pollCount >= 40 || hasDimensions) {
-              clearInterval(fastPoll);
-              const slowPoll = setInterval(checkDisplay, 1000);
-              watcher.addEventListener('disconnected', () => clearInterval(slowPoll), { once: true });
-            }
-          }, 50);
-
-          watcher.addEventListener('disconnected', () => clearInterval(fastPoll), { once: true });
-        }
-      });
-
-      // Update on window resize
-      const resizeHandler = () => updateCanvasCover();
+      // Also update on window resize
+      const resizeHandler = () => {
+        coverApplied = false; // Force recalculation
+        updateCanvasCover();
+      };
       window.addEventListener('resize', resizeHandler);
-      watcher.addEventListener('disconnected', () => window.removeEventListener('resize', resizeHandler), { once: true });
+
+      // Cleanup
+      watcher.addEventListener('disconnected', () => {
+        clearInterval(dimensionPoll);
+        window.removeEventListener('resize', resizeHandler);
+      }, { once: true });
 
       // For outer ring positions, disable video after broadcast initializes
       if (!config.videoEnabled) {
