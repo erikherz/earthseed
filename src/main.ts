@@ -1,4 +1,4 @@
-console.log("[Earthseed] Version: 2026-01-22-v2 (Canvas cover fix)");
+console.log("[Earthseed] Version: 2026-01-22-v3 (Placeholder until video ready)");
 
 // Safari WebSocket fallback - MUST install before hang components load
 // Using our patched version that handles requireUnreliable gracefully
@@ -1987,21 +1987,43 @@ async function initScrollView() {
       const canvas = document.createElement("canvas");
       watcher.appendChild(canvas);
 
-      // Set up cover-style sizing for the canvas (fill viewport, maintain aspect ratio, crop overflow)
-      // Start with full viewport coverage immediately (may stretch until we know aspect ratio)
-      canvas.style.width = '100vw';
-      canvas.style.height = '100vh';
+      // Create full-viewport placeholder with logo (shown until video is ready)
+      const placeholder = document.createElement("div");
+      placeholder.className = "video-placeholder";
+      placeholder.innerHTML = `
+        <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="50" cy="50" r="48" fill="url(#oceanGradient-ph)"/>
+          <path d="M30 25c5-3 15-5 20 0s10 10 5 18c-3 5-10 8-15 5s-12-8-15-13c-2-4 0-8 5-10z" fill="url(#landGradient-ph)" opacity="0.9"/>
+          <path d="M55 30c8-2 18 2 22 10s2 20-8 25c-8 4-15 0-18-8s-4-15 0-20c2-4 6-6 4-7z" fill="url(#landGradient-ph)" opacity="0.9"/>
+          <path d="M25 50c3-2 10-1 15 3s8 12 5 18c-2 5-8 8-14 6s-10-8-10-15c0-5 2-10 4-12z" fill="url(#landGradient-ph)" opacity="0.9"/>
+          <path d="M60 60c5-1 12 2 15 8s2 14-5 18c-5 3-12 1-15-5s-3-12 0-16c2-3 3-4 5-5z" fill="url(#landGradient-ph)" opacity="0.9"/>
+          <circle cx="50" cy="50" r="48" fill="none" stroke="url(#atmosphereGradient-ph)" stroke-width="3" opacity="0.6"/>
+          <ellipse cx="35" cy="30" rx="12" ry="8" fill="white" opacity="0.15" transform="rotate(-30 35 30)"/>
+          <defs>
+            <linearGradient id="oceanGradient-ph" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#1e40af"/><stop offset="50%" stop-color="#3b82f6"/><stop offset="100%" stop-color="#0ea5e9"/>
+            </linearGradient>
+            <linearGradient id="landGradient-ph" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#22c55e"/><stop offset="100%" stop-color="#16a34a"/>
+            </linearGradient>
+            <linearGradient id="atmosphereGradient-ph" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#60a5fa"/><stop offset="100%" stop-color="#a78bfa"/>
+            </linearGradient>
+          </defs>
+        </svg>
+      `;
+      watcher.appendChild(placeholder);
 
+      // Set up cover-style sizing for the canvas
       let lastVideoWidth = 0;
       let lastVideoHeight = 0;
       let hasDimensions = false;
 
       function updateCanvasCover() {
-        // Try to get dimensions from: lastVideoWidth/Height, canvas buffer, or default to square
         const videoWidth = lastVideoWidth || canvas.width || 1;
         const videoHeight = lastVideoHeight || canvas.height || 1;
 
-        // Skip if we still have no real dimensions (both are default/0)
+        // Skip if we still have no real dimensions
         if (lastVideoWidth === 0 && canvas.width <= 1) return;
 
         const videoAspect = videoWidth / videoHeight;
@@ -2016,6 +2038,12 @@ async function initScrollView() {
           canvas.style.width = '100vw';
           canvas.style.height = `${100 * viewportAspect / videoAspect}vw`;
         }
+
+        // Hide placeholder once video is sized
+        if (!hasDimensions) {
+          placeholder.style.opacity = '0';
+          setTimeout(() => placeholder.remove(), 300);
+        }
         hasDimensions = true;
       }
 
@@ -2029,19 +2057,17 @@ async function initScrollView() {
               lastVideoHeight = display.height;
               updateCanvasCover();
             } else if (canvas.width > 1 && canvas.height > 1) {
-              // Fallback: use canvas buffer dimensions if display signal not ready
               updateCanvasCover();
             }
           };
 
-          // Poll frequently at first (every 50ms for 2 seconds), then slower
+          // Poll frequently at first, then slower
           let pollCount = 0;
           const fastPoll = setInterval(() => {
             checkDisplay();
             pollCount++;
-            if (pollCount >= 40 || hasDimensions) { // 40 * 50ms = 2 seconds
+            if (pollCount >= 40 || hasDimensions) {
               clearInterval(fastPoll);
-              // Switch to slower polling for ongoing updates
               const slowPoll = setInterval(checkDisplay, 1000);
               watcher.addEventListener('disconnected', () => clearInterval(slowPoll), { once: true });
             }
