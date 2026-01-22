@@ -1,4 +1,4 @@
-console.log("[Earthseed] Version: 2026-01-22-v3 (Placeholder until video ready)");
+console.log("[Earthseed] Version: 2026-01-22-v4 (Placeholder with fallback timeout)");
 
 // Safari WebSocket fallback - MUST install before hang components load
 // Using our patched version that handles requireUnreliable gracefully
@@ -2014,10 +2014,27 @@ async function initScrollView() {
       `;
       watcher.appendChild(placeholder);
 
+      // Fallback: hide placeholder after 2 seconds regardless of dimension detection
+      const placeholderTimeout = setTimeout(() => {
+        if (placeholder.parentNode) {
+          placeholder.style.opacity = '0';
+          setTimeout(() => placeholder.remove(), 300);
+        }
+      }, 2000);
+
       // Set up cover-style sizing for the canvas
       let lastVideoWidth = 0;
       let lastVideoHeight = 0;
       let hasDimensions = false;
+
+      function hidePlaceholder() {
+        if (placeholder.parentNode && !hasDimensions) {
+          clearTimeout(placeholderTimeout);
+          placeholder.style.opacity = '0';
+          setTimeout(() => placeholder.remove(), 300);
+          hasDimensions = true;
+        }
+      }
 
       function updateCanvasCover() {
         const videoWidth = lastVideoWidth || canvas.width || 1;
@@ -2039,12 +2056,7 @@ async function initScrollView() {
           canvas.style.height = `${100 * viewportAspect / videoAspect}vw`;
         }
 
-        // Hide placeholder once video is sized
-        if (!hasDimensions) {
-          placeholder.style.opacity = '0';
-          setTimeout(() => placeholder.remove(), 300);
-        }
-        hasDimensions = true;
+        hidePlaceholder();
       }
 
       // Subscribe to video display dimensions from broadcast
