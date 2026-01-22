@@ -1,4 +1,4 @@
-console.log("[Earthseed] Version: 2026-01-22-v5 (Direct canvas dimension polling)");
+console.log("[Earthseed] Version: 2026-01-22-v6 (Simplified: fill height, compute width)");
 
 // Safari WebSocket fallback - MUST install before hang components load
 // Using our patched version that handles requireUnreliable gracefully
@@ -1987,87 +1987,23 @@ async function initScrollView() {
       const canvas = document.createElement("canvas");
       watcher.appendChild(canvas);
 
-      // Create full-viewport placeholder with logo (shown until video is ready)
-      const placeholder = document.createElement("div");
-      placeholder.className = "video-placeholder";
-      placeholder.innerHTML = `
-        <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <circle cx="50" cy="50" r="48" fill="url(#oceanGradient-ph)"/>
-          <path d="M30 25c5-3 15-5 20 0s10 10 5 18c-3 5-10 8-15 5s-12-8-15-13c-2-4 0-8 5-10z" fill="url(#landGradient-ph)" opacity="0.9"/>
-          <path d="M55 30c8-2 18 2 22 10s2 20-8 25c-8 4-15 0-18-8s-4-15 0-20c2-4 6-6 4-7z" fill="url(#landGradient-ph)" opacity="0.9"/>
-          <path d="M25 50c3-2 10-1 15 3s8 12 5 18c-2 5-8 8-14 6s-10-8-10-15c0-5 2-10 4-12z" fill="url(#landGradient-ph)" opacity="0.9"/>
-          <path d="M60 60c5-1 12 2 15 8s2 14-5 18c-5 3-12 1-15-5s-3-12 0-16c2-3 3-4 5-5z" fill="url(#landGradient-ph)" opacity="0.9"/>
-          <circle cx="50" cy="50" r="48" fill="none" stroke="url(#atmosphereGradient-ph)" stroke-width="3" opacity="0.6"/>
-          <ellipse cx="35" cy="30" rx="12" ry="8" fill="white" opacity="0.15" transform="rotate(-30 35 30)"/>
-          <defs>
-            <linearGradient id="oceanGradient-ph" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stop-color="#1e40af"/><stop offset="50%" stop-color="#3b82f6"/><stop offset="100%" stop-color="#0ea5e9"/>
-            </linearGradient>
-            <linearGradient id="landGradient-ph" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stop-color="#22c55e"/><stop offset="100%" stop-color="#16a34a"/>
-            </linearGradient>
-            <linearGradient id="atmosphereGradient-ph" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stop-color="#60a5fa"/><stop offset="100%" stop-color="#a78bfa"/>
-            </linearGradient>
-          </defs>
-        </svg>
-      `;
-      watcher.appendChild(placeholder);
-
-      // Track last known canvas dimensions to detect changes
-      let lastCanvasWidth = 0;
-      let lastCanvasHeight = 0;
-      let coverApplied = false;
-
-      function updateCanvasCover() {
-        // Use canvas buffer dimensions directly (set by renderer when frames arrive)
+      // Simple aspect ratio sizing: fill height, compute width from aspect ratio
+      function updateCanvasWidth() {
         const w = canvas.width;
         const h = canvas.height;
-
-        // Need real dimensions (not default 300x150 or 0x0)
-        if (w <= 1 || h <= 1 || (w === 300 && h === 150)) return;
-
-        // Skip if dimensions haven't changed
-        if (w === lastCanvasWidth && h === lastCanvasHeight && coverApplied) return;
-        lastCanvasWidth = w;
-        lastCanvasHeight = h;
-
-        const videoAspect = w / h;
-        const viewportAspect = window.innerWidth / window.innerHeight;
-
-        if (videoAspect > viewportAspect) {
-          // Video is wider than viewport - fit to height, overflow width
-          canvas.style.width = `${100 * videoAspect / viewportAspect}vh`;
-          canvas.style.height = '100vh';
-        } else {
-          // Video is taller than viewport - fit to width, overflow height
-          canvas.style.width = '100vw';
-          canvas.style.height = `${100 * viewportAspect / videoAspect}vw`;
+        // Only update if we have real dimensions (not 300x150 default)
+        if (w > 1 && h > 1 && !(w === 300 && h === 150)) {
+          canvas.style.width = `${100 * (w / h)}vh`;
         }
-
-        // Hide placeholder on first successful cover application
-        if (!coverApplied && placeholder.parentNode) {
-          placeholder.style.opacity = '0';
-          setTimeout(() => placeholder.remove(), 300);
-        }
-        coverApplied = true;
       }
 
-      // Poll canvas dimensions frequently - renderer updates them when frames arrive
-      const dimensionPoll = setInterval(updateCanvasCover, 100);
+      // Check for dimensions after frames should have arrived
+      setTimeout(updateCanvasWidth, 500);
+      setTimeout(updateCanvasWidth, 1000);
+      setTimeout(updateCanvasWidth, 2000);
 
-      // Also update on window resize
-      const resizeHandler = () => {
-        coverApplied = false; // Force recalculation
-        updateCanvasCover();
-      };
-      window.addEventListener('resize', resizeHandler);
-
-      // Cleanup
-      watcher.addEventListener('disconnected', () => {
-        clearInterval(dimensionPoll);
-        window.removeEventListener('resize', resizeHandler);
-      }, { once: true });
+      // Update on resize
+      window.addEventListener('resize', updateCanvasWidth);
 
       // For outer ring positions, disable video after broadcast initializes
       if (!config.videoEnabled) {
