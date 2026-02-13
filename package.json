@@ -14,18 +14,20 @@
     "relay:cloudflare": "./switch-relay.sh cloudflare",
     "relay:luke:deploy": "./switch-relay.sh luke --deploy",
     "relay:cloudflare:deploy": "./switch-relay.sh cloudflare --deploy",
-    "relay:status": "grep 'const RELAY_SERVER' src/main.ts | head -1"
+    "relay:status": "grep 'const RELAY_SERVER' src/main.ts | head -1",
+    "test": "vitest run"
   },
   "devDependencies": {
     "typescript": "^5.5.2",
     "vite": "^7.3.0",
+    "vitest": "^3.2.4",
     "wrangler": "^4.54.0"
   },
   "dependencies": {
-    "patch-package": "^8.0.1",
+    "@kixelated/libavjs-webcodecs-polyfill": "^0.5.5",
+    "@kixelated/web-transport-ws": "^0.1.2",
     "@moq/hang": "^0.1.1",
     "@moq/hang-ui": "^0.1.1",
-    "@kixelated/libavjs-webcodecs-polyfill": "^0.5.5",
-    "@kixelated/web-transport-ws": "^0.1.2"
+    "patch-package": "^8.0.1"
   }
 }
