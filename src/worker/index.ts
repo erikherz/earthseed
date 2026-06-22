@@ -24,6 +24,7 @@ import {
   clearSessionCookie,
   getSessionFromCookie,
 } from "./auth/session";
+import { mintEd25519Token, mintHs256Token, type MoqClaims } from "./auth/moq-token";
 
 export interface Env {
   DB: D1Database;
@@ -35,6 +36,15 @@ export interface Env {
   DISCORD_CLIENT_ID: string;
   DISCORD_CLIENT_SECRET: string;
   SESSION_SECRET: string;
+  // BYOK: tenant's Ed25519 PRIVATE signing key as an OKP JWK (JSON string, includes `d`).
+  // When set, the Worker mints EdDSA tokens with it (only the matching public key is
+  // registered with TinyMoQ). When unset, the Worker falls back to the per-stream HS256
+  // key returned by /assign (managed mode). Optional so the file is tenant-agnostic.
+  MOQ_AUTH_PRIVATE_JWK?: string;
+  // Tenant's TinyMoQ provisioning bearer. Authorizes the autoscaler control API
+  // (/assign, /release) AND identifies the tenant, so the relay is keyed with this
+  // tenant's registered key. Optional so deploys are safe before the operator sets it.
+  TINYMOQ_PROVISION_KEY?: string;
 }
 
 interface User {
@@ -71,12 +81,11 @@ export default {
     const isStatsPage = url.pathname === "/stats";
     const isStatsMapPage = url.pathname === "/stats/map";
     const isGreetPage = url.pathname === "/greet";
-    const isScrollPage = url.pathname === "/scroll";
     const isStreamStatsPage = /^\/[a-z0-9]{5}\/stats$/.test(url.pathname);
     const isStreamStatsMapPage = /^\/[a-z0-9]{5}\/stats\/map$/.test(url.pathname);
     const isClearDataPage = url.pathname === "/cleardata";
 
-    if (isStreamId || isStatsPage || isStatsMapPage || isGreetPage || isScrollPage || isStreamStatsPage || isStreamStatsMapPage || isClearDataPage) {
+    if (isStreamId || isStatsPage || isStatsMapPage || isGreetPage || isStreamStatsPage || isStreamStatsMapPage || isClearDataPage) {
       const indexUrl = new URL("/index.html", url.origin);
       return env.ASSETS.fetch(new Request(indexUrl.toString(), {
         method: request.method,
@@ -462,6 +471,86 @@ async function handleStreamRoutes(
     });
   }
 
+  // GET /api/streams/:stream_id/route - Relay hosting the live broadcast (public).
+  // 404 = no live broadcast. Viewers use this to co-locate on the publisher's relay.
+  //
+  // IMPORTANT: relay ports are dynamic and can change DURING a live broadcast
+  // (reap/respawn), so the stored D1 port goes stale. We therefore re-query the
+  // autoscaler (/assign is sticky + idempotent → the broadcast's CURRENT relay)
+  // and use D1 only to confirm the stream is live and which CDN cluster the
+  // publisher is on. D1 is synced when the port has changed (for /admin + stats).
+  //
+  // Optional ?viewer-cdn=cdn-02.tinymoq.com pulls from a different CDN cluster
+  // (push-to-one/pull-from-two), with origin = the publisher's CURRENT relay.
+  const streamRouteMatch = path.match(/^\/api\/streams\/([a-z0-9]{5})\/route$/);
+  if (method === "GET" && streamRouteMatch) {
+    const streamId = streamRouteMatch[1];
+    const row = await env.DB
+      .prepare(
+        "SELECT relay_host, relay_port FROM broadcast_events WHERE stream_id = ? AND ended_at IS NULL ORDER BY id DESC LIMIT 1"
+      )
+      .bind(streamId)
+      .first<{ relay_host: string | null; relay_port: number | null }>();
+
+    if (!row?.relay_host) {
+      return new Response("offline", { status: 404 });
+    }
+    const publisherCluster = row.relay_host; // cluster host, e.g. cdn.tinymoq.com / cdn-01.tinymoq.com
+
+    // Authoritative current relay for this broadcast (sticky per name).
+    const current = await assignRelay(streamId, publisherCluster, undefined, env.TINYMOQ_PROVISION_KEY);
+    if (!current) {
+      return new Response("offline", { status: 404 });
+    }
+
+    // Keep D1 in sync if the relay moved (reap/respawn) so admin/stats stay accurate.
+    if (current.host !== publisherCluster || current.port !== row.relay_port) {
+      await env.DB
+        .prepare("UPDATE broadcast_events SET relay_host = ?, relay_port = ? WHERE stream_id = ? AND ended_at IS NULL")
+        .bind(current.host, current.port, streamId)
+        .run();
+    }
+
+    // Access control: the token IS the grant. For auth-required streams, only mint a
+    // viewer token for a caller with a valid session — otherwise 401. Public streams
+    // (require_auth = 0) mint for anyone. Future policies (allow-list, paid, geo) are
+    // just additional "decide whether to mint" checks here; the relay has no ACL.
+    const streamCfg = await env.DB
+      .prepare("SELECT require_auth FROM streams WHERE stream_id = ?")
+      .bind(streamId)
+      .first<{ require_auth: number }>();
+    if (streamCfg?.require_auth === 1) {
+      const user = await getAuthenticatedUser(request, env);
+      if (!user) {
+        return Response.json({ error: "Authentication required" }, { status: 401 });
+      }
+    }
+
+    // Resolve the relay the viewer will actually connect to. For a cross-cluster viewer
+    // that's a fresh edge (with its OWN per-stream key); otherwise the publisher's relay.
+    // The viewer token must be signed with THAT relay's key (managed mode).
+    let relay = current;
+    const viewerCdn = url.searchParams.get("viewer-cdn");
+    if (viewerCdn && viewerCdn !== current.host) {
+      // Cross-cluster: assign an edge on the viewer's cluster that pulls from the
+      // publisher's CURRENT relay. Explicit ?origin= test override wins.
+      const forcedOrigin = url.searchParams.get("origin");
+      const origin = forcedOrigin ?? `${current.host}:${current.port}`;
+      const edge = await assignRelay(streamId, viewerCdn, origin, env.TINYMOQ_PROVISION_KEY);
+      if (!edge) return new Response("offline", { status: 404 });
+      relay = edge;
+    }
+
+    // Viewer token: subscribe-only to THIS broadcast (put:[] => cannot publish/hijack).
+    const viewerJwt = await tryMintMoqToken(env, {
+      put: [],
+      get: [broadcastName(streamId)],
+      exp: Math.floor(Date.now() / 1000) + VIEWER_TOKEN_TTL,
+    }, relay.key);
+
+    return Response.json({ relay: `${relay.host}:${relay.port}`, jwt: viewerJwt });
+  }
+
   // POST /api/streams - Create or update stream settings (requires auth)
   if (method === "POST" && path === "/api/streams") {
     const user = await getAuthenticatedUser(request, env);
@@ -507,6 +596,124 @@ async function handleStreamRoutes(
 }
 
 // Stats routes handler
+// --- tinymoq broadcast→relay routing -------------------------------------
+// The autoscaler exposes a sticky, idempotent assignment API keyed by the full
+// broadcast name. The key MUST match what the client publishes/subscribes.
+const TINYMOQ_AUTOSCALER = "https://cdn.tinymoq.com";
+// NOTE: there is no static relay fallback. cdn.tinymoq.com:443 is the autoscaler
+// control API (TCP), not a MoQ relay — UDP/443 has no media listener. Every media
+// connection must use a dynamic host:port from /assign or /route.
+
+function broadcastName(streamId: string): string {
+  return `earthseed.live/${streamId}.hang`;
+}
+
+// Resolve the autoscaler base URL, honoring an optional per-request CDN override
+// (e.g. cdn-01.tinymoq.com) for testing individual destinations. Only tinymoq CDN
+// hosts are allowed — this guards the Worker's fetch against SSRF via user input.
+function autoscalerBase(cdnHost?: string | null): string {
+  if (cdnHost && /^cdn(-[a-z0-9]+)?\.tinymoq\.com$/i.test(cdnHost)) {
+    return `https://${cdnHost}`;
+  }
+  return TINYMOQ_AUTOSCALER;
+}
+
+// A tinymoq relay origin "host:port" (the publisher's relay), for cross-cluster pulls.
+function isValidOrigin(origin: string): boolean {
+  return /^cdn(-[a-z0-9]+)?\.tinymoq\.com:\d+$/i.test(origin);
+}
+
+// Ask the autoscaler for the relay hosting this broadcast (spawns/sticks as needed).
+// When the viewer's cluster differs from the publisher's, pass `origin` (the
+// publisher's relay host:port) so the assigned edge relay pulls the stream across
+// clusters. Returns null if /assign is unavailable — there is NO static fallback.
+// The /assign response is dual-mode (cutover-safe):
+//   bare text  "host:port"                         -> sign tokens with the tenant key
+//   JSON  {"relay":"host:port","key":<b64url|null>,"byok":<bool>}
+//     - managed:  key is the per-stream HMAC secret -> sign THIS broadcast with `key`
+//     - BYOK:     key is null + byok true            -> Worker signs its own EdDSA token
+// /assign is sticky; in managed mode a reap/respawn yields a new key, so do NOT cache
+// the key — sign on demand with whatever this call returned.
+async function assignRelay(
+  streamId: string,
+  cdnHost?: string | null,
+  origin?: string | null,
+  provisionKey?: string | null
+): Promise<{ host: string; port: number; key?: string } | null> {
+  const name = broadcastName(streamId);
+  const base = autoscalerBase(cdnHost);
+  let query = `broadcast=${encodeURIComponent(name)}`;
+  if (origin && isValidOrigin(origin)) {
+    query += `&origin=${encodeURIComponent(origin)}`;
+  }
+  try {
+    const res = await fetch(`${base}/assign?${query}`, { headers: provisionHeaders(provisionKey) });
+    if (res.ok) {
+      const text = (await res.text()).trim();
+      let relayStr = text; // e.g. "cdn.tinymoq.com:8000"
+      let key: string | undefined;
+      // Per-stream / BYOK mode returns JSON; shared mode returns a bare "host:port".
+      if (text.startsWith("{")) {
+        try {
+          const obj = JSON.parse(text) as { relay?: string; key?: string | null };
+          if (obj.relay) relayStr = String(obj.relay).trim();
+          if (obj.key) key = String(obj.key); // null in BYOK mode — left undefined
+        } catch {
+          console.warn("assignRelay: /assign returned non-JSON starting with '{'");
+        }
+      }
+      const [host, portStr] = relayStr.split(":");
+      const port = parseInt(portStr, 10);
+      if (host && Number.isFinite(port)) {
+        return { host, port, key };
+      }
+    }
+    console.warn("assignRelay: unexpected /assign response", res.status);
+  } catch (e) {
+    console.warn("assignRelay: /assign failed", e);
+  }
+  return null;
+}
+
+// Free the relay route when a broadcast ends so the node can be scaled down.
+// Release on the same CDN the broadcast was assigned to (its stored relay_host).
+async function releaseRelay(streamId: string, cdnHost?: string | null, provisionKey?: string | null): Promise<void> {
+  const name = broadcastName(streamId);
+  const base = autoscalerBase(cdnHost);
+  try {
+    await fetch(`${base}/release?broadcast=${encodeURIComponent(name)}`, { headers: provisionHeaders(provisionKey) });
+  } catch (e) {
+    console.warn("releaseRelay: /release failed", e);
+  }
+}
+
+// Authenticate the Worker to TinyMoQ's provisioning API (/assign, /release) with an
+// opaque bearer that also identifies the tenant. Omitted when the key isn't set so
+// deploys are safe before the operator runs `wrangler secret put TINYMOQ_PROVISION_KEY`.
+function provisionHeaders(provisionKey?: string | null): HeadersInit {
+  return provisionKey ? { Authorization: `Bearer ${provisionKey}` } : {};
+}
+
+// Token lifetimes (seconds). Generous until a refresh loop exists, so long broadcasts /
+// long views aren't dropped mid-stream.
+const PUBLISHER_TOKEN_TTL = 12 * 60 * 60; // 12h
+const VIEWER_TOKEN_TTL = 6 * 60 * 60; // 6h
+
+// Mint a per-broadcast token, config-driven and guarded (returns null instead of throwing
+// so the endpoint still works). BYOK: sign EdDSA with the tenant's private key when set.
+// Managed: else sign HS256 with the per-stream `streamKey` from /assign. Neither => null.
+async function tryMintMoqToken(env: Env, claims: MoqClaims, streamKey?: string | null): Promise<string | null> {
+  try {
+    if (env.MOQ_AUTH_PRIVATE_JWK) return await mintEd25519Token(env.MOQ_AUTH_PRIVATE_JWK, claims);
+    if (streamKey) return await mintHs256Token(streamKey, claims);
+    console.warn("[moq-token] no signing material (no BYOK key, no per-stream key); no token");
+    return null;
+  } catch (e) {
+    console.error("[moq-token] mint failed", e);
+    return null;
+  }
+}
+
 async function handleStatsRoutes(
   request: Request,
   env: Env,
@@ -541,22 +748,18 @@ async function handleStatsRoutes(
   }
 
   // GET /api/stats/greet - Get live broadcasts with viewer counts (public)
-  // Only returns broadcasts with a heartbeat within the last 15 seconds
   if (method === "GET" && path === "/api/stats/greet") {
-    // Get active broadcasts with recent heartbeats
-    // Streams without a recent heartbeat are considered stale and not returned
+    // Get active broadcasts with viewer counts
     const broadcasts = await env.DB
       .prepare(`
         SELECT
-          b.id, b.stream_id, b.started_at, b.origin,
+          b.id, b.stream_id, b.started_at,
           u.name as user_name,
           b.geo_country, b.geo_city, b.geo_region, b.geo_latitude, b.geo_longitude,
           (SELECT COUNT(*) FROM watch_events w WHERE w.stream_id = b.stream_id AND w.ended_at IS NULL) as viewer_count
         FROM broadcast_events b
         JOIN users u ON b.user_id = u.id
         WHERE b.ended_at IS NULL
-          AND b.last_heartbeat IS NOT NULL
-          AND b.last_heartbeat > datetime('now', '-15 seconds')
         ORDER BY b.started_at DESC
       `)
       .all();
@@ -575,7 +778,7 @@ async function handleStatsRoutes(
     const broadcasts = await env.DB
       .prepare(`
         SELECT
-          b.id, b.stream_id, b.started_at, b.origin,
+          b.id, b.stream_id, b.started_at,
           u.id as user_id, u.name as user_name, u.email as user_email, u.avatar_url,
           b.geo_country, b.geo_city, b.geo_region, b.geo_latitude, b.geo_longitude, b.geo_timezone
         FROM broadcast_events b
@@ -612,49 +815,70 @@ async function handleStatsRoutes(
       return Response.json({ error: "Authentication required" }, { status: 401 });
     }
 
-    const body = await request.json() as { stream_id: string; origin?: string };
+    const body = await request.json() as { stream_id: string; publisher_cdn?: string };
     if (!body.stream_id) {
       return Response.json({ error: "stream_id required" }, { status: 400 });
     }
 
-    // Default to 'cloudflare' if not specified (Chrome/QUIC)
-    // Use 'earthseed' for Safari/WebSocket connections
-    const origin = body.origin || 'cloudflare';
-
     const geo = getGeoFromRequest(request);
     console.log("Broadcast geo data:", JSON.stringify(geo));
+
+    // Ask the tinymoq autoscaler which relay to publish to (sticky per broadcast
+    // name). Optional publisher_cdn picks which CDN destination to assign on (testing).
+    // No static fallback: if /assign is down, relay is null and the client retries.
+    const assigned = await assignRelay(body.stream_id, body.publisher_cdn, undefined, env.TINYMOQ_PROVISION_KEY);
+    const relayHost = assigned?.host ?? null;
+    const relayPort = assigned?.port ?? null;
+
     const result = await env.DB
       .prepare(`
-        INSERT INTO broadcast_events (user_id, stream_id, origin, geo_country, geo_city, geo_region, geo_latitude, geo_longitude, geo_timezone)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO broadcast_events (user_id, stream_id, geo_country, geo_city, geo_region, geo_latitude, geo_longitude, geo_timezone, relay_host, relay_port)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING id
       `)
-      .bind(user.id, body.stream_id, origin, geo.country, geo.city, geo.region, geo.latitude, geo.longitude, geo.timezone)
+      .bind(user.id, body.stream_id, geo.country, geo.city, geo.region, geo.latitude, geo.longitude, geo.timezone, relayHost, relayPort)
       .first<{ id: number }>();
 
-    return Response.json({ id: result?.id, stream_id: body.stream_id, origin, geo });
+    // Mint a publisher token scoped to THIS broadcast (publish + read acks on its own
+    // path only). Owner/auth already enforced above; the relay enforces the scope.
+    // Signed with the relay's per-stream key when /assign returned one (managed mode),
+    // else with the tenant's BYOK Ed25519 key.
+    const publisherJwt = assigned
+      ? await tryMintMoqToken(env, {
+          put: [broadcastName(body.stream_id)],
+          get: [broadcastName(body.stream_id)],
+          exp: Math.floor(Date.now() / 1000) + PUBLISHER_TOKEN_TTL,
+        }, assigned.key)
+      : null;
+
+    return Response.json({
+      id: result?.id,
+      stream_id: body.stream_id,
+      geo,
+      relay: assigned ? `${relayHost}:${relayPort}` : null,
+      jwt: publisherJwt,
+    });
   }
 
   // POST /api/stats/broadcast/:id/end - End a broadcast
   const broadcastEndMatch = path.match(/^\/api\/stats\/broadcast\/(\d+)\/end$/);
   if (method === "POST" && broadcastEndMatch) {
     const eventId = parseInt(broadcastEndMatch[1]);
+
+    // Look up the stream (and the CDN it was assigned on) to free the assignment.
+    const row = await env.DB
+      .prepare("SELECT stream_id, relay_host FROM broadcast_events WHERE id = ?")
+      .bind(eventId)
+      .first<{ stream_id: string; relay_host: string | null }>();
+
     await env.DB
       .prepare("UPDATE broadcast_events SET ended_at = datetime('now') WHERE id = ?")
       .bind(eventId)
       .run();
 
-    return Response.json({ success: true });
-  }
-
-  // POST /api/stats/broadcast/:id/heartbeat - Update broadcaster heartbeat (keeps stream alive)
-  const broadcastHeartbeatMatch = path.match(/^\/api\/stats\/broadcast\/(\d+)\/heartbeat$/);
-  if (method === "POST" && broadcastHeartbeatMatch) {
-    const eventId = parseInt(broadcastHeartbeatMatch[1]);
-    await env.DB
-      .prepare("UPDATE broadcast_events SET last_heartbeat = datetime('now') WHERE id = ? AND ended_at IS NULL")
-      .bind(eventId)
-      .run();
+    if (row?.stream_id) {
+      await releaseRelay(row.stream_id, row.relay_host, env.TINYMOQ_PROVISION_KEY);
+    }
 
     return Response.json({ success: true });
   }

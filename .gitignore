@@ -166,3 +166,8 @@ dist
 !.env.example
 .wrangler/
 .dev.vars
+
+# BYOK MoQ relay signing key material — SECRET, never commit
+moq-auth.*.jwk
+MOQ-KEY-HANDOFF.md
+*.private.jwk

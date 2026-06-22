@@ -1,60 +1,51 @@
-import { defineConfig, Plugin } from "vite";
-import { resolve, dirname as pathDirname } from "path";
-import { fileURLToPath } from "url";
+import { defineConfig, type Plugin } from "vite";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = pathDirname(__filename);
-
-// Fix broken .ts imports in @moq/hang compiled JS
-function fixMoqHangWorklets(): Plugin {
+// Force the MoQ stack to use WebTransport ONLY (no WebSocket, no race).
+//
+// @moq/net's connect() races a WebSocket fallback against WebTransport by
+// default (500ms head start, Promise.any). tinymoq has no WebSocket endpoint
+// (the relay is built without it), so the wss:// leg always fails and only adds
+// latency + console noise. The web components expose no option to disable it, so
+// we patch the dependency at build time: flip the WS gate from opt-out
+// (`enabled !== false`) to opt-in (`enabled === true`). Since nothing enables
+// WebSocket, connect() then only ever attempts WebTransport — no fallback, no race.
+//
+// Note: this drops the WS fallback for browsers without native WebTransport
+// (old Safari, Firefox) — but those can't talk to tinymoq anyway (WT-only relay).
+function moqWebTransportOnly(): Plugin {
+  const WS_GATE = "props?.websocket?.enabled !== false";
+  let patched = 0;
   return {
-    name: "fix-moq-hang-worklets",
+    name: "moq-webtransport-only",
     enforce: "pre",
-    resolveId(source, importer) {
-      // Fix: ./render-worklet.ts?worker&url -> ./render-worklet.js?worker&url
-      if (source === "./render-worklet.ts?worker&url" && importer?.includes("@moq/hang")) {
-        const dir = pathDirname(importer);
-        return { id: resolve(dir, "render-worklet.js") + "?worker&url", external: false };
-      }
-      // Fix: ./capture-worklet.ts?worker&url -> ./capture-worklet.js?worker&url
-      if (source === "./capture-worklet.ts?worker&url" && importer?.includes("@moq/hang")) {
-        const dir = pathDirname(importer);
-        return { id: resolve(dir, "capture-worklet.js") + "?worker&url", external: false };
+    transform(code, id) {
+      // Match @moq/net's connection/connect.js across all (possibly nested) copies.
+      if (id.includes("@moq") && code.includes("connectWebSocket") && code.includes(WS_GATE)) {
+        patched++;
+        return { code: code.replace(WS_GATE, "props?.websocket?.enabled === true"), map: null };
       }
       return null;
     },
-  };
-}
-
-// Fix broken exports in @moq/hang-ui
-function fixMoqHangUI(): Plugin {
-  const hangUIDir = resolve(__dirname, "node_modules/@moq/hang-ui");
-
-  return {
-    name: "fix-moq-hang-ui",
-    enforce: "pre",
-    resolveId(source) {
-      if (source === "@moq/hang-ui/publish/element") {
-        return resolve(hangUIDir, "publish-controls.esm.js");
+    buildEnd() {
+      if (patched === 0) {
+        this.warn(
+          "moq-webtransport-only: did not patch any @moq/net connect.js — the WS gate string may have changed upstream; WebSocket race may still be active."
+        );
+      } else {
+        // eslint-disable-next-line no-console
+        console.log(`moq-webtransport-only: patched ${patched} @moq/net connect module(s) to WebTransport-only`);
       }
-      if (source === "@moq/hang-ui/watch/element") {
-        return resolve(hangUIDir, "watch-controls.esm.js");
-      }
-      return null;
     },
   };
 }
 
 export default defineConfig({
-  plugins: [fixMoqHangWorklets(), fixMoqHangUI()],
+  plugins: [moqWebTransportOnly()],
   build: {
     outDir: "dist",
     emptyDirBeforeWrite: true,
   },
   server: {
     port: 3000,
-  },
-  optimizeDeps: {
-    exclude: ["@moq/hang", "@moq/hang-ui", "@moq/lite"],
   },
 });

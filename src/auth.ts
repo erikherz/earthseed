@@ -63,17 +63,20 @@ export function logout(): void {
   window.location.href = "/api/auth/logout";
 }
 
-// Origin type for broadcast sources
-export type BroadcastOrigin = "cloudflare" | "earthseed";
-
 // Stats logging functions
-export async function logBroadcastStart(streamId: string, origin: BroadcastOrigin = "cloudflare"): Promise<number | null> {
+export interface BroadcastStart {
+  eventId: number;
+  relay: string | null; // assigned tinymoq relay "host:port", or null on failure
+  jwt: string | null; // per-broadcast publisher token (scoped to this stream), or null
+}
+
+export async function logBroadcastStart(streamId: string, publisherCdn?: string): Promise<BroadcastStart | null> {
   try {
-    console.log("Attempting to log broadcast start for stream:", streamId, "origin:", origin);
+    console.log("Attempting to log broadcast start for stream:", streamId, publisherCdn ? `(publisher CDN: ${publisherCdn})` : "");
     const response = await fetch("/api/stats/broadcast", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ stream_id: streamId, origin }),
+      body: JSON.stringify({ stream_id: streamId, publisher_cdn: publisherCdn }),
     });
     if (!response.ok) {
       const errorText = await response.text();
@@ -81,10 +84,36 @@ export async function logBroadcastStart(streamId: string, origin: BroadcastOrigi
       return null;
     }
     const data = await response.json();
-    console.log("Broadcast started with geo:", data.geo, "origin:", data.origin);
-    return data.id;
+    console.log("Broadcast started with geo:", data.geo, "relay:", data.relay);
+    return { eventId: data.id, relay: data.relay ?? null, jwt: data.jwt ?? null };
   } catch (e) {
     console.error("Error logging broadcast start:", e);
+    return null;
+  }
+}
+
+// Look up the relay hosting a live broadcast (for viewers to co-locate) plus a
+// per-broadcast viewer token. Returns { relay: "host:port", jwt } or null if the
+// stream is offline / not yet routed (404) or access is denied (401 on auth-required
+// streams without a session). Optional viewerCdn pulls from a specific CDN destination;
+// optional origin (publisher relay host:port) forces a cross-cluster pull source (testing).
+export interface StreamRoute {
+  relay: string;
+  jwt: string | null;
+}
+
+export async function getStreamRoute(streamId: string, viewerCdn?: string, origin?: string): Promise<StreamRoute | null> {
+  try {
+    const qp = new URLSearchParams();
+    if (viewerCdn) qp.set("viewer-cdn", viewerCdn);
+    if (origin) qp.set("origin", origin);
+    const qs = qp.toString() ? `?${qp.toString()}` : "";
+    const response = await fetch(`/api/streams/${streamId}/route${qs}`);
+    if (!response.ok) return null; // 404 = offline, 401 = auth required
+    const data = await response.json();
+    if (!data.relay) return null;
+    return { relay: data.relay, jwt: data.jwt ?? null };
+  } catch {
     return null;
   }
 }
@@ -94,15 +123,6 @@ export async function logBroadcastEnd(eventId: number): Promise<void> {
     await fetch(`/api/stats/broadcast/${eventId}/end`, { method: "POST" });
   } catch {
     // Ignore errors
-  }
-}
-
-// Send heartbeat to keep broadcast alive (call every 5 seconds)
-export async function sendBroadcastHeartbeat(eventId: number): Promise<void> {
-  try {
-    await fetch(`/api/stats/broadcast/${eventId}/heartbeat`, { method: "POST" });
-  } catch {
-    // Ignore errors - heartbeat is best-effort
   }
 }
 
@@ -178,7 +198,6 @@ export interface LiveBroadcast {
   id: number;
   stream_id: string;
   started_at: string;
-  origin: BroadcastOrigin;
   user_id: number;
   user_name: string;
   user_email: string;

@@ -23,8 +23,6 @@ CREATE TABLE IF NOT EXISTS broadcast_events (
   stream_id TEXT NOT NULL,
   started_at TEXT DEFAULT (datetime('now')),
   ended_at TEXT,
-  -- Origin relay: 'cloudflare' (Chrome/QUIC) or 'earthseed' (Safari/WebSocket)
-  origin TEXT DEFAULT 'cloudflare',
   -- Geolocation data from Cloudflare
   geo_country TEXT,
   geo_city TEXT,
@@ -32,6 +30,9 @@ CREATE TABLE IF NOT EXISTS broadcast_events (
   geo_latitude TEXT,
   geo_longitude TEXT,
   geo_timezone TEXT,
+  -- Assigned tinymoq relay (broadcast→relay routing directory)
+  relay_host TEXT,
+  relay_port INTEGER,
   FOREIGN KEY (user_id) REFERENCES users(id)
 );
 

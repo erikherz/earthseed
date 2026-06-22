@@ -1,25 +1,15 @@
-console.log("[Earthseed] Version: 2026-01-22-v6 (Simplified: fill height, compute width)");
-
 // Safari WebSocket fallback - MUST install before hang components load
 // Using our patched version that handles requireUnreliable gracefully
 import { install as installWebTransportPolyfill } from "./webtransport-polyfill";
 // WebCodecs polyfill for Opus audio encoding on Safari
 import { install as installWebCodecsPolyfill } from "./webcodecs-polyfill";
 
-// Relay configuration - toggle between relay modes:
-// - "luke": Pure Luke's servers (cdn.moq.dev/anon) - both browsers use Luke's relay
-//           Luke natively supports WebSocket fallback for Safari
-// - "linode": Pure Linode servers (us-central.earthseed.live) - both browsers use Linode
-//             Future: will race multiple Linode servers for lowest latency
-// - "cloudflare-hybrid": CloudFlare for Chrome + Linode for Safari
-//                        Requires cloudflare-adapter bridge running on Linode
-const RELAY_MODE: "luke" | "linode" | "cloudflare-hybrid" = "linode";
-
 // Detect Safari - even Safari 17+ with WebTransport has compatibility issues with some relays
 const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
 
-// Check if we need the polyfill: either no WebTransport or Safari (which has issues)
-const needsPolyfill = typeof WebTransport === "undefined" || isSafari;
+// Check if we need the polyfill: only when WebTransport is not available
+// Safari now uses native WebTransport with Cloudflare relay (fallback relays disabled)
+const needsPolyfill = typeof WebTransport === "undefined";
 if (needsPolyfill) {
   const reason = typeof WebTransport === "undefined"
     ? "WebTransport not supported"
@@ -45,17 +35,15 @@ if (isSafari) {
   console.log("Safari: Patched MediaStreamTrack.getSettings for channelCount");
 }
 
-// Theme toggle functionality
+// Theme initialization - must run early to prevent flash
 function initTheme() {
   const savedTheme = localStorage.getItem("theme");
   const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
 
-  // Use saved theme, or system preference, default to dark
   if (savedTheme === "light" || (!savedTheme && !prefersDark)) {
     document.documentElement.classList.add("light");
   }
 
-  // Set up toggle button when DOM is ready
   document.addEventListener("DOMContentLoaded", () => {
     const themeToggle = document.getElementById("theme-toggle");
     if (themeToggle) {
@@ -69,166 +57,31 @@ function initTheme() {
 }
 initTheme();
 
-// Flip device button appearance: selected=dim, available=bright
-// The hang component sets inline opacity (selected=1, unselected=0.5)
-// We invert this by adding CSS classes based on the opacity value
-function initDeviceButtonFlipper() {
-  document.addEventListener("DOMContentLoaded", () => {
-    // Add CSS to invert the visual appearance
-    const style = document.createElement("style");
-    style.textContent = `
-      /* Hide the Microphone toggle button (keep audio-only-btn) */
-      hang-publish button[title="Microphone"] { display: none !important; }
-
-      /* Reorder buttons: Audio, Video, Screen, None */
-      hang-publish button.audio-only-btn { order: 1 !important; }
-      hang-publish button[title="Camera"] { order: 2 !important; }
-      hang-publish button[title="Screen"] { order: 3 !important; }
-      hang-publish button[title="Nothing"] { order: 4 !important; }
-
-      /* Replace camera emoji with video camera emoji */
-      hang-publish button[title="Camera"] {
-        font-size: 0 !important;
-      }
-      hang-publish button[title="Camera"]::after {
-        content: "📹";
-        font-size: 1.25rem;
-      }
-
-      /* Selected device = dim (already chosen, de-emphasized) */
-      hang-publish button[title].device-selected {
-        filter: grayscale(50%) brightness(0.7) !important;
-        opacity: 1 !important;
-      }
-      /* Available device = bright with glow (click me!) */
-      hang-publish button[title].device-available {
-        filter: brightness(1.1) !important;
-        opacity: 1 !important;
-        box-shadow: 0 0 8px rgba(59, 130, 246, 0.5);
-      }
-
-      /* Status indicator: move to left of device buttons, show only ball */
-      hang-publish > div {
-        flex-wrap: nowrap !important;
-      }
-      hang-publish > div > div:first-child {
-        order: 1 !important;
-        display: flex !important;
-        align-items: center !important;
-      }
-      hang-publish > div > div:last-child {
-        order: 0 !important;
-        position: relative;
-        cursor: default;
-      }
-      /* Status indicator tooltip styling */
-      hang-publish > div > div:last-child.status-indicator-styled {
-        font-size: 1.25rem;
-        line-height: 1;
-      }
-      hang-publish > div > div:last-child.status-indicator-styled::after {
-        content: attr(data-status-text);
-        position: absolute;
-        bottom: 100%;
-        left: 50%;
-        transform: translateX(-50%);
-        background: rgba(0, 0, 0, 0.85);
-        color: #fff;
-        padding: 4px 8px;
-        border-radius: 4px;
-        font-size: 0.75rem;
-        white-space: nowrap;
-        opacity: 0;
-        pointer-events: none;
-        transition: opacity 0.15s ease;
-        margin-bottom: 4px;
-      }
-      hang-publish > div > div:last-child.status-indicator-styled:hover::after {
-        opacity: 1;
-      }
-    `;
-    document.head.appendChild(style);
-
-    const updateButtonClasses = () => {
-      const hangPublish = document.querySelector("hang-publish");
-      if (!hangPublish) return;
-
-      const buttons = hangPublish.querySelectorAll('button[title]');
-      buttons.forEach((btn) => {
-        const button = btn as HTMLButtonElement;
-        const opacity = parseFloat(button.style.opacity);
-
-        // hang sets opacity: 1 = selected/active, 0.5 = available
-        // User wants INVERTED: selected = dim, available = bright
-        if (opacity >= 0.9 || isNaN(opacity)) {
-          // hang's selected (opacity 1) → make it DIM
-          button.classList.remove("device-available");
-          button.classList.add("device-selected");
-        } else {
-          // hang's available (opacity 0.5) → make it BRIGHT
-          button.classList.remove("device-selected");
-          button.classList.add("device-available");
-        }
-      });
-
-      // Style the status indicator: show only emoji, text as hover tooltip
-      const controlsContainer = hangPublish.querySelector(":scope > div");
-      if (controlsContainer) {
-        const statusDiv = controlsContainer.querySelector(":scope > div:last-child") as HTMLElement;
-        if (statusDiv && statusDiv.textContent) {
-          const fullText = statusDiv.textContent.trim();
-          // Only process if there's text after the emoji (not already processed)
-          // Check if it has more than just an emoji (emojis are ~2 chars in length)
-          if (fullText.length > 2) {
-            // Extract emoji (first character or emoji sequence) and text
-            const emojiMatch = fullText.match(/^([\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}])/u);
-            if (emojiMatch) {
-              const emoji = emojiMatch[1];
-              const text = fullText.slice(emoji.length).replace(/^\s+/, ''); // Remove leading space/nbsp
-              if (text) {
-                statusDiv.textContent = emoji;
-                statusDiv.setAttribute("data-status-text", text);
-                statusDiv.classList.add("status-indicator-styled");
-              }
-            }
-          }
-        }
-      }
-    };
-
-    // Use MutationObserver to watch for style changes on buttons
-    const setupObserver = () => {
-      const hangPublish = document.querySelector("hang-publish");
-      if (!hangPublish) {
-        setTimeout(setupObserver, 100);
-        return;
-      }
-
-      const observer = new MutationObserver(() => {
-        updateButtonClasses();
-      });
-
-      observer.observe(hangPublish, {
-        attributes: true,
-        attributeFilter: ["style"],
-        subtree: true,
-        childList: true,
-        characterData: true,
-      });
-
-      // Initial update after component renders
-      setTimeout(updateButtonClasses, 100);
-      setTimeout(updateButtonClasses, 300);
-      setTimeout(updateButtonClasses, 500);
-    };
-
-    setupObserver();
-  });
+// --- Minimal typings for the headless @moq/publish + @moq/watch core elements ---
+// The core elements render no controls of their own; we drive them programmatically.
+// @moq/signals Signals expose peek()/set()/subscribe() (subscribe returns an unsubscribe fn).
+interface MoqSignal<T> {
+  peek(): T;
+  set(value: T): void;
+  subscribe(fn: (value: T) => void): () => void;
 }
-initDeviceButtonFlipper();
+type ConnStatus = "disconnected" | "connecting" | "connected";
+type PublishSource = "camera" | "screen" | "file" | null | undefined;
 
-// Linode relay servers for racing (used in linode mode)
-const LINODE_RELAYS = [
+interface MoqPublishElement extends HTMLElement {
+  source: PublishSource;
+  invisible: boolean;
+  muted: boolean;
+  connection: { status: MoqSignal<ConnStatus> };
+  state: { source: MoqSignal<PublishSource> };
+}
+
+interface MoqWatchElement extends HTMLElement {
+  muted: boolean;
+}
+
+// Safari fallback relay servers (WebSocket-enabled)
+const FALLBACK_RELAYS = [
   "us-central.earthseed.live",
   "eu-central.earthseed.live",
   "ap-south.earthseed.live",
@@ -250,13 +103,7 @@ interface ServerStatus {
 
 const serverStatus: ServerStatus = {
   mode: needsPolyfill ? "websocket" : "webtransport",
-  selectedServer: (() => {
-    switch (RELAY_MODE) {
-      case "luke": return "cdn.moq.dev/anon";
-      case "linode": return "us-central.earthseed.live/anon";
-      case "cloudflare-hybrid": return isSafari ? "us-central.earthseed.live/anon" : "relay-next.cloudflare.mediaoverquic.com";
-    }
-  })(),
+  selectedServer: "cdn.tinymoq.com",
   connected: false,
   raceResults: [],
 };
@@ -544,7 +391,6 @@ function updateBrowserSupportPanel() {
       <button class="details-btn" id="support-details-btn">Details</button>
     </div>
     <div class="server-details hidden" id="support-details-content">
-      <div id="playback-settings-container" class="playback-settings"></div>
       ${detailsContent}
     </div>
   `;
@@ -561,36 +407,39 @@ function updateBrowserSupportPanel() {
   });
 }
 
-// Race requests to find the lowest-latency Linode relay server
-async function selectBestLinodeRelay(): Promise<string> {
+// Race requests to find the lowest-latency relay server
+async function selectBestFallbackRelay(): Promise<string> {
+  const testPath = "/fingerprint";
   const timeout = 5000; // 5 second timeout per server
 
   // Track all results for the status panel
-  const results: RelayResult[] = LINODE_RELAYS.map(domain => ({
+  const results: RelayResult[] = FALLBACK_RELAYS.map(domain => ({
     domain,
     latency: null,
   }));
 
   // Create a promise for each server that resolves with result
-  const racePromises = LINODE_RELAYS.map(async (domain, index) => {
+  const racePromises = FALLBACK_RELAYS.map(async (domain, index) => {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeout);
     const startTime = performance.now();
 
     try {
-      // Earthseed relays use port 443 - just test connectivity (any response is fine)
-      const response = await fetch(`https://${domain}/`, {
+      const response = await fetch(`https://${domain}:8888${testPath}`, {
         signal: controller.signal,
         cache: "no-store",
-        method: "HEAD", // Faster than GET
       });
       clearTimeout(timeoutId);
 
-      // Any response means the server is reachable - we just care about latency
-      const latency = performance.now() - startTime;
-      results[index].latency = latency;
-      console.log(`Relay ${domain} responded in ${latency.toFixed(0)}ms (HTTP ${response.status})`);
-      return { domain, latency };
+      if (response.ok) {
+        const latency = performance.now() - startTime;
+        results[index].latency = latency;
+        console.log(`Relay ${domain} responded in ${latency.toFixed(0)}ms`);
+        return { domain, latency };
+      }
+      const error = `HTTP ${response.status}`;
+      results[index].error = error;
+      throw new Error(error);
     } catch (error) {
       clearTimeout(timeoutId);
       if (!results[index].error) {
@@ -619,16 +468,16 @@ async function selectBestLinodeRelay(): Promise<string> {
     ]);
 
     serverStatus.raceResults = results;
-    serverStatus.selectedServer = `${winner.domain}/anon`;
+    serverStatus.selectedServer = winner.domain;
     serverStatus.connected = true;
 
     return winner.domain;
   } catch {
     console.warn("All relay servers failed latency test, using default");
     serverStatus.raceResults = results;
-    serverStatus.selectedServer = `${LINODE_RELAYS[0]}/anon`;
+    serverStatus.selectedServer = FALLBACK_RELAYS[0];
     serverStatus.connected = false;
-    return LINODE_RELAYS[0];
+    return FALLBACK_RELAYS[0];
   }
 }
 
@@ -647,8 +496,7 @@ function updateServerStatusPanel() {
     <p><strong>Server:</strong> ${serverStatus.selectedServer}</p>
   `;
 
-  // Show race results if we have them (linode mode with racing)
-  if (serverStatus.raceResults.length > 0) {
+  if (serverStatus.mode === "websocket" && serverStatus.raceResults.length > 0) {
     detailsContent += `
       <p><strong>Latency Test Results:</strong></p>
       <table class="latency-results">
@@ -665,7 +513,7 @@ function updateServerStatusPanel() {
     });
 
     for (const result of sorted) {
-      const isSelected = serverStatus.selectedServer.includes(result.domain);
+      const isSelected = result.domain === serverStatus.selectedServer;
       const latencyText = result.latency !== null
         ? `${result.latency.toFixed(0)}ms`
         : `Failed: ${result.error || "timeout"}`;
@@ -697,121 +545,32 @@ function updateServerStatusPanel() {
       btn.textContent = isHidden ? "Hide" : "Details";
     }
   });
-
 }
 
-// Relay URLs for each server
-const RELAY_URLS = {
-  luke: "https://cdn.moq.dev/anon",
-  cloudflare: "https://relay-next.cloudflare.mediaoverquic.com",
-  linode: "https://us-central.earthseed.live/anon",
-  // Future Linode servers for racing:
-  // linodeEU: "https://eu-central.earthseed.live/anon",
-  // linodeAP: "https://ap-south.earthseed.live/anon",
-};
-
-// Determine relay URL based on mode and browser
-// - luke: Both browsers use Luke's relay (he supports WebSocket natively)
-// - linode: Both browsers use Linode relay
-// - cloudflare-hybrid: Chrome→CloudFlare, Safari→Linode (requires bridge)
-function getRelayUrlForMode(): string {
-  switch (RELAY_MODE) {
-    case "luke":
-      return RELAY_URLS.luke;
-    case "linode":
-      return RELAY_URLS.linode;
-    case "cloudflare-hybrid":
-      // Chrome uses CloudFlare (WebTransport), Safari uses Linode (WebSocket)
-      return isSafari ? RELAY_URLS.linode : RELAY_URLS.cloudflare;
-  }
+// Record the relay this client actually connected to (assigned/routed, possibly a
+// CDN override or cross-cluster edge) and refresh the footer Server Status panel.
+function setActiveRelay(relay: string | null) {
+  serverStatus.selectedServer = relay ?? "(no relay assigned)";
+  serverStatus.connected = !!relay;
+  updateServerStatusPanel();
 }
 
-let RELAY_URL = getRelayUrlForMode();
+// Per-broadcast relay tokens are minted server-side (BYOK) and returned by the Worker:
+// publishers get one from POST /api/stats/broadcast, viewers from GET /route. There is no
+// static client token — the browser never holds a long-lived, all-paths credential.
 const NAMESPACE_PREFIX = "earthseed.live";
 
-// Helper to get correct URL and name based on relay type
-function getRelayConfig(streamId: string): { url: string; name: string } {
-  const streamName = `${NAMESPACE_PREFIX}/${streamId}`;
-  // Both relays: URL is just the relay server, namespace goes in PUBLISH_NAMESPACE/ANNOUNCE
-  return {
-    url: RELAY_URL,
-    name: streamName,
-  };
-}
-
-// Debug logging for connection issues
-console.log("Earthseed config:", {
-  mode: RELAY_MODE,
-  relay: RELAY_URL,
-  isSafari,
-  namespace: NAMESPACE_PREFIX,
-  userAgent: navigator.userAgent,
-  hasWebTransport: typeof WebTransport !== "undefined",
-  needsPolyfill,
-  note: (() => {
-    switch (RELAY_MODE) {
-      case "luke": return "All browsers → Luke's relay (cdn.moq.dev)";
-      case "linode": return "All browsers → Linode relay (us-central.earthseed.live)";
-      case "cloudflare-hybrid": return isSafari
-        ? "Safari → Linode relay (WebSocket, bridged)"
-        : "Chrome → CloudFlare relay (WebTransport)";
-    }
-  })(),
-});
-
-// Wrap WebTransport to add detailed connection logging
-if (typeof WebTransport !== "undefined" && !needsPolyfill) {
-  const OriginalWebTransport = WebTransport;
-  // @ts-expect-error - wrapping native WebTransport
-  globalThis.WebTransport = class DebugWebTransport extends OriginalWebTransport {
-    constructor(url: string | URL, options?: WebTransportOptions) {
-      console.log("[WebTransport Debug] Creating connection:", {
-        url: url.toString(),
-        options: JSON.stringify(options, null, 2),
-      });
-      super(url, options);
-
-      const startTime = performance.now();
-
-      this.ready.then(() => {
-        const elapsed = (performance.now() - startTime).toFixed(0);
-        console.log(`[WebTransport Debug] Connection READY after ${elapsed}ms`, {
-          // @ts-expect-error - accessing internal state
-          protocol: this.protocol,
-        });
-      }).catch((err) => {
-        const elapsed = (performance.now() - startTime).toFixed(0);
-        console.error(`[WebTransport Debug] Connection FAILED after ${elapsed}ms:`, err);
-      });
-
-      this.closed.then((info) => {
-        console.log("[WebTransport Debug] Connection CLOSED:", {
-          closeCode: info.closeCode,
-          reason: info.reason,
-        });
-      }).catch((err) => {
-        console.error("[WebTransport Debug] Connection closed with error:", err);
-      });
-
-      // Log when datagrams/streams are accessed
-      const originalIncoming = this.incomingBidirectionalStreams;
-      console.log("[WebTransport Debug] incomingBidirectionalStreams available:", !!originalIncoming);
-    }
-  };
-  console.log("[WebTransport Debug] Wrapped native WebTransport for debugging");
-}
-
-// Dynamic imports for hang components - MUST happen after polyfills are installed
-// ES module static imports are hoisted and execute before any code runs
+// Dynamic imports for the MoQ web components - MUST happen after polyfills are installed.
+// These register the headless light-DOM core elements <moq-publish> and <moq-watch>
+// from @moq/publish + @moq/watch (which use @moq/net, negotiating moq-lite-04).
+// ES module static imports are hoisted and execute before any code runs.
 const loadHangComponents = async () => {
   // Install WebCodecs polyfill for Opus audio encoding (Safari)
-  // This must complete before hang components try to use AudioEncoder
+  // This must complete before the components try to use AudioEncoder
   await installWebCodecsPolyfill();
-  await import("@moq/hang/publish/element");
-  await import("@moq/hang/watch/element");
-  // UI controls (device picker, etc.)
-  await import("@moq/hang-ui/publish/element");
-  await import("@moq/hang-ui/watch/element");
+
+  await import("@moq/publish/element");
+  await import("@moq/watch/element");
 };
 
 import {
@@ -823,9 +582,9 @@ import {
   logout,
   logBroadcastStart,
   logBroadcastEnd,
-  sendBroadcastHeartbeat,
   logWatchStart,
   logWatchEnd,
+  getStreamRoute,
   checkStreamExists,
   getStreamSettings,
   updateStreamSettings,
@@ -835,11 +594,10 @@ import {
   type Geo,
   type StreamSettings,
   type LiveBroadcast,
-  type LiveViewer,
-  type BroadcastOrigin,
+  type LiveViewer
 } from "./auth";
 
-type View = "broadcast" | "watch" | "stats" | "stats-map" | "greet" | "scroll" | "stream-stats" | "stream-stats-map" | "admin";
+type View = "broadcast" | "watch" | "stats" | "stats-map" | "greet" | "stream-stats" | "stream-stats-map" | "admin";
 
 // Generate a random stream ID (5 lowercase alphanumeric characters)
 function generateRandomId(): string {
@@ -883,11 +641,6 @@ async function getRouteInfo(): Promise<{ view: View; streamId: string }> {
   // Greet view: /greet (broadcasters map)
   if (path === "/greet") {
     return { view: "greet", streamId: "" };
-  }
-
-  // Scroll view: /scroll (TikTok-style viewer)
-  if (path === "/scroll") {
-    return { view: "scroll", streamId: "" };
   }
 
   // Admin view: /cleardata
@@ -1105,11 +858,21 @@ function showLoginRequired() {
 }
 
 // Initialize broadcast view
+// Optional per-request CDN override for testing individual tinymoq destinations
+// (e.g. ?publisher-cdn=cdn-01.tinymoq.com, &viewer-cdn=cdn-02.tinymoq.com).
+function getCdnOverride(param: "publisher-cdn" | "viewer-cdn"): string | undefined {
+  const v = new URLSearchParams(window.location.search).get(param)?.trim();
+  return v || undefined;
+}
+
 function initBroadcastView(streamId: string, user: User | null) {
-  const streamName = `${NAMESPACE_PREFIX}/${streamId}`;
+  // The ".hang" suffix makes the catalog format explicit so the watcher can parse
+  // the catalog and subscribe to video/audio tracks (otherwise detectFormat() is
+  // undefined and the viewer only fetches catalog.json, never video/hd).
+  const streamName = `${NAMESPACE_PREFIX}/${streamId}.hang`;
   const shareUrl = `${window.location.origin}/${streamId}`;
 
-  console.log(`Earthseed.Live Broadcast - Stream: ${streamId}`);
+  console.log(`Earthseed Broadcast - Stream: ${streamId}`);
 
   // Show broadcast view, hide watch view
   document.getElementById("broadcast-view")?.classList.remove("hidden");
@@ -1187,355 +950,206 @@ function initBroadcastView(streamId: string, user: User | null) {
     });
   }
 
-  // Set stream name on publisher
-  const publisher = document.querySelector("hang-publish") as HTMLElement & { video: boolean; device: string; active?: { connection?: { status?: { peek?: () => string } } } };
+  // Drive the headless <moq-publish> core element with our own control bar.
+  const publisher = document.querySelector("moq-publish") as MoqPublishElement | null;
   if (publisher) {
-    const relayConfig = getRelayConfig(streamId);
-    console.log("[Hang Debug] Setting up publisher:", {
-      url: relayConfig.url,
-      name: relayConfig.name,
-      relayMode: RELAY_MODE,
-    });
-    publisher.setAttribute("url", relayConfig.url);
-    publisher.setAttribute("name", relayConfig.name);
+    // The relay URL is NOT static: on go-live the Worker calls tinymoq /assign and
+    // returns the relay hosting this broadcast; we point the publisher at it then.
+    publisher.setAttribute("name", streamName);
 
-    // Monitor connection status changes
-    const checkConnectionStatus = () => {
-      try {
-        const instance = (publisher as any).active?.peek?.();
-        if (instance?.connection) {
-          const status = instance.connection.status?.peek?.();
-          console.log("[Hang Debug] Publisher connection status:", status);
-        }
-      } catch (e) {
-        // Ignore errors accessing internal state
-      }
-    };
-    // Check status periodically for debugging
-    const statusInterval = setInterval(checkConnectionStatus, 2000);
-    setTimeout(() => clearInterval(statusInterval), 30000); // Stop after 30s
+    type DeviceMode = "camera" | "audio" | "screen" | "off";
 
-    // Track broadcast event
     let broadcastEventId: number | null = null;
-    let heartbeatInterval: number | null = null;
+    let goLivePromise: Promise<void> | null = null;
 
-    // Log broadcast start when user starts streaming
-    // Safari uses WebSocket to earthseed relay, Chrome uses WebTransport to CloudFlare
-    const broadcastOrigin: BroadcastOrigin = isSafari ? "earthseed" : "cloudflare";
-    const checkBroadcastStatus = () => {
-      // Status is rendered by hang-publish-ui wrapper, not hang-publish itself
-      const publisherUI = document.querySelector("hang-publish-ui") as HTMLElement | null;
-      const searchRoot = publisherUI || publisher;
-
-      // Debug: dump all text content
-      const allText: string[] = [];
-      searchRoot.querySelectorAll("*").forEach(el => {
-        const t = (el as HTMLElement).textContent?.trim();
-        if (t && t.length < 50) allText.push(t);
+    // First device selection = go live: get the assigned relay, then connect to it.
+    // logBroadcastStart hits POST /api/stats/broadcast which calls /assign and stores
+    // the relay on the broadcast row (so viewers can co-locate). Idempotent/sticky.
+    const goLive = (): Promise<void> => {
+      if (goLivePromise) return goLivePromise;
+      goLivePromise = logBroadcastStart(streamId, getCdnOverride("publisher-cdn")).then((res) => {
+        broadcastEventId = res?.eventId ?? null;
+        const relay = res?.relay;
+        const jwt = res?.jwt;
+        if (!relay || !jwt) {
+          // /assign failed or no token was minted — there is no static relay/token to
+          // fall back to. Allow a retry on the next device action rather than
+          // connecting to a dead endpoint.
+          console.error("[routing] go-live got no relay/token (assign unavailable); pick a device again to retry");
+          setActiveRelay(null);
+          goLivePromise = null;
+          return;
+        }
+        publisher.setAttribute("url", `https://${relay}/?jwt=${jwt}`);
+        setActiveRelay(relay);
+        console.log("[routing] broadcaster relay:", relay, "eventId:", broadcastEventId);
       });
-      console.log("[Broadcast Status Debug] All text in", publisherUI ? "hang-publish-ui" : "hang-publish", ":", [...new Set(allText)]);
+      return goLivePromise;
+    };
 
-      // Search for status in both light DOM and shadow DOM
-      let fullStatus = "";
-
-      // Helper to recursively search elements including shadow roots
-      const searchInElement = (root: Element | ShadowRoot | Document): string => {
-        const elements = root.querySelectorAll("*");
-        for (const el of elements) {
-          // Skip style, script, and other non-visible elements
-          const tagName = el.tagName?.toLowerCase();
-          if (tagName === "style" || tagName === "script" || tagName === "link") {
-            continue;
-          }
-
-          // Recursively check shadow roots first
-          const shadowRoot = (el as HTMLElement).shadowRoot;
-          if (shadowRoot) {
-            const result = searchInElement(shadowRoot);
-            if (result) return result;
-          }
-
-          // Check for status indicators - use innerText for visible text only
-          const text = (el as HTMLElement).innerText || "";
-          const dataText = (el as HTMLElement).getAttribute?.("data-status-text") || "";
-          const combined = text + " " + dataText;
-
-          // Look for status emoji indicators
-          if (combined.includes("🟢") || combined.includes("🟡") || combined.includes("🔴")) {
-            console.log("[Broadcast Status Debug] Found status in element:", tagName, combined.substring(0, 100));
-            return combined.trim();
-          }
-          // Look for status text patterns
-          if ((combined.includes("Live") || combined.includes("Audio Only") || combined.includes("Select Device")) &&
-              !combined.includes("{") && combined.length < 200) {
-            console.log("[Broadcast Status Debug] Found status text in element:", tagName, combined.substring(0, 100));
-            return combined.trim();
-          }
-        }
-        return "";
-      };
-
-      // Check if searchRoot has shadow root
-      const hasShadow = !!searchRoot.shadowRoot;
-      console.log("[Broadcast Status Debug] searchRoot shadowRoot:", hasShadow);
-
-      // Search starting from shadow root if it exists, otherwise light DOM
-      if (searchRoot.shadowRoot) {
-        fullStatus = searchInElement(searchRoot.shadowRoot);
-      }
-      if (!fullStatus) {
-        fullStatus = searchInElement(searchRoot);
-      }
-
-      console.log("[Broadcast Status Check] Status:", fullStatus, "| Event ID:", broadcastEventId);
-      if (fullStatus.includes("🟢") || fullStatus.includes("Live") || fullStatus.includes("Audio Only")) {
-        if (!broadcastEventId) {
-          logBroadcastStart(streamId, broadcastOrigin).then(id => {
-            broadcastEventId = id;
-            console.log("Broadcast started, event ID:", id, "origin:", broadcastOrigin);
-            // Start heartbeat to keep broadcast alive
-            if (id && !heartbeatInterval) {
-              heartbeatInterval = window.setInterval(() => {
-                if (broadcastEventId) sendBroadcastHeartbeat(broadcastEventId);
-              }, 5000);
-            }
-          });
-        }
-      } else if (broadcastEventId && fullStatus.includes("Select Device")) {
+    // End the broadcast: mark ended + free the relay assignment (server-side /release).
+    const endBroadcast = () => {
+      if (broadcastEventId) {
         logBroadcastEnd(broadcastEventId);
         console.log("Broadcast ended, event ID:", broadcastEventId);
-        // Stop heartbeat
-        if (heartbeatInterval) {
-          clearInterval(heartbeatInterval);
-          heartbeatInterval = null;
-        }
         broadcastEventId = null;
+      }
+      goLivePromise = null; // a later device selection re-assigns
+    };
+
+    // Map a control-bar selection to the element's source/invisible/muted props.
+    // audio-only = camera source with video disabled (invisible); off = no source.
+    const applyMode = (mode: DeviceMode) => {
+      switch (mode) {
+        case "camera":
+          publisher.invisible = false;
+          publisher.muted = false;
+          publisher.source = "camera";
+          break;
+        case "audio":
+          publisher.invisible = true;
+          publisher.muted = false;
+          publisher.source = "camera";
+          break;
+        case "screen":
+          publisher.invisible = false;
+          publisher.muted = false;
+          publisher.source = "screen";
+          break;
+        case "off":
+          publisher.source = null;
+          break;
+      }
+      // Going live (any real source) assigns + connects to a relay; "off" releases it.
+      if (mode === "off") {
+        endBroadcast();
+      } else {
+        void goLive();
       }
     };
 
-    // Observe status changes
-    const statusObserver = new MutationObserver((mutations) => {
-      console.log("[Broadcast Status] Mutation detected, checking status...");
-      checkBroadcastStatus();
-    });
-    statusObserver.observe(publisher, { childList: true, subtree: true, characterData: true, attributes: true });
+    // --- Build the control bar (status + device buttons + overlay toggle) ---
+    const bar = document.createElement("div");
+    bar.className = "publish-controls";
 
-    // Also check periodically in case mutations are missed
-    const statusCheckInterval = setInterval(checkBroadcastStatus, 3000);
-    // Initial check after component loads
-    setTimeout(checkBroadcastStatus, 1000);
-    setTimeout(checkBroadcastStatus, 2000);
-    setTimeout(checkBroadcastStatus, 5000);
+    const statusEl = document.createElement("div");
+    statusEl.className = "publish-status";
+    statusEl.textContent = "⚪";
+    statusEl.setAttribute("data-status-text", "Offline");
+    bar.appendChild(statusEl);
+
+    const deviceButtons: Partial<Record<DeviceMode, HTMLButtonElement>> = {};
+
+    // Selected = dim (already chosen, de-emphasized); available = bright (click me).
+    const setActiveButton = (mode: DeviceMode | null) => {
+      (Object.keys(deviceButtons) as DeviceMode[]).forEach((m) => {
+        const btn = deviceButtons[m];
+        if (!btn) return;
+        btn.classList.toggle("device-selected", m === mode);
+        btn.classList.toggle("device-available", m !== mode);
+      });
+    };
+
+    const makeDeviceButton = (mode: DeviceMode, emoji: string, label: string) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "publish-btn";
+      b.title = label;
+      b.textContent = emoji;
+      b.addEventListener("click", () => {
+        applyMode(mode);
+        setActiveButton(mode);
+      });
+      deviceButtons[mode] = b;
+      bar.appendChild(b);
+    };
+    makeDeviceButton("audio", "🎤", "Audio Only");
+    makeDeviceButton("camera", "📹", "Camera");
+    makeDeviceButton("screen", "🖥️", "Screen");
+    makeDeviceButton("off", "⏹️", "Off");
+    setActiveButton(null);
+
+    // Place the control bar directly after the <moq-publish> element.
+    publisher.insertAdjacentElement("afterend", bar);
+
+    // --- Status indicator (display only; go-live logging is handled by goLive) ---
+    const refreshStatus = () => {
+      const conn = publisher.connection?.status?.peek?.() ?? "disconnected";
+      const hasSource = !!publisher.state?.source?.peek?.();
+      let emoji = "⚪";
+      let text = "Offline";
+      if (conn === "connected" && hasSource) {
+        emoji = "🟢"; text = "Live";
+      } else if (conn === "connecting") {
+        emoji = "🟡"; text = "Connecting";
+      } else if (conn === "connected" && !hasSource) {
+        emoji = "🟡"; text = "Select Device";
+      }
+      statusEl.textContent = emoji;
+      statusEl.setAttribute("data-status-text", text);
+    };
+    try {
+      publisher.connection?.status?.subscribe?.(refreshStatus);
+      publisher.state?.source?.subscribe?.(refreshStatus);
+    } catch (err) {
+      console.warn("Could not subscribe to publish status signals:", err);
+    }
+    refreshStatus();
 
     // Log end on page unload
     window.addEventListener("beforeunload", () => {
-      if (heartbeatInterval) {
-        clearInterval(heartbeatInterval);
-      }
       if (broadcastEventId) {
         logBroadcastEnd(broadcastEventId);
       }
     });
 
-    // Inject audio-only button into device selector
-    const injectAudioButton = () => {
-      // Find the device selector container (div with flex layout containing buttons)
-      const deviceContainer = publisher.querySelector(":scope > div > div");
-      if (!deviceContainer || deviceContainer.querySelector(".audio-only-btn")) return;
+    // --- HTML overlay editor (broadcaster-authored HTML shown to viewers) ---
+    const overlayBtn = document.createElement("button");
+    overlayBtn.type = "button";
+    overlayBtn.title = "HTML Overlay";
+    overlayBtn.className = "publish-btn html-overlay-btn";
+    overlayBtn.textContent = "</>";
+    bar.appendChild(overlayBtn);
 
-      const audioBtn = document.createElement("button");
-      audioBtn.type = "button";
-      audioBtn.title = "Audio Only";
-      audioBtn.className = "audio-only-btn";
-      audioBtn.textContent = "🎤";
-      audioBtn.style.cursor = "pointer";
-      audioBtn.style.opacity = "0.5";
-
-      audioBtn.addEventListener("click", () => {
-        const isActive = audioBtn.style.opacity === "1";
-        if (isActive) {
-          // Turn off audio-only mode
-          publisher.video = true;
-          audioBtn.style.opacity = "0.5";
-        } else {
-          // Turn on audio-only mode
-          publisher.video = false;
-          publisher.device = "camera";
-          audioBtn.style.opacity = "1";
-        }
-      });
-
-      // Deselect audio-only button when other device buttons are clicked
-      const otherButtons = deviceContainer.querySelectorAll("button:not(.audio-only-btn)");
-      otherButtons.forEach((btn) => {
-        btn.addEventListener("click", () => {
-          // Deselect audio-only when another device is selected
-          if (audioBtn.style.opacity === "1") {
-            publisher.video = true;
-            audioBtn.style.opacity = "0.5";
-          }
-        });
-      });
-
-      // Insert after the first button (camera icon)
-      const buttons = deviceContainer.querySelectorAll("button");
-      if (buttons.length >= 1) {
-        buttons[0].after(audioBtn);
-      } else {
-        deviceContainer.appendChild(audioBtn);
-      }
-    };
-
-    // Try after component renders and observe for changes
-    const observer = new MutationObserver(() => injectAudioButton());
-    observer.observe(publisher, { childList: true, subtree: true });
-    setTimeout(injectAudioButton, 100);
-    setTimeout(injectAudioButton, 500);
-
-    // Inject HTML overlay button into device selector
-    // Note: With @moq/hang-ui, device buttons are in hang-publish-ui's Shadow DOM
-    const injectHtmlOverlayButton = () => {
-      const publisherUI = document.querySelector("hang-publish-ui");
-      const shadowRoot = publisherUI?.shadowRoot;
-      const deviceContainer = shadowRoot?.querySelector(".publishSourceSelectorContainer");
-      if (!deviceContainer || deviceContainer.querySelector(".html-overlay-btn")) return;
-
-      const htmlBtn = document.createElement("button");
-      htmlBtn.type = "button";
-      htmlBtn.title = "HTML Overlay";
-      htmlBtn.className = "html-overlay-btn";
-      htmlBtn.textContent = "</>";
-      htmlBtn.style.cursor = "pointer";
-      htmlBtn.style.opacity = "0.5";
-      htmlBtn.style.fontFamily = "monospace";
-      htmlBtn.style.fontWeight = "bold";
-      htmlBtn.style.fontSize = "0.9rem";
-
-      // Create the overlay input container
-      const overlayContainer = document.createElement("div");
-      overlayContainer.className = "html-overlay-container";
-      overlayContainer.innerHTML = `
-        <div class="html-overlay-input" contenteditable="true"></div>
-        <div class="html-overlay-hint">HTML content will be displayed below the video for all viewers</div>
-      `;
-
-      // Insert container after the section
-      const section = document.querySelector("#broadcast-view section");
-      if (section && section.parentNode) {
-        section.parentNode.insertBefore(overlayContainer, section.nextSibling);
-      }
-
-      const overlayInput = overlayContainer.querySelector(".html-overlay-input") as HTMLDivElement;
-      let saveTimeout: number | null = null;
-
-      // Load existing overlay content
-      getStreamSettings(streamId).then(settings => {
-        if (settings.overlay_html) {
-          overlayInput.textContent = settings.overlay_html;
-          htmlBtn.style.opacity = "1";
-        }
-      });
-
-      // Save overlay content with debounce
-      overlayInput.addEventListener("input", () => {
-        if (saveTimeout) clearTimeout(saveTimeout);
-        saveTimeout = window.setTimeout(() => {
-          const content = overlayInput.textContent || "";
-          updateStreamSettings(streamId, { overlay_html: content });
-          htmlBtn.style.opacity = content.trim() ? "1" : "0.5";
-        }, 500);
-      });
-
-      // Toggle overlay input visibility
-      htmlBtn.addEventListener("click", () => {
-        overlayContainer.classList.toggle("visible");
-        if (overlayContainer.classList.contains("visible")) {
-          overlayInput.focus();
-        }
-      });
-
-      // Append to device container
-      deviceContainer.appendChild(htmlBtn);
-    };
-
-    // Restyle status indicator: move to left, show only ball with tooltip
-    const restyleStatusIndicator = () => {
-      const publisherUI = document.querySelector("hang-publish-ui");
-      const shadowRoot = publisherUI?.shadowRoot;
-      if (!shadowRoot) return;
-
-      const deviceContainer = shadowRoot.querySelector(".publishSourceSelectorContainer");
-      const statusOutput = shadowRoot.querySelector("output");
-      if (!deviceContainer || !statusOutput) return;
-
-      // Skip if already restyled
-      if (statusOutput.classList.contains("status-restyled")) return;
-      statusOutput.classList.add("status-restyled");
-
-      // Hide "Source:" text by wrapping device buttons only
-      const sourceText = deviceContainer.firstChild;
-      if (sourceText?.nodeType === Node.TEXT_NODE && sourceText.textContent?.includes("Source")) {
-        sourceText.textContent = "";
-      }
-
-      // Move status indicator to be first in device container
-      deviceContainer.insertBefore(statusOutput, deviceContainer.firstChild);
-
-      // Style the status indicator
-      statusOutput.style.cssText = `
-        cursor: default;
-        position: relative;
-        font-size: 1.25rem;
-        line-height: 1;
-        margin-right: 8px;
-      `;
-
-      // Update tooltip on status changes
-      let isUpdating = false;
-      const updateTooltip = () => {
-        if (isUpdating) return;
-        const fullText = statusOutput.textContent || "";
-        // Only process if there's text after the emoji (not already processed)
-        if (fullText.length <= 2) return;
-
-        // Extract emoji (first character) and text (rest)
-        const match = fullText.match(/^([\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{1F7E0}-\u{1F7FF}])/u);
-        if (match) {
-          const emoji = match[1];
-          const text = fullText.slice(emoji.length).trim();
-          if (text) {
-            isUpdating = true;
-            statusOutput.textContent = emoji;
-            statusOutput.title = text;
-            isUpdating = false;
-          }
-        }
-      };
-
-      // Initial update
-      updateTooltip();
-
-      // Watch for status text changes
-      const statusObserver = new MutationObserver(updateTooltip);
-      statusObserver.observe(statusOutput, { childList: true, characterData: true, subtree: true });
-    };
-
-    // Inject HTML overlay button after component renders
-    // Use MutationObserver to catch when hang-publish-ui renders its controls in Shadow DOM
-    const publisherUI = document.querySelector("hang-publish-ui");
-    if (publisherUI?.shadowRoot) {
-      const uiObserver = new MutationObserver(() => {
-        injectHtmlOverlayButton();
-        restyleStatusIndicator();
-      });
-      uiObserver.observe(publisherUI.shadowRoot, { childList: true, subtree: true });
+    const overlayContainer = document.createElement("div");
+    overlayContainer.className = "html-overlay-container";
+    overlayContainer.innerHTML = `
+      <div class="html-overlay-input" contenteditable="true"></div>
+      <div class="html-overlay-hint">HTML content will be displayed below the video for all viewers</div>
+    `;
+    const section = document.querySelector("#broadcast-view section");
+    if (section && section.parentNode) {
+      section.parentNode.insertBefore(overlayContainer, section.nextSibling);
     }
-    setTimeout(injectHtmlOverlayButton, 200);
-    setTimeout(injectHtmlOverlayButton, 600);
-    setTimeout(injectHtmlOverlayButton, 1000);
-    setTimeout(restyleStatusIndicator, 200);
-    setTimeout(restyleStatusIndicator, 600);
-    setTimeout(restyleStatusIndicator, 1000);
+
+    const overlayInput = overlayContainer.querySelector(".html-overlay-input") as HTMLDivElement;
+    let saveTimeout: number | null = null;
+
+    // Load existing overlay content
+    getStreamSettings(streamId).then((settings) => {
+      if (settings.overlay_html) {
+        overlayInput.textContent = settings.overlay_html;
+        overlayBtn.classList.add("active");
+      }
+    });
+
+    // Save overlay content with debounce
+    overlayInput.addEventListener("input", () => {
+      if (saveTimeout) clearTimeout(saveTimeout);
+      saveTimeout = window.setTimeout(() => {
+        const content = overlayInput.textContent || "";
+        updateStreamSettings(streamId, { overlay_html: content });
+        overlayBtn.classList.toggle("active", !!content.trim());
+      }, 500);
+    });
+
+    // Toggle overlay input visibility
+    overlayBtn.addEventListener("click", () => {
+      overlayContainer.classList.toggle("visible");
+      if (overlayContainer.classList.contains("visible")) {
+        overlayInput.focus();
+      }
+    });
   }
 
   // New stream button
@@ -1596,9 +1210,12 @@ function showWatchLoginRequired() {
 
 // Initialize watch view
 async function initWatchView(streamId: string, user: User | null) {
-  const streamName = `${NAMESPACE_PREFIX}/${streamId}`;
+  // The ".hang" suffix makes the catalog format explicit so the watcher can parse
+  // the catalog and subscribe to video/audio tracks (otherwise detectFormat() is
+  // undefined and the viewer only fetches catalog.json, never video/hd).
+  const streamName = `${NAMESPACE_PREFIX}/${streamId}.hang`;
 
-  console.log(`Earthseed.Live Watch - Stream: ${streamId}`);
+  console.log(`Earthseed Watch - Stream: ${streamId}`);
 
   // Show watch view, hide broadcast view
   document.getElementById("watch-view")?.classList.remove("hidden");
@@ -1617,33 +1234,93 @@ async function initWatchView(streamId: string, user: User | null) {
     return;
   }
 
-  // Set stream name on watcher
-  const watcher = document.querySelector("hang-watch");
+  // Set stream name on watcher (headless <moq-watch> core element)
+  const watcher = document.querySelector("moq-watch") as MoqWatchElement | null;
   if (watcher) {
-    const relayConfig = getRelayConfig(streamId);
-    console.log("[Hang Debug] Setting up watcher:", {
-      url: relayConfig.url,
-      name: relayConfig.name,
-      relayMode: RELAY_MODE,
-    });
-    watcher.setAttribute("url", relayConfig.url);
-    watcher.setAttribute("name", relayConfig.name);
-
-    // Monitor connection status changes
-    const checkConnectionStatus = () => {
-      try {
-        const instance = (watcher as any).active?.peek?.();
-        if (instance?.connection) {
-          const status = instance.connection.status?.peek?.();
-          console.log("[Hang Debug] Watcher connection status:", status);
-        }
-      } catch (e) {
-        // Ignore errors accessing internal state
-      }
+    // --- TEMP timing probe: localize viewer join latency by phase ---
+    const t0 = performance.now();
+    const ms = () => `${Math.round(performance.now() - t0)}ms`;
+    const wDiag = watcher as unknown as {
+      connection?: { status?: { subscribe?: (fn: (s: string) => void) => void } };
+      broadcast?: { catalog?: { subscribe?: (fn: (c: unknown) => void) => void } };
     };
-    // Check status periodically for debugging
-    const statusInterval = setInterval(checkConnectionStatus, 2000);
-    setTimeout(() => clearInterval(statusInterval), 30000); // Stop after 30s
+    try {
+      wDiag.connection?.status?.subscribe?.((s) => console.log(`[watch-timing] connection ${s} @ ${ms()}`));
+      let gotCatalog = false;
+      wDiag.broadcast?.catalog?.subscribe?.((c) => {
+        if (c && !gotCatalog) { gotCatalog = true; console.log(`[watch-timing] catalog received @ ${ms()}`); }
+      });
+    } catch { /* ignore */ }
+
+    // --- Time to first frame ---
+    // The renderer draws decoded frames to the <canvas> 2D context via drawImage
+    // (black background uses fillRect, so drawImage = a real video frame). Hook it
+    // once to capture time-to-first-frame from page load and show it in the footer.
+    const canvas = watcher.querySelector("canvas") as HTMLCanvasElement | null;
+    const ctx = canvas?.getContext("2d");
+    if (ctx) {
+      const origDrawImage = ctx.drawImage as (...a: unknown[]) => unknown;
+      (ctx as unknown as { drawImage: unknown }).drawImage = function (this: CanvasRenderingContext2D, ...args: unknown[]) {
+        const result = origDrawImage.apply(this, args);
+        // First real frame: report, then restore the prototype method (no per-frame overhead).
+        delete (ctx as unknown as { drawImage?: unknown }).drawImage;
+        const sinceLoad = performance.now(); // ms since page navigation start
+        console.log(`[watch-timing] FIRST FRAME painted @ ${ms()} (from page load: ${Math.round(sinceLoad)}ms)`);
+        const ttffEl = document.getElementById("ttff-display");
+        if (ttffEl) {
+          ttffEl.style.color = "#737373";
+          ttffEl.textContent = ` | first frame: ${(sinceLoad / 1000).toFixed(2)}s`;
+        }
+        return result;
+      };
+    }
+
+    // Co-locate on the publisher's relay: look up the broadcast→relay route.
+    // Relays are islands, so the viewer MUST use the same relay as the broadcaster.
+    // Falls back to the static relay if the stream isn't routed yet / lookup fails.
+    const viewerCdn = getCdnOverride("viewer-cdn");
+    // Optional forced cross-cluster origin (publisher relay host:port) for testing;
+    // normally the Worker derives it from the publisher's stored relay in D1.
+    const originOverride = new URLSearchParams(window.location.search).get("origin")?.trim() || undefined;
+    if (viewerCdn) console.log("[routing] viewer CDN override:", viewerCdn, originOverride ? `(forced origin ${originOverride})` : "");
+
+    // Resolve the relay via /route. There is NO static relay to fall back to — every
+    // connection must use the dynamic host:port from the directory. If the broadcast
+    // isn't live yet (404), poll until it is, showing a "waiting" state. Connect once.
+    let routeInfo = await getStreamRoute(streamId, viewerCdn, originOverride);
+    console.log(`[watch-timing] route resolved @ ${ms()} ->`, routeInfo?.relay ?? "(offline, polling)");
+
+    if (!routeInfo) {
+      const section = document.querySelector("#watch-view section");
+      const waitingEl = document.createElement("div");
+      waitingEl.className = "watch-waiting";
+      waitingEl.textContent = "Waiting for broadcaster…";
+      waitingEl.style.cssText = "text-align:center;padding:1.5rem;color:var(--text-muted);";
+      section?.appendChild(waitingEl);
+
+      let stopped = false;
+      window.addEventListener("beforeunload", () => { stopped = true; });
+      while (!routeInfo && !stopped) {
+        await new Promise((r) => setTimeout(r, 1500));
+        routeInfo = await getStreamRoute(streamId, viewerCdn, originOverride);
+      }
+      waitingEl.remove();
+      if (stopped) return;
+      console.log(`[watch-timing] route became available @ ${ms()} ->`, routeInfo?.relay);
+    }
+
+    if (!routeInfo) return; // stopped before a route resolved
+    setActiveRelay(routeInfo.relay);
+    watcher.setAttribute("url", `https://${routeInfo.relay}/?jwt=${routeInfo.jwt}`);
+    watcher.setAttribute("name", streamName);
+    console.log(`[watch-timing] url set, connecting @ ${ms()}`);
+
+    // Start muted; first click/tap on the player enables audio.
+    const enableAudio = () => {
+      watcher.muted = false;
+      watcher.removeEventListener("click", enableAudio);
+    };
+    watcher.addEventListener("click", enableAudio);
 
     // Log watch event
     let watchEventId: number | null = null;
@@ -1709,953 +1386,12 @@ async function initWatchView(streamId: string, user: User | null) {
     window.addEventListener("beforeunload", () => {
       clearInterval(settingsCheckInterval);
     });
-
-    // Move latency/quality controls from hang-watch-ui Shadow DOM to Browser Support panel
-    const movePlaybackControls = () => {
-      const watchUI = document.querySelector("hang-watch-ui");
-      const shadowRoot = watchUI?.shadowRoot;
-      const targetContainer = document.getElementById("playback-settings-container");
-
-      if (!shadowRoot || !targetContainer) return;
-
-      const latencyContainer = shadowRoot.querySelector(".latencySliderContainer");
-      const qualityContainer = shadowRoot.querySelector(".qualitySelectorContainer");
-
-      if (latencyContainer && !targetContainer.contains(latencyContainer)) {
-        targetContainer.appendChild(latencyContainer);
-      }
-      if (qualityContainer && !targetContainer.contains(qualityContainer)) {
-        targetContainer.appendChild(qualityContainer);
-      }
-    };
-
-    // Try to move controls after hang-watch-ui renders
-    const watchUI = document.querySelector("hang-watch-ui");
-    if (watchUI?.shadowRoot) {
-      const uiObserver = new MutationObserver(() => movePlaybackControls());
-      uiObserver.observe(watchUI.shadowRoot, { childList: true, subtree: true });
-    }
-    setTimeout(movePlaybackControls, 500);
-    setTimeout(movePlaybackControls, 1000);
-    setTimeout(movePlaybackControls, 2000);
   }
-}
-
-// Scroll view state
-interface ScrollBroadcast {
-  stream_id: string;
-  user_name: string;
-  started_at: string;
-  geo_city: string | null;
-  geo_country: string | null;
-  geo_region: string | null;
-  viewer_count: number;
-}
-
-// 5-slot deck positions for QUIC zapping
-type DeckPosition = "far_prev" | "prev" | "current" | "next" | "far_next";
-
-// Position configuration: outer ring = audio only, inner ring + current = video + audio
-const DECK_CONFIG: Record<DeckPosition, { videoEnabled: boolean; visible: boolean }> = {
-  far_prev: { videoEnabled: false, visible: false },  // Outer ring: audio only
-  prev:     { videoEnabled: true,  visible: false },  // Inner ring: video ready
-  current:  { videoEnabled: true,  visible: true  },  // Center: visible
-  next:     { videoEnabled: true,  visible: false },  // Inner ring: video ready
-  far_next: { videoEnabled: false, visible: false },  // Outer ring: audio only
-};
-
-// Initialize scroll view (TikTok-style) with 5-slot QUIC zapping
-async function initScrollView() {
-  console.log("Earthseed.Live Scroll View - QUIC Zapping enabled");
-
-  // Wait for hang-watch custom element to be defined
-  await customElements.whenDefined("hang-watch");
-  console.log("[Scroll] hang-watch custom element is ready");
-
-  // Hide all other views
-  document.getElementById("broadcast-view")?.classList.add("hidden");
-  document.getElementById("watch-view")?.classList.add("hidden");
-  document.getElementById("scroll-view")?.classList.remove("hidden");
-
-  // Hide header and footer for immersive experience
-  const header = document.querySelector("header");
-  const footer = document.querySelector("footer");
-  if (header) header.classList.add("hidden");
-  if (footer) footer.classList.add("hidden");
-
-  // State management
-  let upcomingStreams: ScrollBroadcast[] = [];
-  let historyStreams: ScrollBroadcast[] = [];
-  let currentStream: ScrollBroadcast | null = null;
-  let watchEventId: number | null = null;
-  const MAX_HISTORY = 10;
-
-  // 5-slot deck for QUIC zapping
-  interface DeckSlot {
-    element: HTMLElement | null;
-    stream: ScrollBroadcast | null;
-    videoEnabled: boolean;
-  }
-
-  const deck: Record<DeckPosition, DeckSlot> = {
-    far_prev: { element: null, stream: null, videoEnabled: false },
-    prev:     { element: null, stream: null, videoEnabled: true },
-    current:  { element: null, stream: null, videoEnabled: true },
-    next:     { element: null, stream: null, videoEnabled: true },
-    far_next: { element: null, stream: null, videoEnabled: false },
-  };
-
-  // DOM elements - verify they exist
-  const scrollView = document.getElementById("scroll-view");
-  if (!scrollView) {
-    console.error("[Scroll] scroll-view element not found");
-    return;
-  }
-  const videoWrapper = scrollView.querySelector(".scroll-video-wrapper") as HTMLElement;
-  const streamIdEl = scrollView.querySelector(".scroll-stream-id") as HTMLElement;
-  const broadcasterEl = scrollView.querySelector(".scroll-broadcaster") as HTMLElement;
-  const noStreamsEl = scrollView.querySelector(".scroll-no-streams") as HTMLElement;
-  const hintEl = scrollView.querySelector(".scroll-hint") as HTMLElement;
-
-  // TikTok UI elements
-  const viewerCountEl = scrollView.querySelector(".viewer-number") as HTMLElement;
-  const locationEl = scrollView.querySelector(".scroll-location") as HTMLElement;
-  const avatarPlaceholder = scrollView.querySelector(".scroll-avatar-placeholder") as HTMLElement;
-  const closeBtn = scrollView.querySelector(".scroll-close-btn") as HTMLElement;
-  const likeBtn = scrollView.querySelector(".scroll-like-btn") as HTMLElement;
-  const likeCountEl = scrollView.querySelector(".scroll-like-count") as HTMLElement;
-
-  // Floating hearts container (add dynamically if not present)
-  let floatingHeartsEl = scrollView.querySelector(".scroll-floating-hearts") as HTMLElement;
-  if (!floatingHeartsEl) {
-    floatingHeartsEl = document.createElement("div");
-    floatingHeartsEl.className = "scroll-floating-hearts";
-    scrollView.querySelector(".scroll-overlay")?.appendChild(floatingHeartsEl);
-  }
-
-  if (!videoWrapper) {
-    console.error("[Scroll] video-wrapper element not found");
-    return;
-  }
-
-  // Wire up close button
-  if (closeBtn) {
-    closeBtn.addEventListener("click", () => {
-      window.location.href = "/";
-    });
-  }
-
-  // Like count state (mock for now since likes aren't stored in DB)
-  let likeCount = 0;
-
-  // Wire up like button with floating heart animation
-  if (likeBtn) {
-    likeBtn.addEventListener("click", () => {
-      likeCount++;
-      if (likeCountEl) likeCountEl.textContent = formatCount(likeCount);
-      likeBtn.classList.add("liked");
-      spawnFloatingHeart();
-    });
-  }
-
-  // Spawn floating heart animation
-  function spawnFloatingHeart(): void {
-    if (!floatingHeartsEl) return;
-    const heart = document.createElement("div");
-    heart.className = "scroll-floating-heart";
-    heart.innerHTML = "❤️";
-    // Random horizontal drift
-    heart.style.setProperty("--drift", `${(Math.random() - 0.5) * 30}px`);
-    floatingHeartsEl.appendChild(heart);
-    // Remove after animation completes
-    setTimeout(() => heart.remove(), 2000);
-  }
-
-  // Format count for display (e.g., 1234 -> "1.2K")
-  function formatCount(count: number): string {
-    if (count >= 1000000) return (count / 1000000).toFixed(1) + "M";
-    if (count >= 1000) return (count / 1000).toFixed(1) + "K";
-    return count.toString();
-  }
-
-  // Get country flag emoji from country code
-  function countryToFlag(countryCode: string | null): string {
-    if (!countryCode || countryCode.length !== 2) return "🌍";
-    const codePoints = countryCode
-      .toUpperCase()
-      .split("")
-      .map(char => 127397 + char.charCodeAt(0));
-    return String.fromCodePoint(...codePoints);
-  }
-
-  // Update TikTok UI with stream data
-  function updateStreamUI(stream: ScrollBroadcast | null): void {
-    if (!stream) return;
-
-    // Update broadcaster name with @ prefix
-    if (broadcasterEl) {
-      broadcasterEl.textContent = `@${stream.user_name}`;
-    }
-
-    // Update stream ID
-    if (streamIdEl) {
-      streamIdEl.textContent = stream.stream_id;
-    }
-
-    // Update location with flag
-    if (locationEl) {
-      const parts = [stream.geo_city, stream.geo_country].filter(Boolean);
-      if (parts.length > 0) {
-        const flag = countryToFlag(stream.geo_country);
-        locationEl.textContent = `${flag} ${parts.join(", ")}`;
-      } else {
-        locationEl.textContent = "";
-      }
-    }
-
-    // Update avatar placeholder with first letter of name
-    if (avatarPlaceholder) {
-      avatarPlaceholder.textContent = stream.user_name.charAt(0).toUpperCase();
-    }
-
-    // Update viewer count from initial data
-    if (viewerCountEl) {
-      // Add 1 for the current viewer (us)
-      const count = stream.viewer_count + 1;
-      viewerCountEl.textContent = formatCount(count);
-    }
-
-    // Reset like count for new stream
-    likeCount = 0;
-    if (likeCountEl) likeCountEl.textContent = "0";
-    likeBtn?.classList.remove("liked");
-  }
-
-  // Periodically refresh viewer count
-  let viewerCountInterval: number | null = null;
-  function startViewerCountRefresh(streamId: string): void {
-    // Clear any existing interval
-    if (viewerCountInterval) {
-      clearInterval(viewerCountInterval);
-    }
-    // Refresh every 10 seconds
-    viewerCountInterval = window.setInterval(async () => {
-      const count = await fetchViewerCount(streamId);
-      if (viewerCountEl) {
-        viewerCountEl.textContent = formatCount(count);
-      }
-    }, 10000);
-  }
-
-  // Remove the static hang-watch from HTML, we'll create them dynamically
-  const staticWatcher = document.getElementById("scroll-watcher");
-  if (staticWatcher) staticWatcher.remove();
-
-  // Wait for hang-watch broadcast object to be available
-  function waitForBroadcast(element: HTMLElement): Promise<any> {
-    return new Promise((resolve) => {
-      let attempts = 0;
-      const maxAttempts = 100; // 5 seconds max
-      const check = () => {
-        const broadcast = (element as any).broadcast;
-        if (broadcast?.video?.enabled) {
-          resolve(broadcast);
-        } else if (attempts < maxAttempts) {
-          attempts++;
-          setTimeout(check, 50);
-        } else {
-          console.warn("[Scroll] Timeout waiting for broadcast object");
-          resolve(null);
-        }
-      };
-      check();
-    });
-  }
-
-  // Create a hang-watch element for a stream with appropriate video state
-  async function createWatcher(stream: ScrollBroadcast, position: DeckPosition): Promise<HTMLElement | null> {
-    try {
-      const relayConfig = getRelayConfig(stream.stream_id);
-      const config = DECK_CONFIG[position];
-
-      const watcher = document.createElement("hang-watch");
-      watcher.className = `scroll-deck-${position}`;
-      watcher.setAttribute("muted", "");
-      watcher.setAttribute("url", relayConfig.url);
-      watcher.setAttribute("name", relayConfig.name);
-
-      const canvas = document.createElement("canvas");
-      watcher.appendChild(canvas);
-
-      // Simple aspect ratio sizing: fill height, compute width from aspect ratio
-      function updateCanvasWidth() {
-        const w = canvas.width;
-        const h = canvas.height;
-        // Only update if we have real dimensions (not 300x150 default)
-        if (w > 1 && h > 1 && !(w === 300 && h === 150)) {
-          canvas.style.width = `${100 * (w / h)}vh`;
-        }
-      }
-
-      // Check for dimensions after frames should have arrived
-      setTimeout(updateCanvasWidth, 500);
-      setTimeout(updateCanvasWidth, 1000);
-      setTimeout(updateCanvasWidth, 2000);
-
-      // Update on resize
-      window.addEventListener('resize', updateCanvasWidth);
-
-      // For outer ring positions, disable video after broadcast initializes
-      if (!config.videoEnabled) {
-        waitForBroadcast(watcher).then((broadcast) => {
-          if (broadcast) {
-            broadcast.video.enabled.set(false);
-            console.log(`[Scroll] ${position}: ${stream.stream_id} - video DISABLED (audio-only)`);
-          }
-        });
-      } else {
-        console.log(`[Scroll] ${position}: ${stream.stream_id} - video ENABLED`);
-      }
-
-      return watcher;
-    } catch (err) {
-      console.error(`[Scroll] Failed to create watcher for ${stream.stream_id}:`, err);
-      return null;
-    }
-  }
-
-  // Promote a slot: enable video (outer → inner ring)
-  async function promoteSlot(slot: DeckSlot): Promise<void> {
-    if (!slot.element || slot.videoEnabled) return;
-
-    const broadcast = await waitForBroadcast(slot.element);
-    if (broadcast) {
-      broadcast.video.enabled.set(true);
-      slot.videoEnabled = true;
-      console.log(`[Scroll] PROMOTED ${slot.stream?.stream_id}: video ENABLED`);
-    }
-  }
-
-  // Demote a slot: disable video (inner → outer ring)
-  async function demoteSlot(slot: DeckSlot): Promise<void> {
-    if (!slot.element || !slot.videoEnabled) return;
-
-    const broadcast = await waitForBroadcast(slot.element);
-    if (broadcast) {
-      broadcast.video.enabled.set(false);
-      slot.videoEnabled = false;
-      console.log(`[Scroll] DEMOTED ${slot.stream?.stream_id}: video DISABLED`);
-    }
-  }
-
-  // Fetch live broadcasts
-  async function fetchLiveBroadcasts(): Promise<ScrollBroadcast[]> {
-    try {
-      const response = await fetch("/api/stats/greet");
-      if (!response.ok) return [];
-      const data = await response.json();
-      return (data.broadcasts || []).map((b: any) => ({
-        stream_id: b.stream_id,
-        user_name: b.user_name || "Anonymous",
-        started_at: b.started_at,
-        geo_city: b.geo_city || null,
-        geo_country: b.geo_country || null,
-        geo_region: b.geo_region || null,
-        viewer_count: b.viewer_count || 0,
-      }));
-    } catch (err) {
-      console.error("Failed to fetch broadcasts:", err);
-      return [];
-    }
-  }
-
-  // Fetch current viewer count for a stream
-  async function fetchViewerCount(streamId: string): Promise<number> {
-    try {
-      const response = await fetch(`/api/stats/stream/${streamId}/viewers`);
-      if (!response.ok) return 0;
-      const data = await response.json();
-      return data.viewers?.length || 0;
-    } catch (err) {
-      console.error("Failed to fetch viewer count:", err);
-      return 0;
-    }
-  }
-
-  // Update a specific deck slot
-  async function updateSlot(
-    position: DeckPosition,
-    stream: ScrollBroadcast | null
-  ): Promise<void> {
-    const slot = deck[position];
-
-    // If same stream, nothing to do
-    if (slot.stream?.stream_id === stream?.stream_id) {
-      console.log(`[Scroll] updateSlot(${position}): no change, already ${stream?.stream_id || 'empty'}`);
-      return;
-    }
-
-    console.log(`[Scroll] updateSlot(${position}): REPLACING ${slot.stream?.stream_id || 'empty'} with ${stream?.stream_id || 'empty'}`);
-
-    // Remove old element
-    if (slot.element) {
-      slot.element.remove();
-    }
-
-    // Create new element or clear slot
-    if (stream) {
-      slot.stream = stream;
-      slot.element = await createWatcher(stream, position);
-      slot.videoEnabled = DECK_CONFIG[position].videoEnabled;
-      if (slot.element) {
-        videoWrapper.appendChild(slot.element);
-      }
-    } else {
-      slot.stream = null;
-      slot.element = null;
-      slot.videoEnabled = false;
-    }
-  }
-
-  // Update the entire deck based on current state
-  async function updateDeck(): Promise<void> {
-    // far_next: upcomingStreams[2] if exists
-    const farNextStream = upcomingStreams.length > 2 ? upcomingStreams[2] : null;
-    await updateSlot("far_next", farNextStream);
-
-    // next: upcomingStreams[1] if exists
-    const nextStream = upcomingStreams.length > 1 ? upcomingStreams[1] : null;
-    await updateSlot("next", nextStream);
-
-    // far_prev: historyStreams[length-2] if exists (second to last)
-    const farPrevStream = historyStreams.length > 1 ? historyStreams[historyStreams.length - 2] : null;
-    await updateSlot("far_prev", farPrevStream);
-
-    // prev: historyStreams[length-1] if exists (last = most recent)
-    const prevStream = historyStreams.length > 0 ? historyStreams[historyStreams.length - 1] : null;
-    await updateSlot("prev", prevStream);
-
-    updateHints();
-    updatePositionIndicator();
-
-    // Log deck state
-    console.log("[Scroll] Deck state:", {
-      far_prev: deck.far_prev.stream?.stream_id || "(empty)",
-      prev: deck.prev.stream?.stream_id || "(empty)",
-      current: deck.current.stream?.stream_id || "(empty)",
-      next: deck.next.stream?.stream_id || "(empty)",
-      far_next: deck.far_next.stream?.stream_id || "(empty)",
-    });
-  }
-
-  // Load initial current stream
-  async function loadCurrentStream(stream: ScrollBroadcast): Promise<void> {
-    try {
-      currentStream = stream;
-
-      console.log(`[Scroll] Loading current: ${stream.stream_id}`);
-
-      // Log watch start for this stream
-      logWatchStart(stream.stream_id).then(id => {
-        watchEventId = id;
-        console.log(`[Scroll] Watch started for ${stream.stream_id}, event ID:`, id);
-      });
-
-      // Remove old current element
-      if (deck.current.element) {
-        deck.current.element.remove();
-      }
-
-      // Create new current element
-      deck.current.stream = stream;
-      const watcher = await createWatcher(stream, "current");
-      if (!watcher) {
-        console.error(`[Scroll] Failed to create watcher for ${stream.stream_id}`);
-        showNoStreams();
-        return;
-      }
-      deck.current.element = watcher;
-      deck.current.videoEnabled = true;
-      videoWrapper.appendChild(watcher);
-
-      // Update TikTok UI
-      updateStreamUI(stream);
-      if (noStreamsEl) noStreamsEl.classList.add("hidden");
-
-      // Start periodic viewer count refresh
-      startViewerCountRefresh(stream.stream_id);
-
-      // Preload adjacent streams
-      await updateDeck();
-    } catch (err) {
-      console.error("[Scroll] Error loading current stream:", err);
-      showNoStreams();
-    }
-  }
-
-  // Update navigation hints
-  function updateHints(): void {
-    const hintUp = scrollView.querySelector(".scroll-hint-up") as HTMLElement;
-    const hintDown = scrollView.querySelector(".scroll-hint-down") as HTMLElement;
-
-    const canGoNext = upcomingStreams.length > 1 || deck.next.stream !== null;
-    const canGoBack = historyStreams.length > 0 || deck.prev.stream !== null;
-
-    if (hintUp) hintUp.style.display = canGoNext ? "block" : "none";
-    if (hintDown) hintDown.style.display = canGoBack ? "block" : "none";
-  }
-
-  // Show no streams available
-  function showNoStreams(): void {
-    currentStream = null;
-    streamIdEl.textContent = "";
-    broadcasterEl.textContent = "";
-    noStreamsEl.classList.remove("hidden");
-    hintEl.style.opacity = "0";
-  }
-
-  // Update position indicator dots
-  function updatePositionIndicator(): void {
-    let indicator = scrollView.querySelector(".scroll-position-indicator");
-    if (!indicator) {
-      indicator = document.createElement("div");
-      indicator.className = "scroll-position-indicator";
-      videoWrapper.appendChild(indicator);
-    }
-
-    const historyToShow = historyStreams.slice(-5);
-    const upcomingToShow = upcomingStreams.slice(0, 5);
-
-    let dotsHtml = "";
-
-    historyToShow.forEach(() => {
-      dotsHtml += `<div class="scroll-position-dot history" title="Previous stream"></div>`;
-    });
-
-    upcomingToShow.forEach((stream, i) => {
-      const isActive = i === 0;
-      dotsHtml += `<div class="scroll-position-dot ${isActive ? "active" : ""}" title="${stream.stream_id}"></div>`;
-    });
-
-    indicator.innerHTML = dotsHtml;
-  }
-
-  // Navigate to next stream (swipe up) - INSTANT because inner ring has video ready
-  async function goToNextStream(): Promise<boolean> {
-    // Check if we have a next stream
-    if (!deck.next.stream && upcomingStreams.length <= 1) {
-      // Try to fetch more streams
-      const newStreams = await fetchLiveBroadcasts();
-      if (newStreams.length > 0) {
-        const existingIds = new Set([
-          ...upcomingStreams.map(s => s.stream_id),
-          ...historyStreams.map(s => s.stream_id),
-        ]);
-        const trulyNew = newStreams.filter(s => !existingIds.has(s.stream_id));
-        upcomingStreams.push(...trulyNew);
-        await updateDeck();
-      }
-
-      if (!deck.next.stream) {
-        console.log("[Scroll] No more streams available");
-        return false;
-      }
-    }
-
-    // End watch for current stream, start watch for next
-    if (watchEventId) {
-      logWatchEnd(watchEventId);
-      console.log(`[Scroll] Watch ended for ${currentStream?.stream_id}, event ID:`, watchEventId);
-    }
-    if (deck.next.stream) {
-      logWatchStart(deck.next.stream.stream_id).then(id => {
-        watchEventId = id;
-        console.log(`[Scroll] Watch started for ${deck.next.stream?.stream_id}, event ID:`, id);
-      });
-    }
-
-    // Move current to history
-    if (currentStream) {
-      historyStreams.push(currentStream);
-      if (historyStreams.length > MAX_HISTORY) {
-        historyStreams.shift();
-      }
-    }
-
-    // === ROTATE DECK LEFT ===
-    // 1. Remove far_prev
-    if (deck.far_prev.element) {
-      deck.far_prev.element.remove();
-      console.log(`[Scroll] Removed far_prev: ${deck.far_prev.stream?.stream_id}`);
-    }
-
-    // 2. Demote prev → far_prev (disable video)
-    deck.far_prev.element = deck.prev.element;
-    deck.far_prev.stream = deck.prev.stream;
-    deck.far_prev.videoEnabled = deck.prev.videoEnabled;
-    if (deck.far_prev.element) {
-      deck.far_prev.element.className = "scroll-deck-far_prev";
-      demoteSlot(deck.far_prev); // Async, don't await
-    }
-
-    // 3. Shift current → prev (keep video, just hide)
-    deck.prev.element = deck.current.element;
-    deck.prev.stream = deck.current.stream;
-    deck.prev.videoEnabled = deck.current.videoEnabled;
-    if (deck.prev.element) {
-      deck.prev.element.className = "scroll-deck-prev";
-    }
-
-    // 4. Shift next → current (already has video, instant!)
-    deck.current.element = deck.next.element;
-    deck.current.stream = deck.next.stream;
-    deck.current.videoEnabled = deck.next.videoEnabled;
-    if (deck.current.element) {
-      deck.current.element.className = "scroll-deck-current";
-    }
-
-    // 5. Promote far_next → next (enable video)
-    deck.next.element = deck.far_next.element;
-    deck.next.stream = deck.far_next.stream;
-    deck.next.videoEnabled = deck.far_next.videoEnabled;
-    if (deck.next.element) {
-      deck.next.element.className = "scroll-deck-next";
-      promoteSlot(deck.next); // Async, don't await - video will enable in background
-    }
-
-    // 6. Clear far_next (will be populated by updateDeck)
-    deck.far_next.element = null;
-    deck.far_next.stream = null;
-    deck.far_next.videoEnabled = false;
-
-    // Update state
-    upcomingStreams.shift();
-    currentStream = deck.current.stream;
-
-    // Update TikTok UI
-    updateStreamUI(currentStream);
-    if (currentStream) {
-      startViewerCountRefresh(currentStream.stream_id);
-    }
-
-    // Populate new far_next
-    await updateDeck();
-
-    return true;
-  }
-
-  // Navigate to previous stream (swipe down) - INSTANT because inner ring has video ready
-  async function goToPreviousStream(): Promise<boolean> {
-    console.log("[Scroll] goToPreviousStream called", {
-      "deck.prev.stream": deck.prev.stream?.stream_id,
-      "deck.prev.element": !!deck.prev.element,
-      "deck.far_prev.stream": deck.far_prev.stream?.stream_id,
-      "historyStreams": historyStreams.map(s => s.stream_id),
-      "upcomingStreams": upcomingStreams.map(s => s.stream_id).slice(0, 5),
-    });
-
-    if (!deck.prev.stream && historyStreams.length === 0) {
-      console.log("[Scroll] No history to go back to");
-      return false;
-    }
-
-    // CRITICAL: If deck.prev is empty but we have history, we need to load from history
-    if (!deck.prev.stream && historyStreams.length > 0) {
-      console.log("[Scroll] deck.prev is empty but history exists - rebuilding prev slot");
-      const prevStream = historyStreams[historyStreams.length - 1];
-      deck.prev.stream = prevStream;
-      deck.prev.element = await createWatcher(prevStream, "prev");
-      deck.prev.videoEnabled = true;
-      if (deck.prev.element) {
-        videoWrapper.appendChild(deck.prev.element);
-        await promoteSlot(deck.prev);
-      }
-    }
-
-    // End watch for current stream, start watch for previous
-    if (watchEventId) {
-      logWatchEnd(watchEventId);
-      console.log(`[Scroll] Watch ended for ${currentStream?.stream_id}, event ID:`, watchEventId);
-    }
-    if (deck.prev.stream) {
-      logWatchStart(deck.prev.stream.stream_id).then(id => {
-        watchEventId = id;
-        console.log(`[Scroll] Watch started for ${deck.prev.stream?.stream_id}, event ID:`, id);
-      });
-    }
-
-    // Put current back at front of upcoming (if not already there)
-    if (currentStream && upcomingStreams[0]?.stream_id !== currentStream.stream_id) {
-      upcomingStreams.unshift(currentStream);
-      console.log(`[Scroll] Added ${currentStream.stream_id} back to upcomingStreams`);
-    } else {
-      console.log(`[Scroll] ${currentStream?.stream_id} already in upcomingStreams, skipping unshift`);
-    }
-
-    // === ROTATE DECK RIGHT ===
-    // 1. Remove far_next
-    if (deck.far_next.element) {
-      deck.far_next.element.remove();
-      console.log(`[Scroll] Removed far_next: ${deck.far_next.stream?.stream_id}`);
-    }
-
-    // 2. Demote next → far_next (disable video)
-    deck.far_next.element = deck.next.element;
-    deck.far_next.stream = deck.next.stream;
-    deck.far_next.videoEnabled = deck.next.videoEnabled;
-    if (deck.far_next.element) {
-      deck.far_next.element.className = "scroll-deck-far_next";
-      demoteSlot(deck.far_next); // Async, don't await
-    }
-
-    // 3. Shift current → next (keep video, just hide)
-    deck.next.element = deck.current.element;
-    deck.next.stream = deck.current.stream;
-    deck.next.videoEnabled = deck.current.videoEnabled;
-    if (deck.next.element) {
-      deck.next.element.className = "scroll-deck-next";
-    }
-
-    // 4. Shift prev → current (already has video, instant!)
-    deck.current.element = deck.prev.element;
-    deck.current.stream = deck.prev.stream;
-    deck.current.videoEnabled = deck.prev.videoEnabled;
-    if (deck.current.element) {
-      deck.current.element.className = "scroll-deck-current";
-    }
-
-    // 5. Promote far_prev → prev (enable video)
-    deck.prev.element = deck.far_prev.element;
-    deck.prev.stream = deck.far_prev.stream;
-    deck.prev.videoEnabled = deck.far_prev.videoEnabled;
-    if (deck.prev.element) {
-      deck.prev.element.className = "scroll-deck-prev";
-      promoteSlot(deck.prev); // Async, don't await
-    }
-
-    // 6. Clear far_prev (will be populated by updateDeck)
-    deck.far_prev.element = null;
-    deck.far_prev.stream = null;
-    deck.far_prev.videoEnabled = false;
-
-    // Pop from history - this should match what's now in deck.current
-    const previous = historyStreams.pop();
-    if (!previous) {
-      console.error("[Scroll] historyStreams was empty when trying to pop!");
-      currentStream = deck.current.stream;
-    } else if (previous.stream_id !== deck.current.stream?.stream_id) {
-      console.warn(`[Scroll] Mismatch! historyStreams.pop()=${previous.stream_id} but deck.current=${deck.current.stream?.stream_id}`);
-      // Use deck.current as source of truth
-      currentStream = deck.current.stream;
-    } else {
-      currentStream = previous;
-    }
-
-    // Update TikTok UI
-    updateStreamUI(currentStream);
-    if (currentStream) {
-      startViewerCountRefresh(currentStream.stream_id);
-    }
-
-    console.log("[Scroll] After goToPreviousStream rotation:", {
-      currentStream: currentStream?.stream_id,
-      "deck.current": deck.current.stream?.stream_id,
-      "deck.prev": deck.prev.stream?.stream_id,
-      "deck.far_prev": deck.far_prev.stream?.stream_id,
-      historyStreams: historyStreams.map(s => s.stream_id),
-    });
-
-    // Populate new far_prev
-    await updateDeck();
-
-    console.log("[Scroll] After updateDeck:", {
-      "deck.far_prev": deck.far_prev.stream?.stream_id,
-      "deck.prev": deck.prev.stream?.stream_id,
-    });
-
-    return true;
-  }
-
-  // Touch/swipe handling
-  let touchStartY = 0;
-  let touchStartTime = 0;
-  let isSwiping = false;
-
-  videoWrapper.addEventListener("touchstart", (e) => {
-    touchStartY = e.touches[0].clientY;
-    touchStartTime = Date.now();
-    isSwiping = true;
-    videoWrapper.classList.remove("swiping-up", "swiping-down");
-  }, { passive: true });
-
-  videoWrapper.addEventListener("touchmove", (e) => {
-    if (!isSwiping) return;
-
-    const deltaY = touchStartY - e.touches[0].clientY;
-    const threshold = 30;
-
-    if (deltaY > threshold) {
-      videoWrapper.classList.add("swiping-up");
-      videoWrapper.classList.remove("swiping-down");
-    } else if (deltaY < -threshold) {
-      videoWrapper.classList.add("swiping-down");
-      videoWrapper.classList.remove("swiping-up");
-    } else {
-      videoWrapper.classList.remove("swiping-up", "swiping-down");
-    }
-  }, { passive: true });
-
-  videoWrapper.addEventListener("touchend", async (e) => {
-    if (!isSwiping) return;
-    isSwiping = false;
-
-    const deltaY = touchStartY - (e.changedTouches[0]?.clientY || touchStartY);
-    const deltaTime = Date.now() - touchStartTime;
-    const velocity = Math.abs(deltaY) / deltaTime;
-
-    // Swipe threshold: either distance > 100px or velocity > 0.5px/ms
-    const isSwipe = Math.abs(deltaY) > 100 || velocity > 0.5;
-
-    if (isSwipe) {
-      if (deltaY > 0) {
-        // Swipe up - go to next stream
-        videoWrapper.classList.add("exiting-up");
-        const success = await goToNextStream();
-        if (success) {
-          setTimeout(() => {
-            videoWrapper.classList.remove("exiting-up");
-            videoWrapper.classList.add("entering-from-bottom");
-            requestAnimationFrame(() => {
-              videoWrapper.classList.remove("entering-from-bottom");
-            });
-          }, 300);
-        } else {
-          videoWrapper.classList.remove("exiting-up");
-        }
-      } else {
-        // Swipe down - go to previous stream
-        videoWrapper.classList.add("exiting-down");
-        const success = goToPreviousStream();
-        if (success) {
-          setTimeout(() => {
-            videoWrapper.classList.remove("exiting-down");
-            videoWrapper.classList.add("entering-from-top");
-            requestAnimationFrame(() => {
-              videoWrapper.classList.remove("entering-from-top");
-            });
-          }, 300);
-        } else {
-          videoWrapper.classList.remove("exiting-down");
-        }
-      }
-    }
-
-    videoWrapper.classList.remove("swiping-up", "swiping-down");
-  });
-
-  // Keyboard navigation (for desktop)
-  document.addEventListener("keydown", async (e) => {
-    if (e.key === "ArrowUp" || e.key === "k") {
-      e.preventDefault();
-      videoWrapper.classList.add("exiting-up");
-      const success = await goToNextStream();
-      setTimeout(() => {
-        videoWrapper.classList.remove("exiting-up");
-      }, 300);
-    } else if (e.key === "ArrowDown" || e.key === "j") {
-      e.preventDefault();
-      videoWrapper.classList.add("exiting-down");
-      goToPreviousStream();
-      setTimeout(() => {
-        videoWrapper.classList.remove("exiting-down");
-      }, 300);
-    }
-  });
-
-  // Mouse wheel navigation
-  let wheelTimeout: number | null = null;
-  videoWrapper.addEventListener("wheel", async (e) => {
-    e.preventDefault();
-
-    // Debounce wheel events
-    if (wheelTimeout) return;
-    wheelTimeout = window.setTimeout(() => {
-      wheelTimeout = null;
-    }, 500);
-
-    if (e.deltaY > 0) {
-      // Scroll down = swipe up = next stream
-      await goToNextStream();
-    } else if (e.deltaY < 0) {
-      // Scroll up = swipe down = previous stream
-      goToPreviousStream();
-    }
-  }, { passive: false });
-
-  // Log watch end on page unload
-  window.addEventListener("beforeunload", () => {
-    if (watchEventId) {
-      logWatchEnd(watchEventId);
-    }
-  });
-
-  // Initial load
-  const broadcasts = await fetchLiveBroadcasts();
-
-  if (broadcasts.length === 0) {
-    showNoStreams();
-  } else {
-    // Sort by started_at descending (most recent first)
-    broadcasts.sort((a, b) =>
-      new Date(b.started_at).getTime() - new Date(a.started_at).getTime()
-    );
-    upcomingStreams = broadcasts;
-    await loadCurrentStream(upcomingStreams[0]);
-  }
-
-  // Periodic refresh of stream list
-  const refreshInterval = setInterval(async () => {
-    const newBroadcasts = await fetchLiveBroadcasts();
-    if (newBroadcasts.length > 0) {
-      // Add new streams that aren't already in our lists
-      const existingIds = new Set([
-        ...upcomingStreams.map(s => s.stream_id),
-        ...historyStreams.map(s => s.stream_id),
-        currentStream?.stream_id,
-      ].filter(Boolean));
-
-      const trulyNew = newBroadcasts.filter(s => !existingIds.has(s.stream_id));
-      if (trulyNew.length > 0) {
-        console.log(`[Scroll] Found ${trulyNew.length} new streams`);
-        // Sort new streams by started_at (most recent first)
-        trulyNew.sort((a, b) =>
-          new Date(b.started_at).getTime() - new Date(a.started_at).getTime()
-        );
-        // Add at position 1 (after current) to be next in queue
-        upcomingStreams.splice(1, 0, ...trulyNew);
-        updateDeck(); // Update preloaded streams
-      }
-
-      // If we had no streams before, load the first one
-      if (!currentStream && newBroadcasts.length > 0) {
-        newBroadcasts.sort((a, b) =>
-          new Date(b.started_at).getTime() - new Date(a.started_at).getTime()
-        );
-        upcomingStreams = newBroadcasts;
-        await loadCurrentStream(upcomingStreams[0]);
-      }
-    }
-  }, 15000); // Check every 15 seconds
-
-  // Cleanup on page unload
-  window.addEventListener("beforeunload", () => {
-    clearInterval(refreshInterval);
-  });
 }
 
 // Initialize stats view
 async function initStatsView(user: User | null) {
-  console.log("Earthseed.Live Stats");
+  console.log("Earthseed Stats");
 
   // Hide broadcast and watch views
   document.getElementById("broadcast-view")?.classList.add("hidden");
@@ -2819,7 +1555,7 @@ async function initStatsView(user: User | null) {
 
 // Initialize stream-specific stats view (viewers only)
 async function initStreamStatsView(streamId: string) {
-  console.log(`Earthseed.Live Stream Stats - Stream: ${streamId}`);
+  console.log(`Earthseed Stream Stats - Stream: ${streamId}`);
 
   // Hide broadcast and watch views
   document.getElementById("broadcast-view")?.classList.add("hidden");
@@ -2931,7 +1667,7 @@ async function initStreamStatsView(streamId: string) {
 
 // Initialize stats map view (all viewers on a map)
 async function initStatsMapView(user: User | null) {
-  console.log("Earthseed.Live Stats Map");
+  console.log("Earthseed Stats Map");
 
   // Hide broadcast and watch views
   document.getElementById("broadcast-view")?.classList.add("hidden");
@@ -3055,7 +1791,7 @@ async function initStatsMapView(user: User | null) {
 
 // Initialize stream-specific stats map view (viewers for one stream on a map)
 async function initStreamStatsMapView(streamId: string) {
-  console.log(`Earthseed.Live Stream Stats Map - Stream: ${streamId}`);
+  console.log(`Earthseed Stream Stats Map - Stream: ${streamId}`);
 
   // Hide broadcast and watch views
   document.getElementById("broadcast-view")?.classList.add("hidden");
@@ -3147,7 +1883,7 @@ async function initStreamStatsMapView(streamId: string) {
 
 // Initialize greet view (broadcasters only map - public)
 async function initGreetView() {
-  console.log("Earthseed.Live Greet - Live Broadcasters");
+  console.log("Earthseed Greet - Live Broadcasters");
 
   // Hide broadcast and watch views
   document.getElementById("broadcast-view")?.classList.add("hidden");
@@ -3188,10 +1924,6 @@ async function initGreetView() {
     viewer_count: number;
   }
 
-  // Track map instance for proper cleanup on refresh
-  // @ts-expect-error Leaflet types
-  let greetMap: L.Map | null = null;
-
   const renderMap = async () => {
     // Fetch broadcasts from public greet endpoint
     const response = await fetch("/api/stats/greet");
@@ -3207,15 +1939,11 @@ async function initGreetView() {
     const mapEl = document.getElementById("leaflet-map");
     if (!mapEl) return;
 
-    // Properly destroy existing map before creating new one
-    if (greetMap) {
-      greetMap.remove();
-      greetMap = null;
-    }
+    // Clear existing map
+    mapEl.innerHTML = "";
 
     // @ts-expect-error Leaflet loaded from CDN
-    greetMap = L.map("leaflet-map").setView([20, 0], 2);
-    const map = greetMap;
+    const map = L.map("leaflet-map").setView([20, 0], 2);
 
     // @ts-expect-error Leaflet loaded from CDN
     L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
@@ -3268,7 +1996,7 @@ async function initGreetView() {
 
 // Initialize admin view
 function initAdminView() {
-  console.log("Earthseed.Live Admin Panel");
+  console.log("Earthseed Admin Panel");
 
   // Hide broadcast and watch views
   document.getElementById("broadcast-view")?.classList.add("hidden");
@@ -3421,16 +2149,62 @@ function initAdminView() {
 }
 
 // Initialize the app
+// TEMP diagnostic: time WebTransport bidi-stream creation. If a stream takes
+// ~15s to OPEN after being requested, the stall is QUIC stream-credit/flow-control
+// (relay grants MAX_STREAMS slowly) — NOT client logic. If "called" itself is late,
+// it's client-side. Distinguishes the two for the ~15s subscribe gaps.
+function instrumentWebTransportStreams() {
+  if (typeof WebTransport === "undefined") return;
+  const proto = WebTransport.prototype as unknown as {
+    __streamTimed?: boolean;
+    createBidirectionalStream: (...args: unknown[]) => Promise<unknown>;
+  };
+  if (proto.__streamTimed) return;
+  proto.__streamTimed = true;
+  const orig = proto.createBidirectionalStream;
+  let n = 0;
+  proto.createBidirectionalStream = function (this: unknown, ...args: unknown[]) {
+    const i = ++n;
+    if (i > 8) return orig.apply(this, args);
+    const t = performance.now();
+    console.log(`[wt-stream] #${i} createBidirectionalStream() called @ ${Math.round(t)}ms`);
+    const p = orig.apply(this, args);
+    Promise.resolve(p).then(
+      () => console.log(`[wt-stream] #${i} OPENED after ${Math.round(performance.now() - t)}ms`),
+      (e: unknown) => console.log(`[wt-stream] #${i} failed after ${Math.round(performance.now() - t)}ms`, e)
+    );
+    return p;
+  };
+}
+
+// TEMP diagnostic: prefix every console line with a wall-clock timestamp
+// (HH:MM:SS.mmm) so the @moq MoQ request logs (connected, negotiated ALPN,
+// announced, subscribe start/ok catalog.json + video/hd, received catalog,
+// sync[video]) can be correlated directly against the relay's server-side timeline.
+function timestampConsole() {
+  const w = window as unknown as { __consoleTimestamped?: boolean };
+  if (w.__consoleTimestamped) return;
+  w.__consoleTimestamped = true;
+  (["debug", "log", "info", "warn", "error"] as const).forEach((m) => {
+    const orig = console[m].bind(console);
+    console[m] = (...args: unknown[]) => orig(`[${new Date().toISOString().slice(11, 23)}]`, ...args);
+  });
+}
+
 async function init() {
+  timestampConsole();
+  instrumentWebTransportStreams();
   // Detect browser support (async for codec checks)
   browserSupport = await detectBrowserSupport();
 
-  // For linode mode, race to find the best relay server
-  if (RELAY_MODE === "linode") {
-    const bestRelay = await selectBestLinodeRelay();
-    RELAY_URL = `https://${bestRelay}/anon`;
+  // For Safari/polyfill mode, select the best relay server based on latency
+  if (needsPolyfill) {
+    // Safari/polyfill path is disabled (tinymoq is WebTransport-only); kept for the
+    // serverStatus side effect only. No static relay URL is used anymore — relays and
+    // per-broadcast tokens are resolved dynamically at go-live / watch time.
+    await selectBestFallbackRelay();
   } else {
-    // Luke and cloudflare-hybrid modes use fixed servers
+    // WebTransport mode - assume connected
     serverStatus.connected = true;
   }
 
@@ -3455,8 +2229,6 @@ async function init() {
     await initStatsMapView(user);
   } else if (view === "greet") {
     await initGreetView();
-  } else if (view === "scroll") {
-    await initScrollView();
   } else if (view === "stream-stats") {
     await initStreamStatsView(streamId);
   } else if (view === "stream-stats-map") {

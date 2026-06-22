@@ -222,7 +222,7 @@
         #broadcast-view section h2 {
             text-align: left;
         }
-        #broadcast-view hang-publish {
+        #broadcast-view moq-publish {
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -379,7 +379,6 @@
             background: var(--bg-secondary);
             border: 1px solid var(--border-color);
             border-radius: 12px;
-            transition: background-color 0.3s ease, border-color 0.3s ease;
         }
         .stats-login-required h2 {
             margin-bottom: 0.5rem;
@@ -472,7 +471,7 @@
             width: 32px;
             height: 32px;
             border-radius: 50%;
-            border: 2px solid #404040;
+            border: 2px solid var(--input-border);
         }
         .user-name {
             color: var(--text-primary);
@@ -602,11 +601,11 @@
 
         /* Footer */
         footer a {
-            color: var(--text-muted);
+            color: #737373;
             text-decoration: none;
         }
         footer a:hover {
-            color: var(--text-secondary);
+            color: #a3a3a3;
             text-decoration: underline;
         }
         /* Status panels (Browser Support, Server Status) */
@@ -734,107 +733,6 @@
             color: #ef4444;
         }
 
-        /* Relay select buttons */
-        .relay-select-btn {
-            padding: 0.25rem 0.5rem;
-            font-size: 0.75rem;
-            border-radius: 4px;
-            border: none;
-            cursor: pointer;
-            transition: background-color 0.2s, opacity 0.2s;
-        }
-        .relay-select-btn.current {
-            background-color: #4b5563;
-            color: #9ca3af;
-            cursor: default;
-        }
-        .relay-select-btn.selectable {
-            background-color: #3b82f6;
-            color: white;
-        }
-        .relay-select-btn.selectable:hover {
-            background-color: #2563eb;
-        }
-
-        /* Light mode button colors */
-        @media (prefers-color-scheme: light) {
-            .relay-select-btn.current {
-                background-color: #e5e7eb;
-                color: #6b7280;
-            }
-            .relay-select-btn.selectable {
-                background-color: #2563eb;
-                color: white;
-            }
-            .relay-select-btn.selectable:hover {
-                background-color: #1d4ed8;
-            }
-        }
-
-        /* Relay switch notification */
-        .relay-switch-notification {
-            position: fixed;
-            bottom: 2rem;
-            left: 50%;
-            transform: translateX(-50%);
-            background-color: #22c55e;
-            color: white;
-            padding: 0.75rem 1.5rem;
-            border-radius: 8px;
-            font-size: 0.9rem;
-            font-weight: 500;
-            z-index: 9999;
-            animation: slideUp 0.3s ease-out;
-        }
-        @keyframes slideUp {
-            from {
-                opacity: 0;
-                transform: translateX(-50%) translateY(1rem);
-            }
-            to {
-                opacity: 1;
-                transform: translateX(-50%) translateY(0);
-            }
-        }
-
-        /* Playback settings (moved from hang-watch-ui Shadow DOM) */
-        .playback-settings {
-            display: flex;
-            flex-direction: column;
-            gap: 0.75rem;
-            padding-bottom: 1rem;
-            margin-bottom: 1rem;
-            border-bottom: 1px solid var(--border-color);
-        }
-        .playback-settings:empty {
-            display: none;
-        }
-        .playback-settings .latencySliderContainer,
-        .playback-settings .qualitySelectorContainer {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            font-size: 0.85rem;
-        }
-        .playback-settings .latencyLabel,
-        .playback-settings .qualityLabel {
-            color: var(--text-secondary);
-            min-width: 60px;
-        }
-        .playback-settings .latencySlider {
-            flex: 1;
-            max-width: 200px;
-            accent-color: #3b82f6;
-        }
-        .playback-settings .qualitySelect {
-            background: var(--input-bg);
-            border: 1px solid var(--input-border);
-            border-radius: 4px;
-            padding: 0.25rem 0.5rem;
-            color: var(--text-primary);
-            font-size: 0.85rem;
-        }
-
         /* Login required overlay */
         #login-overlay {
             position: absolute;
@@ -944,137 +842,109 @@
             margin-bottom: 15px;
         }
 
-        /* Hang component button overrides */
-        hang-publish button,
-        hang-watch button {
+        /* MoQ core element base layout (headless light-DOM elements) */
+        moq-publish,
+        moq-watch {
+            display: block;
+            color: var(--text-primary);
+            font-size: 0.875rem;
+            width: 100%;
+        }
+        moq-publish video,
+        moq-watch canvas {
+            display: block;
+            width: 100%;
+            max-width: 900px;
+            margin: 0 auto;
+            border-radius: 8px;
+            background: #000;
+        }
+
+        /* Broadcast control bar (custom controls driving <moq-publish>) */
+        .publish-controls {
+            display: flex;
+            flex-wrap: nowrap;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            margin-top: 1rem;
+        }
+        .publish-btn {
             background: var(--bg-tertiary);
             border: 1px solid var(--input-border);
             border-radius: 8px;
             padding: 0.5rem 0.75rem;
             color: var(--text-primary);
-            font-size: 1rem;
+            font-size: 1.25rem;
             cursor: pointer;
             transition: all 0.2s ease;
             min-width: 44px;
-            min-height: 36px;
+            min-height: 44px;
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            gap: 0.25rem;
-            font-weight: 500;
+            line-height: 1;
         }
-        hang-publish button:hover,
-        hang-watch button:hover {
+        .publish-btn:hover {
             background: var(--bg-hover);
             border-color: var(--border-active);
             transform: translateY(-1px);
         }
-        hang-publish button:active,
-        hang-watch button:active {
+        .publish-btn:active {
             transform: translateY(0);
         }
-        /* Device button active/selected state - selected devices are dimmed */
-        hang-publish button[aria-pressed="true"],
-        hang-watch button[aria-pressed="true"] {
-            background: var(--bg-tertiary);
-            border-color: var(--input-border);
-            opacity: 0.5;
+        /* Selected device = dim (already chosen); available = bright (click me) */
+        .publish-btn.device-selected {
+            filter: grayscale(50%) brightness(0.7);
+            opacity: 1;
         }
-        /* Device button available state - available options are bright */
-        hang-publish button[aria-pressed="false"],
-        hang-watch button[aria-pressed="false"] {
-            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
-            border-color: #3b82f6;
+        .publish-btn.device-available {
+            filter: brightness(1.1);
+            opacity: 1;
+        }
+        .publish-btn.device-available:hover {
+            box-shadow: 0 0 8px rgba(59, 130, 246, 0.5);
+        }
+
+        /* Broadcast status indicator (emoji + hover tooltip) */
+        .publish-status {
+            position: relative;
+            font-size: 1.25rem;
+            line-height: 1;
+            cursor: default;
+            display: inline-flex;
+            align-items: center;
+        }
+        .publish-status::after {
+            content: attr(data-status-text);
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.85);
             color: #fff;
-            box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            white-space: nowrap;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.15s ease;
+            margin-bottom: 4px;
         }
-        hang-publish button[aria-pressed="false"]:hover,
-        hang-watch button[aria-pressed="false"]:hover {
-            background: linear-gradient(135deg, #60a5fa 0%, #2563eb 100%);
-            border-color: #60a5fa;
-            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
-        }
-        /* Device selector buttons - larger for emoji */
-        hang-publish button[title] {
-            font-size: 1.25rem;
-            min-width: 44px;
-            min-height: 44px;
-        }
-        /* Hide "Device:" label from hang-publish */
-        hang-publish > div > div:first-child {
-            font-size: 0;
-        }
-        hang-publish > div > div:first-child button {
-            font-size: 1.25rem;
-        }
-
-        /* Volume slider styling */
-        hang-watch input[type="range"],
-        hang-publish input[type="range"] {
-            -webkit-appearance: none;
-            appearance: none;
-            background: transparent;
-            cursor: pointer;
-            width: 100%;
-            max-width: 120px;
-        }
-        /* Shrink volume slider on small viewports */
-        @media (max-width: 480px) {
-            hang-watch input[type="range"],
-            hang-publish input[type="range"] {
-                max-width: 60px;
-            }
-        }
-        hang-watch input[type="range"]::-webkit-slider-runnable-track,
-        hang-publish input[type="range"]::-webkit-slider-runnable-track {
-            background: var(--slider-track);
-            height: 6px;
-            border-radius: 3px;
-        }
-        hang-watch input[type="range"]::-webkit-slider-thumb,
-        hang-publish input[type="range"]::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            appearance: none;
-            margin-top: -5px;
-            background: #3b82f6;
-            height: 16px;
-            width: 16px;
-            border-radius: 50%;
-            border: 2px solid #1d4ed8;
-            transition: all 0.15s ease;
-        }
-        hang-watch input[type="range"]::-webkit-slider-thumb:hover,
-        hang-publish input[type="range"]::-webkit-slider-thumb:hover {
-            background: #60a5fa;
-            transform: scale(1.1);
-        }
-        hang-watch input[type="range"]::-moz-range-track,
-        hang-publish input[type="range"]::-moz-range-track {
-            background: var(--slider-track);
-            height: 6px;
-            border-radius: 3px;
-        }
-        hang-watch input[type="range"]::-moz-range-thumb,
-        hang-publish input[type="range"]::-moz-range-thumb {
-            background: #3b82f6;
-            height: 16px;
-            width: 16px;
-            border-radius: 50%;
-            border: 2px solid #1d4ed8;
-        }
-
-        /* Hang component text styling and alignment */
-        hang-publish,
-        hang-watch {
-            color: var(--text-primary);
-            font-size: 0.875rem;
+        .publish-status:hover::after {
+            opacity: 1;
         }
 
         /* HTML overlay button and input */
         .html-overlay-btn {
-            order: 5 !important;
-            font-size: 1.25rem !important;
+            font-family: monospace;
+            font-weight: bold;
+            font-size: 0.9rem !important;
             cursor: pointer;
+        }
+        .html-overlay-btn.active {
+            box-shadow: 0 0 8px rgba(59, 130, 246, 0.5);
         }
         .html-overlay-container {
             width: 100%;
@@ -1149,470 +1019,29 @@
 
         /* Theme toggle button */
         .theme-toggle {
-            background: none;
-            border: none;
-            color: var(--text-muted);
-            cursor: pointer;
-            padding: 0.5rem;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--input-border);
             border-radius: 8px;
+            padding: 0.5rem;
+            cursor: pointer;
             display: flex;
             align-items: center;
             justify-content: center;
-            transition: color 0.2s ease, background-color 0.2s ease;
+            transition: all 0.2s ease;
+            color: var(--text-primary);
         }
         .theme-toggle:hover {
-            color: var(--text-primary);
-            background: var(--bg-tertiary);
+            background: var(--bg-hover);
+            border-color: var(--border-active);
         }
         .theme-toggle svg {
-            width: 20px;
-            height: 20px;
+            width: 18px;
+            height: 18px;
         }
         .theme-toggle .sun-icon { display: none; }
         .theme-toggle .moon-icon { display: block; }
         :root.light .theme-toggle .sun-icon { display: block; }
         :root.light .theme-toggle .moon-icon { display: none; }
-        /* Ensure internal flex containers are vertically centered */
-        hang-publish > div,
-        hang-watch > div {
-            display: flex;
-            align-items: center;
-            justify-content: center !important;
-            gap: 0.5rem;
-        }
-        /* Override hang component's space-between layout */
-        hang-publish,
-        hang-watch {
-            display: block;
-        }
-        hang-publish > div > div,
-        hang-watch > div > div {
-            justify-content: center !important;
-        }
-
-        /* Scroll View (TikTok-style) */
-        #scroll-view {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: #000;
-            z-index: 1000;
-        }
-        .scroll-container {
-            width: 100%;
-            height: 100%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            overflow: hidden;
-            touch-action: pan-y;
-        }
-        .scroll-video-wrapper {
-            position: relative;
-            width: 100%;
-            height: 100%;
-            max-width: 100vw;
-            max-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: transform 0.3s ease-out, opacity 0.3s ease-out;
-        }
-        .scroll-video-wrapper.swiping-up {
-            transform: translateY(-30px);
-            opacity: 0.7;
-        }
-        .scroll-video-wrapper.swiping-down {
-            transform: translateY(30px);
-            opacity: 0.7;
-        }
-        .scroll-video-wrapper.exiting-up {
-            transform: translateY(-100%);
-            opacity: 0;
-        }
-        .scroll-video-wrapper.exiting-down {
-            transform: translateY(100%);
-            opacity: 0;
-        }
-        .scroll-video-wrapper.entering-from-bottom {
-            transform: translateY(100%);
-            opacity: 0;
-        }
-        .scroll-video-wrapper.entering-from-top {
-            transform: translateY(-100%);
-            opacity: 0;
-        }
-        #scroll-view hang-watch {
-            display: block;
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-        }
-        #scroll-view hang-watch canvas {
-            display: block;
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            /* Fill height, width computed by JS from aspect ratio */
-            height: 100vh;
-            width: 177.78vh; /* Default 16:9 aspect until JS updates */
-            background: #000;
-        }
-        .scroll-overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            pointer-events: none;
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-            padding: env(safe-area-inset-top, 12px) 12px env(safe-area-inset-bottom, 12px) 12px;
-            background: linear-gradient(
-                to bottom,
-                rgba(0, 0, 0, 0.5) 0%,
-                transparent 12%,
-                transparent 75%,
-                rgba(0, 0, 0, 0.6) 100%
-            );
-            z-index: 100; /* Above all deck positions (current=10, prev/next=5, far=1) */
-        }
-
-        /* TikTok Top Bar */
-        .scroll-top-bar {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            pointer-events: auto;
-        }
-        .scroll-top-left {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        .scroll-live-badge {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            background: #FE2C55;
-            padding: 4px 10px;
-            border-radius: 4px;
-            font-size: 13px;
-            font-weight: 700;
-            color: #fff;
-            text-transform: uppercase;
-        }
-        .live-dot {
-            width: 8px;
-            height: 8px;
-            background: #fff;
-            border-radius: 50%;
-            animation: pulse-dot 1.5s ease-in-out infinite;
-        }
-        @keyframes pulse-dot {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-        .scroll-viewer-count {
-            display: flex;
-            align-items: center;
-            gap: 4px;
-            background: rgba(0, 0, 0, 0.5);
-            padding: 4px 10px;
-            border-radius: 4px;
-            font-size: 13px;
-            color: #fff;
-        }
-        .eye-icon {
-            opacity: 0.9;
-        }
-        .scroll-close-btn {
-            background: rgba(0, 0, 0, 0.5);
-            border: none;
-            border-radius: 50%;
-            width: 36px;
-            height: 36px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #fff;
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-        .scroll-close-btn:hover {
-            background: rgba(0, 0, 0, 0.7);
-        }
-
-        /* TikTok Right Action Bar */
-        .scroll-action-bar {
-            position: absolute;
-            right: 12px;
-            bottom: 140px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 20px;
-            pointer-events: auto;
-        }
-        .scroll-profile-btn {
-            position: relative;
-        }
-        .scroll-avatar {
-            width: 48px;
-            height: 48px;
-            border: 2px solid #fff;
-            border-radius: 50%;
-            background: linear-gradient(135deg, #FE2C55, #25F4EE);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            overflow: hidden;
-        }
-        .scroll-avatar-img {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            display: none;
-        }
-        .scroll-avatar-placeholder {
-            color: #fff;
-            font-size: 20px;
-            font-weight: 700;
-        }
-        .scroll-follow-badge {
-            position: absolute;
-            bottom: -6px;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 20px;
-            height: 20px;
-            background: #FE2C55;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 14px;
-            font-weight: 700;
-            color: #fff;
-        }
-        .scroll-action-btn {
-            background: transparent;
-            border: none;
-            color: #fff;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 4px;
-            cursor: pointer;
-            opacity: 0.9;
-            transition: opacity 0.2s, transform 0.2s;
-        }
-        .scroll-action-btn:hover {
-            opacity: 1;
-        }
-        .scroll-action-btn:active {
-            transform: scale(0.9);
-        }
-        .scroll-action-count {
-            font-size: 12px;
-            font-weight: 600;
-        }
-        .scroll-like-btn.liked svg {
-            color: #FE2C55;
-            fill: #FE2C55;
-        }
-
-        /* TikTok Bottom Creator Info */
-        .scroll-creator-info {
-            position: absolute;
-            left: 12px;
-            bottom: 60px;
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-            max-width: 70%;
-            pointer-events: auto;
-        }
-        .scroll-creator-header {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-        .scroll-creator-name {
-            font-size: 16px;
-            font-weight: 700;
-            color: #fff;
-            text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
-        }
-        .scroll-location-info {
-            font-size: 13px;
-            color: rgba(255, 255, 255, 0.8);
-            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
-        }
-        .scroll-stream-id-badge {
-            display: inline-flex;
-        }
-        .scroll-stream-id {
-            font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
-            font-size: 13px;
-            color: #25F4EE;
-            background: rgba(0, 0, 0, 0.4);
-            padding: 3px 8px;
-            border-radius: 4px;
-            font-weight: 500;
-        }
-        .scroll-broadcaster {
-            /* Now part of scroll-creator-name */
-        }
-
-        /* TikTok Swipe Indicator */
-        .scroll-swipe-indicator {
-            display: flex;
-            justify-content: center;
-            padding-bottom: 8px;
-        }
-        .scroll-swipe-line {
-            width: 40px;
-            height: 4px;
-            background: rgba(255, 255, 255, 0.4);
-            border-radius: 2px;
-        }
-
-        /* Floating Hearts Animation */
-        .scroll-floating-hearts {
-            position: absolute;
-            right: 60px;
-            bottom: 200px;
-            width: 50px;
-            height: 200px;
-            pointer-events: none;
-            overflow: visible;
-        }
-        .scroll-floating-heart {
-            position: absolute;
-            bottom: 0;
-            left: 50%;
-            color: #FE2C55;
-            font-size: 24px;
-            animation: float-up 2s ease-out forwards;
-        }
-        @keyframes float-up {
-            0% {
-                opacity: 1;
-                transform: translateX(-50%) translateY(0) scale(1);
-            }
-            100% {
-                opacity: 0;
-                transform: translateX(calc(-50% + var(--drift, 0px))) translateY(-180px) scale(0.5);
-            }
-        }
-
-        /* Legacy hint styles (hidden but kept for compatibility) */
-        .scroll-hint {
-            display: none;
-        }
-        .scroll-hint-up::before,
-        .scroll-hint-down::after {
-            display: none;
-        }
-        .scroll-no-streams {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            text-align: center;
-            color: #a3a3a3;
-            z-index: 100; /* Above deck positions */
-        }
-        .scroll-no-streams p {
-            margin: 0.5rem 0;
-        }
-        .scroll-no-streams .scroll-checking {
-            font-size: 0.875rem;
-            color: #737373;
-        }
-        .scroll-position-indicator {
-            position: absolute;
-            right: 1rem;
-            top: 50%;
-            transform: translateY(-50%);
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-            pointer-events: none;
-        }
-        .scroll-position-dot {
-            width: 6px;
-            height: 6px;
-            border-radius: 50%;
-            background: rgba(255, 255, 255, 0.3);
-            transition: background 0.2s ease, transform 0.2s ease;
-        }
-        .scroll-position-dot.active {
-            background: #22c55e;
-            transform: scale(1.3);
-        }
-        .scroll-position-dot.history {
-            background: rgba(255, 255, 255, 0.5);
-        }
-
-        /* 5-slot deck positions for QUIC zapping */
-
-        /* Current: visible, full size, fills viewport */
-        .scroll-deck-current {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            z-index: 10;
-        }
-        .scroll-deck-current canvas {
-            /* Canvas sizing handled by #scroll-view hang-watch canvas */
-        }
-
-        /* Inner ring (prev/next): hidden but video still decoding */
-        .scroll-deck-prev,
-        .scroll-deck-next {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            pointer-events: none;
-            opacity: 0;
-            z-index: 5;
-        }
-        .scroll-deck-prev canvas,
-        .scroll-deck-next canvas {
-            /* Canvas sizing handled by #scroll-view hang-watch canvas */
-        }
-
-        /* Outer ring (far_prev/far_next): hidden, audio only, minimal footprint */
-        .scroll-deck-far_prev,
-        .scroll-deck-far_next {
-            position: absolute;
-            width: 1px;
-            height: 1px;
-            opacity: 0;
-            pointer-events: none;
-            overflow: hidden;
-            z-index: 1;
-            /* Positioned off-screen to prevent any layout impact */
-            top: -9999px;
-            left: -9999px;
-        }
-        .scroll-deck-far_prev canvas,
-        .scroll-deck-far_next canvas {
-            width: 1px;
-            height: 1px;
-        }
     </style>
 </head>
 <body>
@@ -1696,117 +1125,23 @@
             </div>
 
             <section>
-                <hang-publish-ui>
-                    <hang-publish>
-                        <video muted autoplay playsinline></video>
-                    </hang-publish>
-                </hang-publish-ui>
+                <moq-publish announce="source">
+                    <video muted autoplay playsinline></video>
+                </moq-publish>
             </section>
         </div>
 
         <!-- Watch View -->
         <div id="watch-view" class="hidden">
             <section>
-                <hang-watch-ui>
-                    <hang-watch muted>
-                        <canvas></canvas>
-                    </hang-watch>
-                </hang-watch-ui>
+                <moq-watch muted visible="always">
+                    <canvas></canvas>
+                </moq-watch>
             </section>
         </div>
 
-        <!-- Scroll View (TikTok Live-style) -->
-        <div id="scroll-view" class="hidden">
-            <div class="scroll-container">
-                <div class="scroll-video-wrapper">
-                    <hang-watch id="scroll-watcher" muted>
-                        <canvas></canvas>
-                    </hang-watch>
-                    <div class="scroll-overlay">
-                        <!-- Top Bar -->
-                        <div class="scroll-top-bar">
-                            <div class="scroll-top-left">
-                                <div class="scroll-live-badge">
-                                    <span class="live-dot"></span>
-                                    <span class="live-text">LIVE</span>
-                                </div>
-                                <div class="scroll-viewer-count">
-                                    <svg class="eye-icon" viewBox="0 0 24 24" width="14" height="14">
-                                        <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z" fill="currentColor"/>
-                                    </svg>
-                                    <span class="viewer-number">0</span>
-                                </div>
-                            </div>
-                            <div class="scroll-top-right">
-                                <button class="scroll-close-btn" title="Close">
-                                    <svg viewBox="0 0 24 24" width="24" height="24">
-                                        <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" fill="currentColor"/>
-                                    </svg>
-                                </button>
-                            </div>
-                        </div>
-
-                        <!-- Right Side Action Bar -->
-                        <div class="scroll-action-bar">
-                            <div class="scroll-profile-btn">
-                                <div class="scroll-avatar">
-                                    <img class="scroll-avatar-img" src="" alt="">
-                                    <span class="scroll-avatar-placeholder">?</span>
-                                </div>
-                                <div class="scroll-follow-badge">+</div>
-                            </div>
-                            <button class="scroll-action-btn scroll-like-btn" title="Like">
-                                <svg viewBox="0 0 24 24" width="32" height="32">
-                                    <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" fill="currentColor"/>
-                                </svg>
-                                <span class="scroll-action-count scroll-like-count">0</span>
-                            </button>
-                            <button class="scroll-action-btn scroll-comment-btn" title="Comments">
-                                <svg viewBox="0 0 24 24" width="32" height="32">
-                                    <path d="M21.99 4c0-1.1-.89-2-1.99-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h14l4 4-.01-18z" fill="currentColor"/>
-                                </svg>
-                                <span class="scroll-action-count">Chat</span>
-                            </button>
-                            <button class="scroll-action-btn scroll-gift-btn" title="Gift">
-                                <svg viewBox="0 0 24 24" width="32" height="32">
-                                    <path d="M20 6h-2.18c.11-.31.18-.65.18-1 0-1.66-1.34-3-3-3-1.05 0-1.96.54-2.5 1.35l-.5.67-.5-.68C10.96 2.54 10.05 2 9 2 7.34 2 6 3.34 6 5c0 .35.07.69.18 1H4c-1.11 0-1.99.89-1.99 2L2 19c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V8c0-1.11-.89-2-2-2zm-5-2c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zM9 4c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zm11 15H4v-2h16v2zm0-5H4V8h5.08L7 10.83 8.62 12 11 8.76l1-1.36 1 1.36L15.38 12 17 10.83 14.92 8H20v6z" fill="currentColor"/>
-                                </svg>
-                            </button>
-                            <button class="scroll-action-btn scroll-share-btn" title="Share">
-                                <svg viewBox="0 0 24 24" width="32" height="32">
-                                    <path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z" fill="currentColor"/>
-                                </svg>
-                            </button>
-                        </div>
-
-                        <!-- Bottom Left Creator Info -->
-                        <div class="scroll-creator-info">
-                            <div class="scroll-creator-header">
-                                <span class="scroll-creator-name scroll-broadcaster">@username</span>
-                            </div>
-                            <div class="scroll-location-info">
-                                <span class="scroll-location"></span>
-                            </div>
-                            <div class="scroll-stream-id-badge">
-                                <span class="scroll-stream-id"></span>
-                            </div>
-                        </div>
-
-                        <!-- Swipe Indicator -->
-                        <div class="scroll-swipe-indicator">
-                            <div class="scroll-swipe-line"></div>
-                        </div>
-                    </div>
-                    <div class="scroll-no-streams hidden">
-                        <p>No live streams available</p>
-                        <p class="scroll-checking">Checking for streams...</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-
         <footer>
-            <p><a href="https://moq.dev/" target="_blank" rel="noopener">MoQ</a> | <a href="https://blog.cloudflare.com/moq/" target="_blank" rel="noopener">Cloudflare</a> | <a href="#" id="support-link">Browser Support</a> | <a href="#" id="server-link">Server Status</a></p>
+            <p><a href="https://moq.dev/" target="_blank" rel="noopener">MoQ</a> | <a href="https://tinymoq.com" target="_blank" rel="noopener">TinyMoQ</a> | <a href="#" id="support-link">Browser Support</a> | <a href="#" id="server-link">Server Status</a><span id="ttff-display"></span></p>
             <div id="support-panel" class="server-panel hidden"></div>
             <div id="server-panel" class="server-panel hidden"></div>
         </footer>
