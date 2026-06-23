@@ -555,6 +555,22 @@ function setActiveRelay(relay: string | null) {
   updateServerStatusPanel();
 }
 
+// A small "🔒 Encrypted" pill shown in the publisher and player views when the
+// stream uses relay-blind E2E media encryption. Purely informational.
+function createEncryptionBadge(): HTMLSpanElement {
+  const badge = document.createElement("span");
+  badge.className = "encryption-badge";
+  badge.title = "End-to-end encrypted — the relay only forwards ciphertext it cannot read";
+  badge.innerHTML =
+    `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>` +
+    `<span>Encrypted</span>`;
+  badge.style.cssText =
+    "display:inline-flex;align-items:center;gap:4px;font-size:0.72rem;font-weight:600;" +
+    "color:#22c55e;border:1px solid rgba(34,197,94,0.5);border-radius:999px;padding:2px 8px;" +
+    "line-height:1;white-space:nowrap;";
+  return badge;
+}
+
 // Per-broadcast relay tokens are minted server-side (BYOK) and returned by the Worker:
 // publishers get one from POST /api/stats/broadcast, viewers from GET /route. There is no
 // static client token — the browser never holds a long-lived, all-paths credential.
@@ -596,6 +612,7 @@ import {
   type LiveBroadcast,
   type LiveViewer
 } from "./auth";
+import { armPublisher, armViewer, setMediaKey, resetMediaKey, clearMediaCrypto } from "./crypto/media-crypto";
 
 type View = "broadcast" | "watch" | "stats" | "stats-map" | "greet" | "stream-stats" | "stream-stats-map" | "admin";
 
@@ -906,6 +923,10 @@ function initBroadcastView(streamId: string, user: User | null) {
     });
   }
 
+  // Tracks whether this stream uses relay-blind E2E media encryption (loaded from
+  // settings). goLive reads it to require + install the content key before connecting.
+  let streamEncrypted = false;
+
   // Require auth toggle
   const requireAuthCheckbox = document.getElementById("require-auth-checkbox") as HTMLInputElement;
   if (requireAuthCheckbox) {
@@ -939,6 +960,34 @@ function initBroadcastView(streamId: string, user: User | null) {
     });
   }
 
+  // Relay-blind E2E media encryption toggle. Arm the publisher as soon as we know
+  // the stream is encrypted — at page load, BEFORE any frame is encoded — so nothing
+  // is ever published in the clear. The content key arrives at go-live and releases
+  // the frames the armed publisher has been queuing. See src/crypto/media-crypto.ts.
+  const encryptCheckbox = document.getElementById("encrypt-checkbox") as HTMLInputElement;
+  if (encryptCheckbox) {
+    // "🔒 Encrypted" indicator in the stream header, reflecting the live toggle state.
+    const encBadge = createEncryptionBadge();
+    encBadge.style.display = "none";
+    document.querySelector(".stream-header")?.appendChild(encBadge);
+    const reflectBadge = (on: boolean) => { encBadge.style.display = on ? "inline-flex" : "none"; };
+
+    getStreamSettings(streamId).then(settings => {
+      encryptCheckbox.checked = settings.encrypted;
+      streamEncrypted = settings.encrypted;
+      reflectBadge(settings.encrypted);
+      if (settings.encrypted) armPublisher();
+    });
+
+    encryptCheckbox.addEventListener("change", () => {
+      streamEncrypted = encryptCheckbox.checked;
+      reflectBadge(encryptCheckbox.checked);
+      if (encryptCheckbox.checked) armPublisher();
+      else clearMediaCrypto();
+      updateStreamSettings(streamId, { encrypted: encryptCheckbox.checked });
+    });
+  }
+
   // Set viewers link to stream stats page
   const viewersLink = document.getElementById("viewers-link") as HTMLAnchorElement;
   if (viewersLink) {
@@ -967,7 +1016,7 @@ function initBroadcastView(streamId: string, user: User | null) {
     // the relay on the broadcast row (so viewers can co-locate). Idempotent/sticky.
     const goLive = (): Promise<void> => {
       if (goLivePromise) return goLivePromise;
-      goLivePromise = logBroadcastStart(streamId, getCdnOverride("publisher-cdn")).then((res) => {
+      goLivePromise = logBroadcastStart(streamId, getCdnOverride("publisher-cdn")).then(async (res) => {
         broadcastEventId = res?.eventId ?? null;
         const relay = res?.relay;
         const jwt = res?.jwt;
@@ -979,6 +1028,20 @@ function initBroadcastView(streamId: string, user: User | null) {
           setActiveRelay(null);
           goLivePromise = null;
           return;
+        }
+        // Relay-blind E2E: install the per-broadcast content key BEFORE connecting,
+        // so the frames the armed publisher has been queuing get encrypted. The
+        // server is authoritative on whether the stream is encrypted.
+        if (res?.encrypted || streamEncrypted) {
+          if (!res?.contentKey) {
+            console.error("[crypto] stream is encrypted but no content key was returned; not going live");
+            publisher.source = null;
+            setActiveRelay(null);
+            goLivePromise = null;
+            return;
+          }
+          armPublisher(); // idempotent; covers the case where settings load lost the race
+          await setMediaKey(res.contentKey);
         }
         publisher.setAttribute("url", `https://${relay}/?jwt=${jwt}`);
         setActiveRelay(relay);
@@ -995,6 +1058,10 @@ function initBroadcastView(streamId: string, user: User | null) {
         broadcastEventId = null;
       }
       goLivePromise = null; // a later device selection re-assigns
+      // Drop the content key (keep the publisher armed): a restarted broadcast
+      // gets a fresh key, and frames queue until it arrives — never encrypted
+      // with the previous session's key.
+      resetMediaKey();
     };
 
     // Map a control-bar selection to the element's source/invisible/muted props.
@@ -1310,6 +1377,30 @@ async function initWatchView(streamId: string, user: User | null) {
     }
 
     if (!routeInfo) return; // stopped before a route resolved
+    // Relay-blind E2E: if the stream is encrypted, arm decryption and install the
+    // content key BEFORE connecting. If the key was withheld (auth-gated stream,
+    // viewer not signed in) we can't decrypt — surface the sign-in requirement.
+    // The content key is per-broadcast and relay-independent, so it survives any
+    // later relay change in the refresh loop without re-fetching.
+    if (routeInfo.encrypted) {
+      if (!routeInfo.contentKey) {
+        console.warn("[crypto] stream is encrypted but the content key was withheld; sign-in required to decrypt");
+        showWatchLoginRequired();
+        return;
+      }
+      armViewer();
+      await setMediaKey(routeInfo.contentKey);
+      // "🔒 Encrypted" badge overlaid on the player.
+      const sec = document.querySelector("#watch-view section") as HTMLElement | null;
+      if (sec) {
+        if (!sec.style.position) sec.style.position = "relative";
+        const badge = createEncryptionBadge();
+        badge.style.cssText +=
+          "position:absolute;top:10px;right:10px;z-index:5;color:#4ade80;" +
+          "background:rgba(0,0,0,0.55);border-color:rgba(74,222,128,0.6);";
+        sec.appendChild(badge);
+      }
+    }
     setActiveRelay(routeInfo.relay);
     watcher.setAttribute("url", `https://${routeInfo.relay}/?jwt=${routeInfo.jwt}`);
     watcher.setAttribute("name", streamName);
