@@ -14,6 +14,20 @@
       "database_id": "b5065f2f-dc24-4ac2-94bd-b30432f0d288"
     }
   ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "CHAT_ROOMS",
+        "class_name": "ChatRoom"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["ChatRoom"]
+    }
+  ],
   "routes": [
     {
       "pattern": "earthseed.live",

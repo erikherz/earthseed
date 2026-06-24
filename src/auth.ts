@@ -179,6 +179,7 @@ export interface StreamSettings {
   require_auth: boolean;
   overlay_html: string;
   encrypted: boolean;
+  chat_enabled: boolean;
 }
 
 export async function getStreamSettings(streamId: string): Promise<StreamSettings> {
@@ -189,9 +190,10 @@ export async function getStreamSettings(streamId: string): Promise<StreamSetting
       require_auth: data.require_auth ?? false,
       overlay_html: data.overlay_html ?? "",
       encrypted: data.encrypted ?? false,
+      chat_enabled: data.chat_enabled ?? false,
     };
   } catch {
-    return { require_auth: false, overlay_html: "", encrypted: false };
+    return { require_auth: false, overlay_html: "", encrypted: false, chat_enabled: false };
   }
 }
 

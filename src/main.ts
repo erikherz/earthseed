@@ -613,6 +613,7 @@ import {
   type LiveViewer
 } from "./auth";
 import { armPublisher, armViewer, setMediaKey, resetMediaKey, clearMediaCrypto } from "./crypto/media-crypto";
+import { initChat, type ChatHandle } from "./chat/chat-client";
 
 type View = "broadcast" | "watch" | "stats" | "stats-map" | "greet" | "stream-stats" | "stream-stats-map" | "admin";
 
@@ -988,6 +989,34 @@ function initBroadcastView(streamId: string, user: User | null) {
     });
   }
 
+  // Live chat toggle. When on, reveal the chat panel (right column on desktop, bottom
+  // overlay on mobile) and connect the broadcaster to the per-stream ChatRoom; persist
+  // the setting so viewers' getStreamSettings() reflects it.
+  const chatCheckbox = document.getElementById("chat-checkbox") as HTMLInputElement;
+  const broadcastChatPanel = document.getElementById("broadcast-chat") as HTMLElement | null;
+  let chatHandle: ChatHandle | null = null;
+  const openChat = () => {
+    if (!broadcastChatPanel || chatHandle) return;
+    broadcastChatPanel.classList.remove("hidden");
+    chatHandle = initChat({ streamId, container: broadcastChatPanel, user });
+  };
+  const closeChat = () => {
+    chatHandle?.destroy();
+    chatHandle = null;
+    broadcastChatPanel?.classList.add("hidden");
+  };
+  if (chatCheckbox) {
+    getStreamSettings(streamId).then(settings => {
+      chatCheckbox.checked = settings.chat_enabled;
+      if (settings.chat_enabled) openChat();
+    });
+    chatCheckbox.addEventListener("change", () => {
+      if (chatCheckbox.checked) openChat();
+      else closeChat();
+      updateStreamSettings(streamId, { chat_enabled: chatCheckbox.checked });
+    });
+  }
+
   // Set viewers link to stream stats page
   const viewersLink = document.getElementById("viewers-link") as HTMLAnchorElement;
   if (viewersLink) {
@@ -1299,6 +1328,16 @@ async function initWatchView(streamId: string, user: User | null) {
   if (settings.require_auth && !user) {
     showWatchLoginRequired();
     return;
+  }
+
+  // Live chat for viewers, when the broadcaster enabled it (right column on desktop,
+  // bottom overlay on mobile). The WS is also gated server-side on chat_enabled.
+  if (settings.chat_enabled) {
+    const watchChatPanel = document.getElementById("watch-chat") as HTMLElement | null;
+    if (watchChatPanel) {
+      watchChatPanel.classList.remove("hidden");
+      initChat({ streamId, container: watchChatPanel, user });
+    }
   }
 
   // Set stream name on watcher (headless <moq-watch> core element)
