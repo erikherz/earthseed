@@ -659,7 +659,7 @@ async function handleStreamRoutes(
 // --- tinymoq broadcast→relay routing -------------------------------------
 // The autoscaler exposes a sticky, idempotent assignment API keyed by the full
 // broadcast name. The key MUST match what the client publishes/subscribes.
-const TINYMOQ_AUTOSCALER = "https://gpc-assign.tinymoq.com";
+const TINYMOQ_AUTOSCALER = "https://gpc-01.tinymoq.com";
 // NOTE: there is no static relay fallback. The autoscaler endpoint is a control API
 // (TCP), not a MoQ relay — UDP/443 has no media listener. Every media connection must
 // use a dynamic host:port from /assign or /route (relays advertise as gpc-01.tinymoq.com:<port>).
