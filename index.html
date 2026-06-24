@@ -1032,6 +1032,28 @@
         .publish-btn.device-available:hover {
             box-shadow: 0 0 8px rgba(59, 130, 246, 0.5);
         }
+        /* Combinable capture toggles: lit when ON, dim when OFF */
+        .publish-btn.toggle-btn { filter: grayscale(45%) brightness(0.78); opacity: 1; }
+        .publish-btn.toggle-btn:hover { filter: none; }
+        .publish-btn.toggle-btn.toggle-on {
+            filter: none;
+            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+            border-color: #3b82f6;
+            color: #fff;
+            box-shadow: 0 2px 8px rgba(59, 130, 246, 0.35);
+        }
+        /* PiP composite preview (screen + draggable camera inset) */
+        .pip-canvas {
+            display: block;
+            width: 100%;
+            max-width: 900px;
+            margin: 0 auto;
+            border-radius: 8px;
+            background: #000;
+            cursor: grab;
+            touch-action: none;
+        }
+        .pip-canvas:active { cursor: grabbing; }
 
         /* Broadcast status indicator (emoji + hover tooltip) */
         .publish-status {

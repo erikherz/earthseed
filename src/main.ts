@@ -614,6 +614,7 @@ import {
 } from "./auth";
 import { armPublisher, armViewer, setMediaKey, resetMediaKey, clearMediaCrypto } from "./crypto/media-crypto";
 import { initChat, type ChatHandle } from "./chat/chat-client";
+import { startPiP, type PiPSession } from "./media/pip-compositor";
 
 type View = "broadcast" | "watch" | "stats" | "stats-map" | "greet" | "stream-stats" | "stream-stats-map" | "admin";
 
@@ -1035,8 +1036,6 @@ function initBroadcastView(streamId: string, user: User | null) {
     // returns the relay hosting this broadcast; we point the publisher at it then.
     publisher.setAttribute("name", streamName);
 
-    type DeviceMode = "camera" | "audio" | "screen" | "off";
-
     let broadcastEventId: number | null = null;
     let goLivePromise: Promise<void> | null = null;
 
@@ -1093,38 +1092,93 @@ function initBroadcastView(streamId: string, user: User | null) {
       resetMediaKey();
     };
 
-    // Map a control-bar selection to the element's source/invisible/muted props.
-    // audio-only = camera source with video disabled (invisible); off = no source.
-    const applyMode = (mode: DeviceMode) => {
-      switch (mode) {
-        case "camera":
-          publisher.invisible = false;
-          publisher.muted = false;
-          publisher.source = "camera";
-          break;
-        case "audio":
-          publisher.invisible = true;
-          publisher.muted = false;
-          publisher.source = "camera";
-          break;
-        case "screen":
-          publisher.invisible = false;
-          publisher.muted = false;
+    // --- Combinable capture toggles: 📹 Camera (video) + 🎤 Audio + 🖥️ Screen ---
+    // Camera + Audio combine freely via the element's "camera" source (invisible gates
+    // video, muted gates audio). Screen uses the "screen" source (audio = system/tab
+    // audio). Camera + Screen together = picture-in-picture: we composite the camera over
+    // the screen on a <canvas> and publish that canvas track directly (the element can't
+    // composite), with announce=true + source=undefined so its internal capture stands down.
+    type Toggle = "camera" | "audio" | "screen";
+    const capture: Record<Toggle, boolean> = { camera: false, audio: false, screen: false };
+    let anyActive = false;
+
+    // Low-level seam: a video/audio Source is just a MediaStreamTrack signal.
+    const bcast = publisher.broadcast as unknown as {
+      video: { source: { set(t: MediaStreamTrack | undefined): void } };
+      audio: { source: { set(t: MediaStreamTrack | undefined): void } };
+    };
+
+    let pip: PiPSession | null = null;
+    const teardownPiP = () => {
+      if (!pip) return;
+      pip.stop();
+      pip = null;
+      bcast.video.source.set(undefined);
+      bcast.audio.source.set(undefined);
+      const v = publisher.querySelector("video") as HTMLElement | null;
+      if (v) v.style.display = ""; // restore the element's own preview
+    };
+
+    // Serialize because getDisplayMedia/getUserMedia show permission prompts.
+    let applying = false;
+    const applyState = async () => {
+      if (applying) return;
+      applying = true;
+      try {
+        const { camera, audio, screen } = capture;
+        anyActive = camera || audio || screen;
+
+        // Picture-in-picture: camera over screen.
+        if (camera && screen) {
+          try {
+            if (!pip) {
+              pip = await startPiP({
+                onEnded: () => { capture.screen = false; syncButtons(); void applyState(); },
+              });
+              const v = publisher.querySelector("video") as HTMLElement | null;
+              if (v) v.style.display = "none";
+              pip.canvas.className = "pip-canvas";
+              publisher.insertAdjacentElement("afterbegin", pip.canvas);
+            }
+            publisher.announce = true;
+            publisher.source = undefined;
+            publisher.invisible = false;
+            publisher.muted = !audio;
+            bcast.video.source.set(pip.videoTrack);
+            bcast.audio.source.set(audio ? (pip.audioTrack ?? undefined) : undefined);
+            void goLive();
+          } catch (e) {
+            console.error("[media] PiP start failed (or screen share cancelled):", e);
+            capture.screen = false;
+            syncButtons();
+            teardownPiP();
+          }
+          return;
+        }
+
+        // Not PiP — drop any composite and use the element's own capture.
+        teardownPiP();
+        publisher.announce = "source";
+        if (screen) {
           publisher.source = "screen";
-          break;
-        case "off":
+          publisher.invisible = false;
+          publisher.muted = !audio; // audio = system/tab audio
+          void goLive();
+        } else if (camera || audio) {
+          publisher.source = "camera";
+          publisher.invisible = !camera; // camera off but audio on -> invisible (no camera light)
+          publisher.muted = !audio;
+          void goLive();
+        } else {
           publisher.source = null;
-          break;
-      }
-      // Going live (any real source) assigns + connects to a relay; "off" releases it.
-      if (mode === "off") {
-        endBroadcast();
-      } else {
-        void goLive();
+          endBroadcast();
+        }
+      } finally {
+        applying = false;
       }
     };
 
-    // --- Build the control bar (status + device buttons + overlay toggle) ---
+    // --- Build the control bar (status + capture toggles + overlay toggle) ---
     const bar = document.createElement("div");
     bar.className = "publish-controls";
 
@@ -1134,36 +1188,42 @@ function initBroadcastView(streamId: string, user: User | null) {
     statusEl.setAttribute("data-status-text", "Offline");
     bar.appendChild(statusEl);
 
-    const deviceButtons: Partial<Record<DeviceMode, HTMLButtonElement>> = {};
-
-    // Selected = dim (already chosen, de-emphasized); available = bright (click me).
-    const setActiveButton = (mode: DeviceMode | null) => {
-      (Object.keys(deviceButtons) as DeviceMode[]).forEach((m) => {
-        const btn = deviceButtons[m];
-        if (!btn) return;
-        btn.classList.toggle("device-selected", m === mode);
-        btn.classList.toggle("device-available", m !== mode);
+    const toggleButtons: Partial<Record<Toggle, HTMLButtonElement>> = {};
+    const syncButtons = () => {
+      (Object.keys(toggleButtons) as Toggle[]).forEach((k) => {
+        toggleButtons[k]?.classList.toggle("toggle-on", capture[k]);
       });
     };
-
-    const makeDeviceButton = (mode: DeviceMode, emoji: string, label: string) => {
+    const makeToggle = (key: Toggle, emoji: string, label: string) => {
       const b = document.createElement("button");
       b.type = "button";
-      b.className = "publish-btn";
+      b.className = "publish-btn toggle-btn";
       b.title = label;
       b.textContent = emoji;
       b.addEventListener("click", () => {
-        applyMode(mode);
-        setActiveButton(mode);
+        capture[key] = !capture[key];
+        syncButtons();
+        void applyState();
       });
-      deviceButtons[mode] = b;
+      toggleButtons[key] = b;
       bar.appendChild(b);
     };
-    makeDeviceButton("audio", "🎤", "Audio Only");
-    makeDeviceButton("camera", "📹", "Camera");
-    makeDeviceButton("screen", "🖥️", "Screen");
-    makeDeviceButton("off", "⏹️", "Off");
-    setActiveButton(null);
+    makeToggle("camera", "📹", "Camera");
+    makeToggle("audio", "🎤", "Audio (mic, or system audio with screen)");
+    makeToggle("screen", "🖥️", "Screen");
+
+    const stopBtn = document.createElement("button");
+    stopBtn.type = "button";
+    stopBtn.className = "publish-btn";
+    stopBtn.title = "Stop";
+    stopBtn.textContent = "⏹️";
+    stopBtn.addEventListener("click", () => {
+      capture.camera = capture.audio = capture.screen = false;
+      syncButtons();
+      void applyState();
+    });
+    bar.appendChild(stopBtn);
+    syncButtons();
 
     // Place the control bar directly after the <moq-publish> element.
     publisher.insertAdjacentElement("afterend", bar);
@@ -1171,7 +1231,8 @@ function initBroadcastView(streamId: string, user: User | null) {
     // --- Status indicator (display only; go-live logging is handled by goLive) ---
     const refreshStatus = () => {
       const conn = publisher.connection?.status?.peek?.() ?? "disconnected";
-      const hasSource = !!publisher.state?.source?.peek?.();
+      // anyActive covers PiP too (where state.source is undefined by design).
+      const hasSource = anyActive || !!publisher.state?.source?.peek?.();
       let emoji = "⚪";
       let text = "Offline";
       if (conn === "connected" && hasSource) {
