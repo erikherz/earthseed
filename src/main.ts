@@ -614,7 +614,7 @@ import {
 } from "./auth";
 import { armPublisher, armViewer, setMediaKey, resetMediaKey, clearMediaCrypto } from "./crypto/media-crypto";
 import { initChat, type ChatHandle } from "./chat/chat-client";
-import { startScreen, type ScreenSession } from "./media/pip-compositor";
+import { createCompositor, type Compositor } from "./media/pip-compositor";
 
 type View = "broadcast" | "watch" | "stats" | "stats-map" | "greet" | "stream-stats" | "stream-stats-map" | "admin";
 
@@ -1093,11 +1093,11 @@ function initBroadcastView(streamId: string, user: User | null) {
     };
 
     // --- Combinable capture toggles: 📹 Camera (video) + 🎤 Audio + 🖥️ Screen ---
-    // Camera + Audio combine freely via the element's "camera" source (invisible gates
-    // video, muted gates audio). Screen uses the "screen" source (audio = system/tab
-    // audio). Camera + Screen together = picture-in-picture: we composite the camera over
-    // the screen on a <canvas> and publish that canvas track directly (the element can't
-    // composite), with announce=true + source=undefined so its internal capture stands down.
+    // Camera and/or Screen video is composited onto a single <canvas> and published as one
+    // stable track (announce=true + source=undefined so the element's own capture stands
+    // down); audio is mixed (mic for camera, system/tab audio for screen) into one stable
+    // track. Toggling sources changes only the compositor inputs, never the published
+    // tracks, so viewers never see a reset. Audio-only uses the element's native source.
     type Toggle = "camera" | "audio" | "screen";
     const capture: Record<Toggle, boolean> = { camera: false, audio: false, screen: false };
     let anyActive = false;
@@ -1108,13 +1108,18 @@ function initBroadcastView(streamId: string, user: User | null) {
       audio: { source: { set(t: MediaStreamTrack | undefined): void } };
     };
 
-    // The screen is captured ONCE per session; the camera is added/removed on top without
-    // re-prompting the screen-share dialog. The composite canvas is the publisher preview.
-    let scr: ScreenSession | null = null;
-    const teardownScreen = () => {
-      if (!scr) return;
-      scr.stop();
-      scr = null;
+    // Any video state (camera and/or screen) routes through ONE compositor whose canvas
+    // and audio-mix tracks are published once and never re-set. Toggling camera/screen/
+    // mic changes only the compositor's inputs, so the viewer never sees a track reset
+    // (RESET_STREAM) — the <moq-watch> element can't re-subscribe after one and would
+    // otherwise freeze. Audio-only (mic, no video) stays on the element's native source.
+    let comp: Compositor | null = null;
+    let bound = false; // whether the compositor's tracks are wired into the broadcast
+    const teardownComposite = () => {
+      if (!comp) return;
+      comp.stop();
+      comp = null;
+      bound = false;
       bcast.video.source.set(undefined);
       bcast.audio.source.set(undefined);
       const v = publisher.querySelector("video") as HTMLElement | null;
@@ -1129,48 +1134,61 @@ function initBroadcastView(streamId: string, user: User | null) {
       try {
         const { camera, audio, screen } = capture;
         anyActive = camera || audio || screen;
+        const hasVideo = camera || screen;
 
-        // Any screen-involving state uses our own capture (so camera can be added as a
-        // draggable PiP without a second screen prompt).
-        if (screen) {
+        if (hasVideo) {
           try {
-            if (!scr) {
-              scr = await startScreen({
-                onEnded: () => { capture.screen = false; syncButtons(); void applyState(); },
-              });
+            if (!comp) {
+              comp = createCompositor();
               const v = publisher.querySelector("video") as HTMLElement | null;
               if (v) v.style.display = "none";
-              scr.canvas.className = "pip-canvas";
-              publisher.insertAdjacentElement("afterbegin", scr.canvas);
+              comp.canvas.className = "pip-canvas";
+              publisher.insertAdjacentElement("afterbegin", comp.canvas);
             }
-            // Add/remove the camera PiP without touching the screen capture.
-            if (camera && !scr.hasCamera()) await scr.enableCamera();
-            else if (!camera && scr.hasCamera()) scr.disableCamera();
+            // Reconcile sources without re-prompting the ones already captured.
+            if (screen && !comp.hasScreen()) {
+              await comp.enableScreen({
+                onEnded: () => { capture.screen = false; syncButtons(); void applyState(); },
+              });
+            } else if (!screen && comp.hasScreen()) {
+              comp.disableScreen();
+            }
+            if (camera && !comp.hasCamera()) await comp.enableCamera();
+            else if (!camera && comp.hasCamera()) comp.disableCamera();
+
+            // Audio routing: screen present -> system/tab audio; else the mic. The mix's
+            // output track is stable, so crossing mic<->system never resets audio.
+            comp.setSystemAudioEnabled(audio && screen);
+            await comp.setMicEnabled(audio && !screen);
 
             publisher.announce = true;
             publisher.source = undefined;
             publisher.invisible = false;
-            publisher.muted = !audio; // audio = system/tab audio
-            bcast.video.source.set(scr.videoTrack);
-            bcast.audio.source.set(audio ? (scr.audioTrack ?? undefined) : undefined);
+            publisher.muted = false; // the mixed audio track is always published (silent when audio off) to keep it stable
+            // Wire the stable tracks exactly once; re-setting them would reset the track.
+            if (!bound) {
+              bcast.video.source.set(comp.videoTrack);
+              bcast.audio.source.set(comp.audioTrack);
+              bound = true;
+            }
             void goLive();
           } catch (e) {
-            console.error("[media] screen/PiP capture failed (or cancelled):", e);
+            console.error("[media] capture failed (or cancelled):", e);
             capture.screen = false;
             capture.camera = false;
             syncButtons();
-            teardownScreen();
+            teardownComposite();
           }
           return;
         }
 
-        // No screen — drop the composite and use the element's own camera/mic capture.
-        teardownScreen();
+        // No video — drop the composite and use the element's own capture (audio-only/idle).
+        teardownComposite();
         publisher.announce = "source";
-        if (camera || audio) {
+        if (audio) {
           publisher.source = "camera";
-          publisher.invisible = !camera; // camera off but audio on -> invisible (no camera light)
-          publisher.muted = !audio;
+          publisher.invisible = true; // audio only -> no camera light / no video track
+          publisher.muted = false;
           void goLive();
         } else {
           publisher.source = null;
