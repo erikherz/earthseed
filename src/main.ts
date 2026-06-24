@@ -2239,7 +2239,23 @@ function initAdminView() {
         <p id="admin-error" style="color: #ef4444; display: none; text-align: center;"></p>
       </div>
     </div>
-    <div id="admin-panel" class="stats-section" style="max-width: 600px; margin: 2rem auto; display: none;">
+    <div id="admin-panel" style="max-width: 720px; margin: 2rem auto; display: none;">
+    <div class="stats-section" style="margin-bottom: 1.5rem;">
+      <h3>Broadcaster Access</h3>
+      <p style="color: #a3a3a3; margin-bottom: 1rem;">
+        Default-deny: only <strong>allowed</strong> accounts can broadcast. Suspend or remove to block.
+      </p>
+      <div style="display: flex; gap: 0.5rem; margin-bottom: 1.5rem;">
+        <input type="email" id="add-email-input" placeholder="email@example.com" autocomplete="off" spellcheck="false"
+          style="flex: 1; background: #262626; border: 1px solid #404040; border-radius: 6px; padding: 0.6rem; color: #e5e5e5; font-size: 0.95rem;">
+        <button id="add-allow-btn" class="btn btn-primary">Allow</button>
+      </div>
+      <div id="broadcasters-list" style="display: flex; flex-direction: column; gap: 0.5rem;">
+        <p style="color: #737373;">Loading…</p>
+      </div>
+      <div id="access-status" style="margin-top: 1rem; padding: 0.75rem; border-radius: 6px; display: none;"></div>
+    </div>
+    <div class="stats-section">
       <h3>Data Management</h3>
       <p style="color: #a3a3a3; margin-bottom: 1.5rem;">Warning: These actions are irreversible.</p>
       <div style="display: flex; flex-direction: column; gap: 1rem;">
@@ -2251,6 +2267,7 @@ function initAdminView() {
         </button>
       </div>
       <div id="admin-status" style="margin-top: 1rem; padding: 0.75rem; border-radius: 6px; display: none;"></div>
+    </div>
     </div>
   `;
   container.appendChild(adminView);
@@ -2266,6 +2283,165 @@ function initAdminView() {
       statusEl.style.color = "#e5e5e5";
     }
   };
+
+  const showAccessStatus = (message: string, isError: boolean) => {
+    const el = document.getElementById("access-status");
+    if (!el) return;
+    el.textContent = message;
+    el.style.display = "block";
+    el.style.background = isError ? "#7f1d1d" : "#14532d";
+    el.style.color = "#e5e5e5";
+  };
+
+  type Broadcaster = {
+    email: string;
+    name: string | null;
+    avatar_url: string | null;
+    status: string; // 'allowed' | 'suspended' | 'none'
+    last_broadcast: string | null;
+    never_signed_in?: boolean;
+  };
+
+  // Build one broadcaster row with avatar, identity, status badge, and actions.
+  const renderBroadcaster = (b: Broadcaster): HTMLElement => {
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex;align-items:center;gap:0.75rem;padding:0.6rem 0.75rem;background:#1f1f1f;border:1px solid #333;border-radius:6px;";
+
+    if (b.avatar_url) {
+      const img = document.createElement("img");
+      img.src = b.avatar_url;
+      img.alt = "";
+      img.style.cssText = "width:32px;height:32px;border-radius:50%;flex-shrink:0;";
+      row.appendChild(img);
+    } else {
+      const ph = document.createElement("div");
+      ph.style.cssText = "width:32px;height:32px;border-radius:50%;flex-shrink:0;background:#3b82f6;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:600;";
+      ph.textContent = (b.name || b.email).charAt(0).toUpperCase();
+      row.appendChild(ph);
+    }
+
+    const info = document.createElement("div");
+    info.style.cssText = "flex:1;min-width:0;";
+    const nameEl = document.createElement("div");
+    nameEl.style.cssText = "color:#e5e5e5;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
+    nameEl.textContent = b.name || b.email;
+    const subEl = document.createElement("div");
+    subEl.style.cssText = "color:#737373;font-size:0.8rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;";
+    subEl.textContent = b.never_signed_in ? `${b.email} · never signed in` : b.email;
+    info.appendChild(nameEl);
+    info.appendChild(subEl);
+    row.appendChild(info);
+
+    const badge = document.createElement("span");
+    const label = b.status === "allowed" ? "allowed" : b.status === "suspended" ? "suspended" : "blocked";
+    const color = b.status === "allowed" ? "#22c55e" : b.status === "suspended" ? "#f59e0b" : "#737373";
+    badge.textContent = label;
+    badge.style.cssText = `color:${color};font-size:0.8rem;font-weight:600;flex-shrink:0;`;
+    row.appendChild(badge);
+
+    const actions = document.createElement("div");
+    actions.style.cssText = "display:flex;gap:0.4rem;flex-shrink:0;";
+    const mkBtn = (text: string, bg: string, fn: () => void) => {
+      const btn = document.createElement("button");
+      btn.textContent = text;
+      btn.className = "btn";
+      btn.style.cssText = `padding:0.3rem 0.7rem;font-size:0.85rem;background:${bg};border-color:${bg};`;
+      btn.addEventListener("click", fn);
+      return btn;
+    };
+    if (b.status === "allowed") {
+      actions.appendChild(mkBtn("Suspend", "#92400e", () => setAccess(b.email, "suspended")));
+    } else {
+      actions.appendChild(mkBtn("Allow", "#15803d", () => setAccess(b.email, "allowed")));
+    }
+    if (b.status !== "none") {
+      actions.appendChild(mkBtn("Remove", "#7f1d1d", () => removeAccess(b.email)));
+    }
+    row.appendChild(actions);
+
+    return row;
+  };
+
+  const loadBroadcasters = async () => {
+    const listEl = document.getElementById("broadcasters-list");
+    if (!listEl) return;
+    try {
+      const res = await fetch("/api/admin/broadcasters", {
+        headers: { "Authorization": `Bearer ${adminPassword}` },
+      });
+      if (!res.ok) {
+        listEl.innerHTML = "";
+        showAccessStatus("Failed to load broadcasters", true);
+        return;
+      }
+      const data = await res.json() as { broadcasters: Broadcaster[] };
+      listEl.innerHTML = "";
+      if (!data.broadcasters.length) {
+        const p = document.createElement("p");
+        p.style.color = "#737373";
+        p.textContent = "No accounts yet. Add an email above to pre-authorize.";
+        listEl.appendChild(p);
+        return;
+      }
+      for (const b of data.broadcasters) listEl.appendChild(renderBroadcaster(b));
+    } catch {
+      showAccessStatus("Connection error", true);
+    }
+  };
+
+  const setAccess = async (email: string, status: "allowed" | "suspended") => {
+    try {
+      const res = await fetch("/api/admin/broadcasters", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${adminPassword}` },
+        body: JSON.stringify({ email, status }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({})) as { error?: string };
+        showAccessStatus(d.error || "Failed to update access", true);
+        return;
+      }
+      showAccessStatus(`${email} is now ${status}.`, false);
+      loadBroadcasters();
+    } catch {
+      showAccessStatus("Connection error", true);
+    }
+  };
+
+  const removeAccess = async (email: string) => {
+    if (!confirm(`Remove ${email} from the allow list? They will no longer be able to broadcast.`)) return;
+    try {
+      const res = await fetch(`/api/admin/broadcasters?email=${encodeURIComponent(email)}`, {
+        method: "DELETE",
+        headers: { "Authorization": `Bearer ${adminPassword}` },
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({})) as { error?: string };
+        showAccessStatus(d.error || "Failed to remove", true);
+        return;
+      }
+      showAccessStatus(`${email} removed from the allow list.`, false);
+      loadBroadcasters();
+    } catch {
+      showAccessStatus("Connection error", true);
+    }
+  };
+
+  const addEmail = () => {
+    const input = document.getElementById("add-email-input") as HTMLInputElement;
+    const email = input?.value.trim().toLowerCase();
+    if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      showAccessStatus("Enter a valid email address.", true);
+      return;
+    }
+    setAccess(email, "allowed");
+    input.value = "";
+  };
+
+  document.getElementById("add-allow-btn")?.addEventListener("click", addEmail);
+  document.getElementById("add-email-input")?.addEventListener("keypress", (e) => {
+    if (e.key === "Enter") addEmail();
+  });
 
   // Login handler
   document.getElementById("admin-login-btn")?.addEventListener("click", async () => {
@@ -2294,6 +2470,7 @@ function initAdminView() {
       // Password is correct, show the admin panel
       document.getElementById("admin-login")!.style.display = "none";
       document.getElementById("admin-panel")!.style.display = "block";
+      loadBroadcasters();
     } catch {
       if (errorEl) {
         errorEl.textContent = "Connection error";
