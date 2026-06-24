@@ -1,42 +1,36 @@
-// Picture-in-picture compositor for "Screen + Camera" publishing.
+// Screen-capture session with an optional, draggable camera picture-in-picture.
 //
-// <moq-publish> captures from a single internal source (camera OR screen), so it can't
-// overlay the camera on the screen. We do it ourselves: capture both, draw the screen
-// full-frame with the camera as a draggable inset on a <canvas>, and hand the canvas's
-// captureStream() video track to the element via broadcast.video.source (a video Source
-// is just a MediaStreamTrack). The caller publishes it with announce=true + source=undefined
-// so the element's own capture stands down.
+// <moq-publish> captures from a single internal source, so it can't overlay the camera
+// on the screen. We capture the screen ONCE here and always render it to a <canvas>,
+// drawing the camera as a draggable inset only while the camera is enabled. The element
+// publishes the canvas's video track via broadcast.video.source (a video Source is just a
+// MediaStreamTrack), with announce=true + source=undefined so its own capture stands down.
 //
-// NOTE: this path is best-effort and has not been browser-verified; expect to iterate.
+// Capturing the screen once (and toggling only the camera) means adding/removing the
+// camera never re-prompts the screen-share dialog. Best-effort; iterate in-browser.
 
-export interface PiPSession {
-  videoTrack: MediaStreamTrack; // composited canvas video
-  audioTrack: MediaStreamTrack | null; // system/tab audio if the user shared it
-  canvas: HTMLCanvasElement; // interactive preview; drag the inset to move the camera
+export interface ScreenSession {
+  videoTrack: MediaStreamTrack; // canvas composite (screen, + camera inset when enabled)
+  audioTrack: MediaStreamTrack | null; // system/tab audio, if shared
+  canvas: HTMLCanvasElement; // interactive preview; drag the camera inset to move it
+  hasCamera: () => boolean;
+  enableCamera: () => Promise<void>;
+  disableCamera: () => void;
   stop: () => void;
 }
 
-export async function startPiP(opts?: { onEnded?: () => void }): Promise<PiPSession> {
-  // Always request system audio best-effort; the caller decides whether to publish it.
-  const screen = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
-  let camera: MediaStream;
-  try {
-    camera = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-  } catch (e) {
-    screen.getTracks().forEach((t) => t.stop());
-    throw e;
-  }
+function mkVideo(stream: MediaStream): HTMLVideoElement {
+  const v = document.createElement("video");
+  v.srcObject = stream;
+  v.muted = true;
+  v.playsInline = true;
+  void v.play().catch(() => {});
+  return v;
+}
 
-  const mkVideo = (stream: MediaStream): HTMLVideoElement => {
-    const v = document.createElement("video");
-    v.srcObject = stream;
-    v.muted = true;
-    v.playsInline = true;
-    void v.play().catch(() => {});
-    return v;
-  };
+export async function startScreen(opts?: { onEnded?: () => void }): Promise<ScreenSession> {
+  const screen = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
   const screenVideo = mkVideo(new MediaStream(screen.getVideoTracks()));
-  const camVideo = mkVideo(new MediaStream(camera.getVideoTracks()));
 
   const canvas = document.createElement("canvas");
   const settings = screen.getVideoTracks()[0].getSettings();
@@ -45,45 +39,48 @@ export async function startPiP(opts?: { onEnded?: () => void }): Promise<PiPSess
   const ctx = canvas.getContext("2d");
   if (!ctx) {
     screen.getTracks().forEach((t) => t.stop());
-    camera.getTracks().forEach((t) => t.stop());
     throw new Error("2D canvas context unavailable");
   }
 
-  // Camera inset: ~1/4 width, default bottom-right, draggable.
-  const insetW = () => Math.round(canvas.width * 0.25);
-  const insetH = () => {
-    const ar = camVideo.videoWidth && camVideo.videoHeight ? camVideo.videoHeight / camVideo.videoWidth : 9 / 16;
-    return Math.round(insetW() * ar);
-  };
+  // Camera inset, added on demand. ~1/4 width, default bottom-right, draggable.
+  let camera: MediaStream | null = null;
+  let camVideo: HTMLVideoElement | null = null;
   let px = 0;
   let py = 0;
   let placed = false;
+  const insetW = () => Math.round(canvas.width * 0.25);
+  const insetH = () => {
+    const ar = camVideo && camVideo.videoWidth && camVideo.videoHeight ? camVideo.videoHeight / camVideo.videoWidth : 9 / 16;
+    return Math.round(insetW() * ar);
+  };
 
   let raf = 0;
   const draw = () => {
     ctx.drawImage(screenVideo, 0, 0, canvas.width, canvas.height);
-    const w = insetW();
-    const h = insetH();
-    if (!placed && w && h) {
-      px = canvas.width - w - 24;
-      py = canvas.height - h - 24;
-      placed = true;
+    if (camVideo) {
+      const w = insetW();
+      const h = insetH();
+      if (!placed && w && h) {
+        px = canvas.width - w - 24;
+        py = canvas.height - h - 24;
+        placed = true;
+      }
+      px = Math.max(0, Math.min(px, canvas.width - w));
+      py = Math.max(0, Math.min(py, canvas.height - h));
+      ctx.save();
+      ctx.shadowColor = "rgba(0,0,0,0.5)";
+      ctx.shadowBlur = 14;
+      ctx.drawImage(camVideo, px, py, w, h);
+      ctx.restore();
+      ctx.strokeStyle = "rgba(255,255,255,0.85)";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(px, py, w, h);
     }
-    px = Math.max(0, Math.min(px, canvas.width - w));
-    py = Math.max(0, Math.min(py, canvas.height - h));
-    ctx.save();
-    ctx.shadowColor = "rgba(0,0,0,0.5)";
-    ctx.shadowBlur = 14;
-    ctx.drawImage(camVideo, px, py, w, h);
-    ctx.restore();
-    ctx.strokeStyle = "rgba(255,255,255,0.85)";
-    ctx.lineWidth = 2;
-    ctx.strokeRect(px, py, w, h);
     raf = requestAnimationFrame(draw);
   };
   raf = requestAnimationFrame(draw);
 
-  // Drag the camera inset (pointer coords -> canvas coords).
+  // Drag the camera inset (no-op when the camera is off).
   let dragging = false;
   let dx = 0;
   let dy = 0;
@@ -96,6 +93,7 @@ export async function startPiP(opts?: { onEnded?: () => void }): Promise<PiPSess
   };
   canvas.style.touchAction = "none";
   canvas.addEventListener("pointerdown", (e) => {
+    if (!camVideo) return;
     const p = toCanvas(e);
     if (p.x >= px && p.x <= px + insetW() && p.y >= py && p.y <= py + insetH()) {
       dragging = true;
@@ -127,10 +125,10 @@ export async function startPiP(opts?: { onEnded?: () => void }): Promise<PiPSess
     stopped = true;
     cancelAnimationFrame(raf);
     screen.getTracks().forEach((t) => t.stop());
-    camera.getTracks().forEach((t) => t.stop());
+    camera?.getTracks().forEach((t) => t.stop());
     composite.getTracks().forEach((t) => t.stop());
     screenVideo.srcObject = null;
-    camVideo.srcObject = null;
+    if (camVideo) camVideo.srcObject = null;
     canvas.remove();
   };
 
@@ -140,5 +138,25 @@ export async function startPiP(opts?: { onEnded?: () => void }): Promise<PiPSess
     opts?.onEnded?.();
   });
 
-  return { videoTrack, audioTrack, canvas, stop };
+  return {
+    videoTrack,
+    audioTrack,
+    canvas,
+    hasCamera: () => !!camera,
+    async enableCamera() {
+      if (camera) return;
+      camera = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      camVideo = mkVideo(new MediaStream(camera.getVideoTracks()));
+      placed = false; // re-place the inset for the new camera aspect ratio
+    },
+    disableCamera() {
+      camera?.getTracks().forEach((t) => t.stop());
+      camera = null;
+      if (camVideo) {
+        camVideo.srcObject = null;
+        camVideo = null;
+      }
+    },
+    stop,
+  };
 }

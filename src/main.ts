@@ -614,7 +614,7 @@ import {
 } from "./auth";
 import { armPublisher, armViewer, setMediaKey, resetMediaKey, clearMediaCrypto } from "./crypto/media-crypto";
 import { initChat, type ChatHandle } from "./chat/chat-client";
-import { startPiP, type PiPSession } from "./media/pip-compositor";
+import { startScreen, type ScreenSession } from "./media/pip-compositor";
 
 type View = "broadcast" | "watch" | "stats" | "stats-map" | "greet" | "stream-stats" | "stream-stats-map" | "admin";
 
@@ -1108,11 +1108,13 @@ function initBroadcastView(streamId: string, user: User | null) {
       audio: { source: { set(t: MediaStreamTrack | undefined): void } };
     };
 
-    let pip: PiPSession | null = null;
-    const teardownPiP = () => {
-      if (!pip) return;
-      pip.stop();
-      pip = null;
+    // The screen is captured ONCE per session; the camera is added/removed on top without
+    // re-prompting the screen-share dialog. The composite canvas is the publisher preview.
+    let scr: ScreenSession | null = null;
+    const teardownScreen = () => {
+      if (!scr) return;
+      scr.stop();
+      scr = null;
       bcast.video.source.set(undefined);
       bcast.audio.source.set(undefined);
       const v = publisher.querySelector("video") as HTMLElement | null;
@@ -1128,43 +1130,44 @@ function initBroadcastView(streamId: string, user: User | null) {
         const { camera, audio, screen } = capture;
         anyActive = camera || audio || screen;
 
-        // Picture-in-picture: camera over screen.
-        if (camera && screen) {
+        // Any screen-involving state uses our own capture (so camera can be added as a
+        // draggable PiP without a second screen prompt).
+        if (screen) {
           try {
-            if (!pip) {
-              pip = await startPiP({
+            if (!scr) {
+              scr = await startScreen({
                 onEnded: () => { capture.screen = false; syncButtons(); void applyState(); },
               });
               const v = publisher.querySelector("video") as HTMLElement | null;
               if (v) v.style.display = "none";
-              pip.canvas.className = "pip-canvas";
-              publisher.insertAdjacentElement("afterbegin", pip.canvas);
+              scr.canvas.className = "pip-canvas";
+              publisher.insertAdjacentElement("afterbegin", scr.canvas);
             }
+            // Add/remove the camera PiP without touching the screen capture.
+            if (camera && !scr.hasCamera()) await scr.enableCamera();
+            else if (!camera && scr.hasCamera()) scr.disableCamera();
+
             publisher.announce = true;
             publisher.source = undefined;
             publisher.invisible = false;
-            publisher.muted = !audio;
-            bcast.video.source.set(pip.videoTrack);
-            bcast.audio.source.set(audio ? (pip.audioTrack ?? undefined) : undefined);
+            publisher.muted = !audio; // audio = system/tab audio
+            bcast.video.source.set(scr.videoTrack);
+            bcast.audio.source.set(audio ? (scr.audioTrack ?? undefined) : undefined);
             void goLive();
           } catch (e) {
-            console.error("[media] PiP start failed (or screen share cancelled):", e);
+            console.error("[media] screen/PiP capture failed (or cancelled):", e);
             capture.screen = false;
+            capture.camera = false;
             syncButtons();
-            teardownPiP();
+            teardownScreen();
           }
           return;
         }
 
-        // Not PiP — drop any composite and use the element's own capture.
-        teardownPiP();
+        // No screen — drop the composite and use the element's own camera/mic capture.
+        teardownScreen();
         publisher.announce = "source";
-        if (screen) {
-          publisher.source = "screen";
-          publisher.invisible = false;
-          publisher.muted = !audio; // audio = system/tab audio
-          void goLive();
-        } else if (camera || audio) {
+        if (camera || audio) {
           publisher.source = "camera";
           publisher.invisible = !camera; // camera off but audio on -> invisible (no camera light)
           publisher.muted = !audio;
