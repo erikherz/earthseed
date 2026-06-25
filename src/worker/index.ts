@@ -567,10 +567,11 @@ async function handleStreamRoutes(
       // Subscribe-scoped, cluster-flagged token so the edge can authenticate its pull
       // from the origin. Signed with OUR key via the SAME signer used for viewer tokens
       // (BYOK EdDSA when configured) — the autoscaler can't mint this, and a different
-      // signer would produce tokens the deployed relay rejects.
+      // signer would produce tokens the deployed relay rejects. Broad get:[''] (root)
+      // scope so the edge can pull whatever subtree the origin advertises for the pull.
       const pullToken = await tryMintMoqToken(env, {
         put: [],
-        get: [broadcastName(streamId)],
+        get: [""],
         cluster: true,
         exp: Math.floor(Date.now() / 1000) + PULL_TOKEN_TTL,
       });
