@@ -564,7 +564,17 @@ async function handleStreamRoutes(
       // publisher's CURRENT relay. Explicit ?origin= test override wins.
       const forcedOrigin = url.searchParams.get("origin");
       const origin = forcedOrigin ?? `${current.host}:${current.port}`;
-      const edge = await assignRelay(streamId, viewerCdn, origin, env.TINYMOQ_PROVISION_KEY);
+      // Subscribe-scoped, cluster-flagged token so the edge can authenticate its pull
+      // from the origin. Signed with OUR key via the SAME signer used for viewer tokens
+      // (BYOK EdDSA when configured) — the autoscaler can't mint this, and a different
+      // signer would produce tokens the deployed relay rejects.
+      const pullToken = await tryMintMoqToken(env, {
+        put: [],
+        get: [broadcastName(streamId)],
+        cluster: true,
+        exp: Math.floor(Date.now() / 1000) + PULL_TOKEN_TTL,
+      });
+      const edge = await assignRelay(streamId, viewerCdn, origin, env.TINYMOQ_PROVISION_KEY, pullToken);
       if (!edge) return new Response("offline", { status: 404 });
       relay = edge;
     }
@@ -709,13 +719,18 @@ async function assignRelay(
   streamId: string,
   cdnHost?: string | null,
   origin?: string | null,
-  provisionKey?: string | null
+  provisionKey?: string | null,
+  pull?: string | null
 ): Promise<{ host: string; port: number; key?: string } | null> {
   const name = broadcastName(streamId);
   const base = autoscalerBase(cdnHost);
   let query = `broadcast=${encodeURIComponent(name)}`;
   if (origin && isValidOrigin(origin)) {
     query += `&origin=${encodeURIComponent(origin)}`;
+    // Cross-cluster: the edge relay needs a subscribe-scoped, cluster-flagged token
+    // (minted with OUR signing key — the autoscaler holds none) to authenticate its
+    // pull from the origin. Only meaningful alongside `origin`.
+    if (pull) query += `&pull=${encodeURIComponent(pull)}`;
   }
   try {
     const res = await fetch(`${base}/assign?${query}`, { headers: provisionHeaders(provisionKey) });
@@ -769,6 +784,9 @@ function provisionHeaders(provisionKey?: string | null): HeadersInit {
 // long views aren't dropped mid-stream.
 const PUBLISHER_TOKEN_TTL = 12 * 60 * 60; // 12h
 const VIEWER_TOKEN_TTL = 6 * 60 * 60; // 6h
+// Cross-cluster pull token (edge relay -> origin). Matches the viewer TTL so a long
+// broadcast's edge pull isn't dropped mid-stream (the moq-token-cli example used 1h).
+const PULL_TOKEN_TTL = 6 * 60 * 60; // 6h
 
 // Mint a per-broadcast token, config-driven and guarded (returns null instead of throwing
 // so the endpoint still works). BYOK: sign EdDSA with the tenant's private key when set.
