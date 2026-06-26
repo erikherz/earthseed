@@ -610,7 +610,8 @@ import {
   type Geo,
   type StreamSettings,
   type LiveBroadcast,
-  type LiveViewer
+  type LiveViewer,
+  type StreamRoute
 } from "./auth";
 import { armPublisher, armViewer, setMediaKey, resetMediaKey, clearMediaCrypto } from "./crypto/media-crypto";
 import { initChat, type ChatHandle } from "./chat/chat-client";
@@ -1387,6 +1388,19 @@ function showWatchLoginRequired() {
 }
 
 // Initialize watch view
+// PROVISIONAL (Mode C): how the browser hands the PRIVATE local relay its cross-cluster
+// pull pass is being finalized on the relay/box side. Keep the mechanism behind this one
+// adapter so it can be swapped without touching the player flow. Default = mechanism (a):
+// carry both tokens on the connect URL (?jwt=<watch>&pull=<pull>) — matching earthseed's
+// existing &pull= cross-CDN convention. Mechanism (b) (a one-time GET <relay>/assign?...
+// &pull=<pull> preflight, then connect with watchToken only) can replace this body once
+// the contract + exact param names are confirmed.
+function buildEnterpriseConnectUrl(route: StreamRoute): string {
+  const token = route.watchToken ?? route.jwt ?? "";
+  const base = `https://${route.relay}/?jwt=${token}`;
+  return route.pullToken ? `${base}&pull=${encodeURIComponent(route.pullToken)}` : base;
+}
+
 async function initWatchView(streamId: string, user: User | null) {
   // The ".hang" suffix makes the catalog format explicit so the watcher can parse
   // the catalog and subscribe to video/audio tracks (otherwise detectFormat() is
@@ -1428,6 +1442,8 @@ async function initWatchView(streamId: string, user: User | null) {
     // --- TEMP timing probe: localize viewer join latency by phase ---
     const t0 = performance.now();
     const ms = () => `${Math.round(performance.now() - t0)}ms`;
+    // Strongest "we're actually playing" signal — the Mode-C fallback watchdog reads it.
+    let gotFirstFrame = false;
     const wDiag = watcher as unknown as {
       connection?: { status?: { subscribe?: (fn: (s: string) => void) => void } };
       broadcast?: { catalog?: { subscribe?: (fn: (c: unknown) => void) => void } };
@@ -1452,6 +1468,7 @@ async function initWatchView(streamId: string, user: User | null) {
         const result = origDrawImage.apply(this, args);
         // First real frame: report, then restore the prototype method (no per-frame overhead).
         delete (ctx as unknown as { drawImage?: unknown }).drawImage;
+        gotFirstFrame = true;
         const sinceLoad = performance.now(); // ms since page navigation start
         console.log(`[watch-timing] FIRST FRAME painted @ ${ms()} (from page load: ${Math.round(sinceLoad)}ms)`);
         const ttffEl = document.getElementById("ttff-display");
@@ -1475,8 +1492,11 @@ async function initWatchView(streamId: string, user: User | null) {
     // Resolve the relay via /route. There is NO static relay to fall back to — every
     // connection must use the dynamic host:port from the directory. If the broadcast
     // isn't live yet (404), poll until it is, showing a "waiting" state. Connect once.
-    let routeInfo = await getStreamRoute(streamId, viewerCdn, originOverride);
-    console.log(`[watch-timing] route resolved @ ${ms()} ->`, routeInfo?.relay ?? "(offline, polling)");
+    // After a failed enterprise (Mode C) attempt we reload with ?noEnterprise=1 so the
+    // Worker skips Mode C and returns B/A — guaranteeing the viewer ends up watching.
+    const noEnterprise = new URLSearchParams(window.location.search).get("noEnterprise") === "1";
+    let routeInfo = await getStreamRoute(streamId, viewerCdn, originOverride, { noEnterprise });
+    console.log(`[watch-timing] route resolved @ ${ms()} ->`, routeInfo?.relay ?? "(offline, polling)", routeInfo?.mode ? `(mode=${routeInfo.mode})` : "");
 
     if (!routeInfo) {
       const section = document.querySelector("#watch-view section");
@@ -1490,7 +1510,7 @@ async function initWatchView(streamId: string, user: User | null) {
       window.addEventListener("beforeunload", () => { stopped = true; });
       while (!routeInfo && !stopped) {
         await new Promise((r) => setTimeout(r, 1500));
-        routeInfo = await getStreamRoute(streamId, viewerCdn, originOverride);
+        routeInfo = await getStreamRoute(streamId, viewerCdn, originOverride, { noEnterprise });
       }
       waitingEl.remove();
       if (stopped) return;
@@ -1522,9 +1542,29 @@ async function initWatchView(streamId: string, user: User | null) {
         sec.appendChild(badge);
       }
     }
-    setActiveRelay(routeInfo.relay);
-    watcher.setAttribute("url", `https://${routeInfo.relay}/?jwt=${routeInfo.jwt}`);
-    watcher.setAttribute("name", streamName);
+    if (routeInfo.mode === "enterprise") {
+      // Mode C: connect to the PRIVATE on-net relay. An ASN match does NOT guarantee the
+      // user can actually reach it (VPN off-net, relay down…), so arm a watchdog: if no
+      // frame paints within a few seconds, reload forcing B/A so the viewer always plays.
+      console.log(`[route] played mode=enterprise relay=${routeInfo.relay} edge=${routeInfo.edgeHost ?? "?"}`);
+      setActiveRelay(routeInfo.relay);
+      watcher.setAttribute("url", buildEnterpriseConnectUrl(routeInfo));
+      watcher.setAttribute("name", routeInfo.broadcast ?? streamName);
+      window.setTimeout(() => {
+        if (gotFirstFrame) return; // enterprise connection succeeded
+        console.warn("[route] enterprise relay unreachable; falling back to B/A");
+        const u = new URL(window.location.href);
+        u.searchParams.set("noEnterprise", "1");
+        window.location.replace(u.toString());
+      }, 6000);
+    } else {
+      // Modes A/B (unchanged): publisher origin relay, or a cross-cluster edge.
+      // (Worker logs which of A/B; the player only sees a host:port here.)
+      console.log(`[route] played mode=edge/origin relay=${routeInfo.relay}${noEnterprise ? " (enterprise fell back)" : ""}`);
+      setActiveRelay(routeInfo.relay);
+      watcher.setAttribute("url", `https://${routeInfo.relay}/?jwt=${routeInfo.jwt}`);
+      watcher.setAttribute("name", streamName);
+    }
     console.log(`[watch-timing] url set, connecting @ ${ms()}`);
 
     // Start muted; first click/tap on the player enables audio.

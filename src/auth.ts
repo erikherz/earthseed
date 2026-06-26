@@ -110,13 +110,27 @@ export interface StreamRoute {
   jwt: string | null;
   encrypted?: boolean; // true if this stream uses relay-blind E2E media encryption
   contentKey?: string | null; // per-broadcast AES content key (base64url); null if withheld (auth-gated)
+  // Mode C (Enterprise): present only when the Worker resolved a PRIVATE on-net relay
+  // for this viewer's network. The browser is the only thing that can reach `relay`.
+  mode?: "enterprise";
+  edgeHost?: string; // remote edge the local relay pulls the broadcast from
+  broadcast?: string; // full broadcast name to subscribe to
+  watchToken?: string; // browser -> local relay (mirrors jwt)
+  pullToken?: string; // local relay -> edge (cluster-flagged pull pass)
 }
 
-export async function getStreamRoute(streamId: string, viewerCdn?: string, origin?: string): Promise<StreamRoute | null> {
+export async function getStreamRoute(
+  streamId: string,
+  viewerCdn?: string,
+  origin?: string,
+  opts?: { noEnterprise?: boolean }
+): Promise<StreamRoute | null> {
   try {
     const qp = new URLSearchParams();
     if (viewerCdn) qp.set("viewer-cdn", viewerCdn);
     if (origin) qp.set("origin", origin);
+    // Tell the Worker to skip Mode C and return B/A (set after a failed enterprise attempt).
+    if (opts?.noEnterprise) qp.set("noEnterprise", "1");
     const qs = qp.toString() ? `?${qp.toString()}` : "";
     const response = await fetch(`/api/streams/${streamId}/route${qs}`);
     if (!response.ok) return null; // 404 = offline, 401 = auth required
@@ -124,9 +138,14 @@ export async function getStreamRoute(streamId: string, viewerCdn?: string, origi
     if (!data.relay) return null;
     return {
       relay: data.relay,
-      jwt: data.jwt ?? null,
+      jwt: data.jwt ?? data.watchToken ?? null,
       encrypted: data.encrypted ?? false,
       contentKey: data.content_key ?? null,
+      mode: data.mode === "enterprise" ? "enterprise" : undefined,
+      edgeHost: data.edgeHost,
+      broadcast: data.broadcast,
+      watchToken: data.watchToken,
+      pullToken: data.pullToken,
     };
   } catch {
     return null;

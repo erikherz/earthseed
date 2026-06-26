@@ -49,6 +49,10 @@ export interface Env {
   // (/assign, /release) AND identifies the tenant, so the relay is keyed with this
   // tenant's registered key. Optional so deploys are safe before the operator sets it.
   TINYMOQ_PROVISION_KEY?: string;
+  // Mode C (Enterprise): bearer for tinymoq's ASN→relay resolve API
+  // (GET /api/enterprise/resolve). Optional — when unset, Mode C is skipped and the
+  // viewer route behaves exactly as Modes B/A do today.
+  RESOLVE_KEY?: string;
   // Per-stream live chat rooms (one Durable Object instance per streamId).
   CHAT_ROOMS: DurableObjectNamespace;
 }
@@ -554,6 +558,62 @@ async function handleStreamRoutes(
       }
     }
 
+    // ── Mode C (Enterprise) ────────────────────────────────────────────────
+    // If this viewer's network (Cloudflare-provided ASN) has a PRIVATE on-net relay,
+    // hand the browser the local relay address + the two tokens it needs and let IT
+    // connect — no server can reach that relay. Runs BEFORE today's B/A logic. The
+    // player sets ?noEnterprise=1 after a failed enterprise attempt to force B/A, and
+    // any resolve failure simply falls through, so the viewer always gets the stream.
+    const cf = (request as Request & { cf?: IncomingRequestCfProperties }).cf;
+    const asn = cf?.asn ?? 0;
+    const asOrg = cf?.asOrganization ?? "";
+    const skipEnterprise = url.searchParams.get("noEnterprise") === "1";
+    if (!skipEnterprise && asn) {
+      const ent = await resolveEnterprise(env, asn);
+      if (ent) {
+        // Both tokens are minted with OUR key (BYOK EdDSA) — the enterprise relay is
+        // registered with earthseed's PUBLIC key. watchToken authorizes the browser to
+        // subscribe on the local relay; pullToken is the local relay's cluster-flagged
+        // pass to pull the broadcast from the remote edge (root get:[''] scope to match
+        // the working cross-CDN edge pull). If BYOK isn't configured we can't mint
+        // either → fall through to B/A.
+        const now = Math.floor(Date.now() / 1000);
+        const watchToken = await tryMintMoqToken(env, {
+          put: [],
+          get: [broadcastName(streamId)],
+          exp: now + VIEWER_TOKEN_TTL,
+        });
+        const pullToken = await tryMintMoqToken(env, {
+          put: [],
+          get: [""],
+          cluster: true,
+          // Short-lived: this root+cluster token is browser-held (see ENTERPRISE_PULL_TOKEN_TTL).
+          exp: now + ENTERPRISE_PULL_TOKEN_TTL,
+        });
+        if (watchToken && pullToken) {
+          const { encrypted, contentKey } = await viewerContentKey(request, env, streamId, row.content_key);
+          console.log(
+            `[route] mode=C enterprise asn=${asn} org=${JSON.stringify(asOrg)} ` +
+            `name=${JSON.stringify(ent.name)} relay=${ent.localRelayHost} edge=${ent.edgeHost} stream=${streamId}`
+          );
+          return Response.json({
+            mode: "enterprise",
+            relay: ent.localRelayHost,
+            edgeHost: ent.edgeHost,
+            broadcast: broadcastName(streamId),
+            watchToken,
+            pullToken,
+            // A/B-compatible aliases so any older player still finds relay + jwt.
+            jwt: watchToken,
+            encrypted,
+            content_key: contentKey,
+          });
+        }
+        console.warn("[route] enterprise matched but BYOK token mint unavailable; falling back to B/A");
+      }
+    }
+    // ────────────────────────────────────────────────────────────────────────
+
     // Resolve the relay the viewer will actually connect to. For a cross-cluster viewer
     // that's a fresh edge (with its OWN per-stream key); otherwise the publisher's relay.
     // The viewer token must be signed with THAT relay's key (managed mode).
@@ -587,26 +647,13 @@ async function handleStreamRoutes(
       exp: Math.floor(Date.now() / 1000) + VIEWER_TOKEN_TTL,
     }, relay.key);
 
-    // Relay-blind E2E: hand the per-broadcast content key to authorized viewers.
-    // The key gates DECRYPTION (the JWT only gates the connection). For a stream
-    // that requires auth, the caller must be signed in to receive it — an
-    // unauthorized viewer can still connect but, lacking the key, only ever sees
-    // ciphertext (fail-closed). Non-auth encrypted streams hand the key to anyone
-    // (they are not meant to be private; encryption there only blinds the relay).
-    let contentKey: string | null = null;
-    const encrypted = !!row.content_key;
-    if (encrypted) {
-      const stream = await env.DB
-        .prepare("SELECT require_auth FROM streams WHERE stream_id = ?")
-        .bind(streamId)
-        .first<{ require_auth: number }>();
-      if (stream?.require_auth === 1) {
-        const viewer = await getAuthenticatedUser(request, env);
-        if (viewer) contentKey = row.content_key;
-      } else {
-        contentKey = row.content_key;
-      }
-    }
+    // Relay-blind E2E: hand the per-broadcast content key to authorized viewers
+    // (auth-gated streams require a session; see viewerContentKey).
+    const { encrypted, contentKey } = await viewerContentKey(request, env, streamId, row.content_key);
+
+    // Which mode resolved: B = cross-cluster edge, A = publisher origin relay.
+    const mode = relay === current ? "A" : "B";
+    console.log(`[route] mode=${mode} ${mode === "B" ? "edge" : "origin"} asn=${asn} stream=${streamId} relay=${relay.host}:${relay.port}`);
 
     return Response.json({
       relay: `${relay.host}:${relay.port}`,
@@ -677,6 +724,61 @@ const TINYMOQ_AUTOSCALER = "https://gpc-01.tinymoq.com";
 
 function broadcastName(streamId: string): string {
   return `earthseed.live/${streamId}.hang`;
+}
+
+// Relay-blind E2E: decide whether to hand the per-broadcast content key to this viewer.
+// The key gates DECRYPTION (the JWT only gates the connection). Auth-required encrypted
+// streams release the key only to a signed-in caller (fail-closed); non-auth encrypted
+// streams release to anyone (encryption there only blinds the relay). Shared by every
+// viewer-route mode (A/B/C) so the policy can't drift between them.
+async function viewerContentKey(
+  request: Request,
+  env: Env,
+  streamId: string,
+  rowContentKey: string | null
+): Promise<{ encrypted: boolean; contentKey: string | null }> {
+  if (!rowContentKey) return { encrypted: false, contentKey: null };
+  const stream = await env.DB
+    .prepare("SELECT require_auth FROM streams WHERE stream_id = ?")
+    .bind(streamId)
+    .first<{ require_auth: number }>();
+  if (stream?.require_auth === 1) {
+    const viewer = await getAuthenticatedUser(request, env);
+    return { encrypted: true, contentKey: viewer ? rowContentKey : null };
+  }
+  return { encrypted: true, contentKey: rowContentKey };
+}
+
+// Mode C (Enterprise): ask tinymoq whether this viewer's network (by ASN) has a PRIVATE
+// on-net relay. That relay is unreachable from any server, so we only RESOLVE here and
+// hand its address + tokens to the BROWSER (the only thing on-net that can reach it).
+// Returns null on ANY failure (no key, bad ASN, no match, network/timeout) so the caller
+// falls back to Mode B/A — the enterprise path must never hard-fail a viewer.
+async function resolveEnterprise(
+  env: Env,
+  asn: number
+): Promise<{ localRelayHost: string; edgeHost: string; name: string } | null> {
+  if (!env.RESOLVE_KEY || !Number.isFinite(asn) || asn <= 0) return null;
+  try {
+    const res = await fetch(`https://tinymoq.com/api/enterprise/resolve?asn=${asn}`, {
+      headers: { "X-Resolve-Key": env.RESOLVE_KEY },
+      signal: AbortSignal.timeout(2000),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      match?: boolean;
+      localRelayHost?: string;
+      edgeHost?: string;
+      name?: string;
+    };
+    // Confirmed contract: match → {match:true, localRelayHost, edgeHost, name};
+    // no match → {match:false}. 401/400 already handled by the !res.ok check above.
+    if (!data || data.match !== true || !data.localRelayHost || !data.edgeHost) return null;
+    return { localRelayHost: data.localRelayHost, edgeHost: data.edgeHost, name: data.name ?? "" };
+  } catch (e) {
+    console.warn("[route] enterprise resolve failed", e);
+    return null;
+  }
 }
 
 // Generate a fresh 256-bit content encryption key (base64url, unpadded) for a
@@ -787,7 +889,15 @@ const PUBLISHER_TOKEN_TTL = 12 * 60 * 60; // 12h
 const VIEWER_TOKEN_TTL = 6 * 60 * 60; // 6h
 // Cross-cluster pull token (edge relay -> origin). Matches the viewer TTL so a long
 // broadcast's edge pull isn't dropped mid-stream (the moq-token-cli example used 1h).
+// SERVER-HELD only (Mode B): never leaves the Worker/relay, so a long TTL is safe.
 const PULL_TOKEN_TTL = 6 * 60 * 60; // 6h
+// Mode C (Enterprise) pull token is BROWSER-HELD: the viewer's browser carries a
+// root-scoped, cluster:true token to the local relay. Same broad scope as Mode B (must
+// match the proven cross-cluster pull), but in an end-user's hands it could act as a
+// cluster node — so containment is a TIGHT expiry, not scope. Keep it to minutes.
+// NOTE (box-side, being validated): if the local relay needs the pass valid for the
+// whole pull session rather than just to establish it, bump this — it's the one knob.
+const ENTERPRISE_PULL_TOKEN_TTL = 5 * 60; // 5 min
 
 // Mint a per-broadcast token, config-driven and guarded (returns null instead of throwing
 // so the endpoint still works). BYOK: sign EdDSA with the tenant's private key when set.
