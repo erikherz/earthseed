@@ -1,0 +1,82 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "earthseed",
+  "compatibility_date": "2025-01-01",
+  "main": "src/worker/index.ts",
+  // BROKERED (tinymoq CDN) — STAGED, NOT YET DEPLOYED. We route the normal broadcast/watch
+  // flow through the tinymoq CDN operator's broker, which ASN-steers our traffic back to
+  // Luke as a dedicated enterprise edge. The operator and every box stay relay-blind: only
+  // our public verify_jwk (kid X3KzNJpRvVarbKBM2mk_M5JGt0dDYu85ZA5z2nLb1Qk) ever leaves
+  // Earthseed; per-broadcast tokens are still signed with MOQ_AUTH_PRIVATE_JWK and validate
+  // at both Luke and the tinymoq fleet. Relay-blind media (payload) encryption is unchanged.
+  //
+  // CUTOVER (do these together, only after Erik provides the customer token):
+  //   1. wrangler secret put CDN_API_TOKEN   (the cdn_… customer token from tinymoq/cdnadmin)
+  //   2. wrangler deploy
+  // Brokered mode REQUIRES CDN_API_TOKEN; deploying without it breaks assign. Ensure the box
+  // bearer TINYMOQ_PROVISION_KEY is NOT set on this deployment (brokered must not hold it).
+  //
+  // ROLLBACK (one line): set FLEET_MODE "static" + FLEET_ENDPOINT "https://luke.moqcdn.net"
+  // (the prior luke-relay direct config) and redeploy — talks to Luke directly again.
+  "vars": {
+    "FLEET_MODE": "brokered",
+    "FLEET_ENDPOINT": "https://tinymoq.com/cdn/assign",
+    // Mode C (Enterprise) — EARTHSEED-DRIVEN steering. Steer viewers to erik.moqcdn.net as a
+    // dedicated edge. crosspull: erik pulls the broadcast from the publisher's origin relay
+    // (earthseed passes the real cdn host:dynamic-port + a BYOK pull token); the browser
+    // couriers its watch token to erik's /assign (?jwt=, C1 box-side validates vs verify_jwk).
+    // ENTERPRISE_ASNS is unset => ALL viewers steered (set a comma list to gate by ASN).
+    "ENTERPRISE_EDGE_HOST": "erik.moqcdn.net",
+    "ENTERPRISE_MODE": "crosspull"
+  },
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    // Serve /send.html and /view.html literally (no pretty-URL redirect to /send),
+    // so the file names match the "two files" model + the download links, and the
+    // relative view.html share link resolves without an extra 307 hop.
+    "html_handling": "none"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "earthseed-db",
+      "database_id": "b5065f2f-dc24-4ac2-94bd-b30432f0d288"
+    }
+  ],
+  // Media-key salts. Holds the operator's global kill-switch salt ("salt:global")
+  // and each live broadcast's rotatable salt ("salt:stream:<id>"). Salts are NOT
+  // secret — they decode nothing without the #k= fragment key — so this is safe to
+  // serve publicly. GLOBAL KILL SWITCH: rotate all stream keys at once with
+  //   wrangler kv key put --binding=SALTS salt:global "<new-base64url>" --remote
+  "kv_namespaces": [
+    {
+      "binding": "SALTS",
+      "id": "f55a0dbce48d4e46b56a378520d418e3"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "CHAT_ROOMS",
+        "class_name": "ChatRoom"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["ChatRoom"]
+    }
+  ],
+  "routes": [
+    {
+      "pattern": "earthseed.live",
+      "custom_domain": true
+    },
+    {
+      "pattern": "www.earthseed.live",
+      "custom_domain": true
+    }
+  ]
+}

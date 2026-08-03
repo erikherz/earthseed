@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Livestream App — Trust, Privacy &amp; Communication</title>
+<style>
+  :root{
+    --ink:#16201c; --muted:#5b6b64; --line:#d9e2dd; --line2:#eef3f0;
+    --accent:#0e7a66; --accent-weak:#e5f2ee; --warn:#b45309; --warn-weak:#fdf3e6;
+    --ok:#0e7a66; --bad:#b03a2e; --panel:#f7faf9;
+  }
+  *{box-sizing:border-box;}
+  html{-webkit-print-color-adjust:exact; print-color-adjust:exact;}
+  body{margin:0; color:var(--ink);
+    font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    background:#fff;}
+  .wrap{max-width:760px; margin:0 auto; padding:56px 40px 72px;}
+  h1{font-size:30px; line-height:1.15; letter-spacing:-.01em; margin:0 0 6px;}
+  .sub{color:var(--muted); font-size:13.5px; margin:0 0 8px; font-style:italic;}
+  h2{font-size:20px; letter-spacing:-.005em; margin:38px 0 12px; padding-bottom:6px;
+     border-bottom:2px solid var(--accent-weak);}
+  h3{font-size:15.5px; margin:24px 0 8px; color:var(--accent);}
+  p{margin:0 0 12px;}
+  ul,ol{margin:0 0 12px; padding-left:22px;}
+  li{margin:4px 0;}
+  strong{font-weight:650;}
+  code{font:13px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+       background:var(--line2); padding:1px 5px; border-radius:4px; word-break:break-word;}
+  a{color:var(--accent);}
+  hr{border:none; border-top:1px solid var(--line); margin:26px 0;}
+  .lead{background:var(--panel); border:1px solid var(--line); border-left:4px solid var(--accent);
+        padding:14px 16px; border-radius:8px; margin:0 0 8px;}
+  blockquote{margin:14px 0; padding:12px 16px; background:var(--accent-weak);
+             border-radius:8px; font-size:14.5px;}
+  blockquote p{margin:0;}
+  table{border-collapse:collapse; width:100%; margin:10px 0 16px; font-size:13px;}
+  th,td{border:1px solid var(--line); padding:7px 10px; text-align:left; vertical-align:top;}
+  th{background:var(--accent-weak); font-weight:650;}
+  tbody tr:nth-child(even){background:var(--line2);}
+  .warn{color:var(--warn);} .ok{color:var(--ok); font-weight:650;} .bad{color:var(--bad); font-weight:650;}
+  .tag{display:inline-block; font-size:11px; font-weight:650; padding:1px 7px; border-radius:999px; vertical-align:middle;}
+  .tag.trusted{background:#e5f2ee; color:#0e7a66;}
+  .tag.untrusted{background:#fbe7e3; color:#b03a2e;}
+  .tag.central{background:#e7effb; color:#2c5aa0;}
+  .tag.app{background:#f1eefb; color:#5b47a0;}
+  .diagram{margin:14px 0 6px;}
+  .tiers{display:flex; gap:10px; flex-wrap:wrap;}
+  .tier{flex:1 1 150px; border:1px solid var(--line); border-radius:10px; padding:12px; background:var(--panel);}
+  .tier h4{margin:0 0 4px; font-size:13.5px;}
+  .tier .who{font-size:12px; color:var(--muted); margin:0 0 8px;}
+  .tier .sees{font-size:11.5px; line-height:1.5; margin:0;}
+  .tier.t-browser{border-top:3px solid #0e7a66;}
+  .tier.t-app{border-top:3px solid #5b47a0;}
+  .tier.t-broker{border-top:3px solid #2c5aa0;}
+  .tier.t-fleet{border-top:3px solid #b03a2e;}
+  .tier.t-dht{border-top:3px solid #b45309;}
+  .flow{margin:12px 0 0; font-size:12.5px; color:var(--muted);}
+  .flow b{color:var(--ink);}
+  .steps{list-style:none; padding-left:0; margin:12px 0; font-size:13px;}
+  .steps li{border-left:2px solid var(--accent-weak); padding:2px 0 2px 14px; margin:8px 0;}
+  .steps .k{font-weight:650; color:var(--accent);}
+  @page{size:Letter; margin:14mm 15mm;}
+  @media print{
+    .wrap{padding:0; max-width:none;}
+    h2{page-break-after:avoid;} h3{page-break-after:avoid;}
+    table,blockquote,.lead,.tiers,.steps{page-break-inside:avoid;}
+    tr{page-break-inside:avoid;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>Livestream App — Trust, Privacy &amp; Communication</h1>
+<p class="lead"><em>A trust review of a privacy-first live-streaming app: video is encrypted in the browser, discovery
+uses no central server, and no accounts or IP logs are kept. This document traces who can see what, on
+every hop — written to expose residual leaks, not to reassure.</em></p>
+<h2>Choose your path</h2>
+<p>The app isn&#39;t a single privacy setting — it&#39;s a set of paths, from <em>&quot;open a link&quot;</em> to <em>&quot;trust no
+shared infrastructure.&quot;</em> Pick the row that matches your threat; the rest of this document is the
+evidence behind each one. <strong>Every party in every row is content-blind</strong> — none can decode your
+video — so the columns below are about <em>who you still rely on to deliver the code and coordinate the
+stream</em>, and what each step removes.</p>
+<table>
+<thead>
+<tr>
+<th>Path</th>
+<th>Choose it if you want…</th>
+<th>Who you still rely on (all content-blind)</th>
+<th>Effort</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>1. Default</strong> — the two hosted pages</td>
+<td>Private video + no accounts, zero setup</td>
+<td>The code host (hash-pinned), the broker, the relay fleet — none can decode; they see your IP only while you&#39;re connected</td>
+<td>Open a link</td>
+</tr>
+<tr>
+<td><strong>2. + Tor / VPN</strong></td>
+<td>Also hide your IP / location from every hop</td>
+<td>The above, <strong>minus IP exposure</strong> (you trust your VPN/Tor instead)</td>
+<td>Run a VPN</td>
+</tr>
+<tr>
+<td><strong>3. Own your copy</strong> — self-contained download</td>
+<td>Control your own app delivery</td>
+<td>The broker + relay fleet only — <strong>no code host</strong>; the code is yours, checkable against the published hash</td>
+<td>Download + run/host</td>
+</tr>
+<tr>
+<td><strong>4. + your own access key</strong></td>
+<td>Your own usage tier and your own revocation switch</td>
+<td>Same as 3</td>
+<td>Request / mint a key</td>
+</tr>
+<tr>
+<td><strong>5. Owned + your own relay</strong> 🔜 <em>roadmap</em></td>
+<td><strong>No shared dependency at all</strong></td>
+<td>Only a relay you chose or run — nothing of ours</td>
+<td>Roadmap (config switch pending)</td>
+</tr>
+</tbody></table>
+<p><em>These stack:</em> add <strong>Tor/VPN</strong> to any row, <strong>self-host the discovery relay</strong> on any owned path, and
+<strong>rotate keys / mint a fresh identity</strong> at any time. The full lever-by-lever detail — what each closes,
+how, and its honest limit — is <strong>§10</strong>.</p>
+<p><strong>What every path guarantees</strong></p>
+<ul>
+<li><strong>Your video is encrypted in your browser.</strong> No relay or broker can decode it — the key lives only
+in the <code>#…</code> of your share link and never reaches a server.</li>
+<li><strong>No accounts, no chat, no directory to browse.</strong> Discovery is a signed record on a public
+distributed hash table (DHT) — a stream is reachable only to someone who already has its key.</li>
+<li><strong>No IP is stored.</strong> Every hop sees your IP <em>while you&#39;re connected</em> (unavoidable in software); none
+of ours logs or rolls it up.</li>
+<li><strong>The client is open source</strong> — and in paths 3–5 it&#39;s hosted by you.</li>
+</ul>
+<p><strong>Key terms (plain language)</strong></p>
+<ul>
+<li><strong>End-to-end encrypted</strong> — scrambled on the sender&#39;s device and unscrambled only on the recipient&#39;s;
+nothing in between holds the key.</li>
+<li><strong>DHT (distributed hash table)</strong> — a decentralized, serverless key→value lookup (the same kind of
+network BitTorrent uses to find peers). Here it maps a stream&#39;s public key to its relay, so no
+server holds a list of streams.</li>
+<li><strong>Content key (<code>#…</code>)</strong> — the secret that decrypts the video. It lives only <em>after the <code>#</code></em> in the
+share link, and browsers never send that part of a URL to any server.</li>
+<li><strong>Trusted computing base (TCB)</strong> — the one component that, if it were malicious, would defeat every
+other protection. For a web app, that&#39;s whoever serves the client code.</li>
+<li><strong>Subresource Integrity (SRI)</strong> — the page pins the exact cryptographic hash of the code it loads;
+the browser refuses any file that doesn&#39;t match, so the code host can&#39;t silently swap it.</li>
+</ul>
+<blockquote>
+<p><strong>For reviewers:</strong> this document is written to be <em>checked</em>, not to reassure. §2 is the trust
+boundaries, <strong>§6</strong> the code-verified who-knows-what, <strong>§7</strong> the ranked residual leaks, <strong>§8</strong> the
+hard floors we can&#39;t engineer away. Tell us where the model is wrong, or where a path doesn&#39;t
+actually deliver the goal it claims — that feedback is the point.</p>
+</blockquote>
+<style>
+.flow{margin:16px 0 22px;border:1px solid var(--line);border-radius:12px;padding:18px 16px;background:var(--panel);}
+.flow .cap{font-size:12px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);margin:0 0 16px;font-weight:650;}
+.flow-steps{display:flex;flex-direction:column;gap:0;max-width:560px;margin:0 auto;}
+.flow-node{border:1px solid var(--line);border-radius:10px;padding:11px 14px;font-weight:650;font-size:14px;background:#fff;}
+.flow-node small{display:block;font-weight:400;font-size:12px;color:var(--muted);margin-top:3px;line-height:1.4;}
+.flow-node.end{border-color:var(--accent);background:var(--accent-weak);color:var(--accent);}
+.flow-arr{color:var(--muted);font-size:12px;padding:6px 0 6px 16px;}
+.flow-arr b{font-size:15px;color:var(--ink);margin-right:6px;}
+.flow-aside{display:grid;grid-template-columns:1fr;gap:8px;margin-top:18px;}
+@media(min-width:540px){.flow-aside{grid-template-columns:1fr 1fr 1fr;}}
+.flow-chip{border:1px dashed var(--line);border-radius:9px;padding:9px 11px;font-size:12px;font-weight:650;}
+.flow-chip small{display:block;font-weight:400;color:var(--muted);margin-top:3px;font-size:11px;line-height:1.45;}
+.flow-note{font-size:12.5px;color:var(--muted);margin:16px 0 0;line-height:1.7;max-width:640px;}
+.flow-note b{color:var(--ink);font-weight:650;}
+</style>
+<figure class="flow">
+  <div class="cap">How it works — one broadcast, end to end</div>
+  <div class="flow-steps">
+    <div class="flow-node end">Broadcaster's browser<small>encrypts every video frame before it leaves the device</small></div>
+    <div class="flow-arr"><b>↓</b> encrypted video</div>
+    <div class="flow-node">Origin relay<small>moves bytes it cannot read</small></div>
+    <div class="flow-arr"><b>↓</b> encrypted video (relay to relay)</div>
+    <div class="flow-node">Edge relay<small>nearest the viewer — also cannot read</small></div>
+    <div class="flow-arr"><b>↓</b> encrypted video</div>
+    <div class="flow-node end">Viewer's browser<small>decrypts locally with the key from the share link</small></div>
+  </div>
+  <div class="flow-aside">
+    <div class="flow-chip">Broker<small>assigns relays and issues short-lived access tokens. Cannot decrypt.</small></div>
+    <div class="flow-chip">Discovery (DHT)<small>maps a stream's public key → its relay. No server holds a list.</small></div>
+    <div class="flow-chip">The key (<code>#…</code>)<small>lives only in the share link — browser to browser, never a server.</small></div>
+  </div>
+  <p class="flow-note"><b>①</b> The broadcaster's browser mints a keypair and a content key, asks the
+  broker for a relay, and signs <b>public key → relay</b> into the DHT. &nbsp;<b>②</b> A viewer opens
+  the share link, looks the public key up on the DHT, and gets a nearby relay plus a short-lived token
+  from the broker. &nbsp;<b>③</b> Video flows relay-to-relay as ciphertext. &nbsp;<b>④</b> Only the two
+  browsers hold the key from the link, so only they can decode.</p>
+</figure>
+
+<hr>
+<h2>1. Goal, stated as a threat model</h2>
+<p>Two guarantees for end users (broadcasters <strong>and</strong> viewers):</p>
+<ul>
+<li><strong>Content confidentiality</strong> — no party in the middle (a relay, the broker, <em>or whoever serves the
+client code</em>) can decode the media. Only the two browsers can.</li>
+<li><strong>Identity protection</strong> — no party can trace a stream to a person, <em>even if a powerful entity
+compels or seizes</em> the code host, the broker, or a relay.</li>
+</ul>
+<p><strong>Out of scope</strong> (accepted limits): copy protection after decode (an authorized viewer can re-capture
+decoded frames — this is not DRM); and network-level anonymity of a browser&#39;s IP from any server it
+connects to directly (that is the user&#39;s own tool — Tor/VPN).</p>
+<blockquote>
+<p><strong>You can only be compelled to reveal what you retain and can enumerate.</strong> The two levers are <em>data
+minimization</em> (don&#39;t store it) and <em>compartmentalization</em> (split knowledge so no single party links
+identity ↔ broadcast ↔ viewer). Every design choice below serves one of these.</p>
+</blockquote>
+<hr>
+<h2>2. Parties and trust boundaries</h2>
+<ul>
+<li><strong>Browser endpoints</strong> <em>(trusted)</em> — the broadcaster and the viewer. They mint and hold the content
+key (the <code>#…</code> in the link), the cryptographic identity, and the rotate secret; they see plaintext;
+they sign the discovery record; they encrypt/decrypt every frame. They also carry a <strong>public access
+key</strong> (see §5) — not a secret.</li>
+<li><strong>Page host — anywhere</strong> <em>(varies)</em> — whoever serves the two pages (<code>send.html</code> / <code>view.html</code>): the
+app&#39;s own site, a third party&#39;s web server, or nobody at all (a page opened as a local file). It
+serves only the two HTML shells plus the public access key; it holds <strong>no secret</strong>, does <strong>no
+coordination</strong>, and sees only the initial page load (nothing at all for a local-file open).</li>
+<li><strong>Code host</strong> <em>(the client&#39;s TCB)</em> — serves the JavaScript bundle the pages load. It cannot decode,
+but whoever serves the code can in principle backdoor it, so it is the browser&#39;s <strong>trusted computing
+base</strong>. The pages pin the exact bundle hash (<strong>Subresource Integrity</strong>), so the code can&#39;t be
+silently swapped. <strong>In <em>owned</em> mode this party disappears entirely:</strong> the self-contained bundle
+carries all its own code — nothing is fetched from us — so there is no code host to trust; the code
+is whatever you downloaded, and you can check it against the published hash. See §10.</li>
+<li><strong>Broker</strong> <em>(central, ours)</em> — a small coordination service (a serverless worker plus a database and
+a key-value store). The browser calls it directly to reserve a relay and fetch salts. It <strong>issues</strong>
+the per-broadcast access token and serves the salts. It is content-blind (never sees the <code>#…</code> key).
+Because the browser calls it directly, it <strong>sees the browser&#39;s IP</strong> while the request is in flight.</li>
+<li><strong>Relay</strong> <em>(untrusted)</em> — a minimal unikernel with no persistent disk and no filesystem to log to.
+It moves ciphertext and sees a peer&#39;s IP:port transiently, as live network state. No disk, no access
+log, no key.</li>
+<li><strong>Discovery relays</strong> <em>(third-party)</em> — public gateways that bridge ordinary HTTP to the DHT. A
+gateway sees the resolving browser&#39;s IP alongside the public key it looks up. It <strong>cannot forge</strong>
+records — they are cryptographically signed.</li>
+</ul>
+<p><strong>Media path:</strong> broadcaster browser → origin relay (ciphertext) → edge relay (relay-to-relay pull) →
+viewer browser. <strong>Discovery:</strong> the broadcaster signs a record to the DHT (public key → origin relay);
+the viewer reads it off the DHT, then calls the broker to place an edge. <strong>The content key never
+enters any of these hops</strong> — it travels only in the share link&#39;s <code>#…</code> fragment, browser to browser.</p>
+<hr>
+<h2>3. Content confidentiality — the key never touches a server</h2>
+<p>Media is encrypted with <strong>AES-256-GCM</strong> per encoded chunk (<code>src/crypto/media-crypto.ts</code>), for <strong>both
+audio and video</strong> (two build-time seams; the build fails closed if either is missing). A relay
+forwards only <code>[timestamp][nonce][ciphertext+tag]</code>. The codec/resolution catalog is left in the clear
+by design — it leaks stream <em>metadata</em> (resolution, codec), never content.</p>
+<p>The key is <strong>derived in the browser</strong> with a standard key-derivation function:</p>
+<blockquote>
+<p><code>contentKey = HKDF-SHA256( input = linkKey, salt = globalSalt ‖ streamSalt, info = &quot;media-v1|&lt;publicKey&gt;|&lt;epoch&gt;&quot; )</code></p>
+</blockquote>
+<ul>
+<li><strong>linkKey</strong> — 32 random bytes minted by the broadcaster&#39;s browser, carried <strong>only</strong> in the <code>#…</code>
+fragment of the share link (<code>…/view.html?node=&lt;publicKey&gt;#k=&lt;key&gt;</code>). Browsers never transmit the
+fragment of a URL, so it reaches no server — relay, proxy, or access log — by the URL spec. Its real
+exposure surface is the <em>link as a string</em> (the channel you share it over, browser history/sync,
+extensions, URL shorteners), not the streaming path — see §7.</li>
+<li><strong>streamSalt</strong> — per-broadcast, broadcaster-rotatable (the <em>reset key</em> button). Held in the broker&#39;s
+key-value store with an expiry, owner-gated by a rotate secret kept only in the broadcaster&#39;s
+browser.</li>
+<li><strong>globalSalt</strong> — the operator&#39;s kill switch (rotated from the admin console). Rotating it re-keys
+every live stream at once.</li>
+</ul>
+<p><strong>The salts are not secret.</strong> They decode nothing without the <code>#…</code> fragment, so the broker serving
+them does not weaken content-blindness — no party but the two browsers can derive the content key.
+Rotating a salt is a <strong>revocation seam</strong>: it re-keys future frames. (Today salts are served openly, so
+a cut-off viewer can re-fetch them; it becomes a true kill switch once salt delivery is access-gated —
+see §7.)</p>
+<hr>
+<h2>4. Discovery — a signed DHT record, not a server list</h2>
+<p>The broadcaster&#39;s <strong>public key</strong> is the stream&#39;s identity, its relay track name, and its DHT key. It
+is minted and kept in the broadcaster&#39;s browser storage (a stable link and stream ownership across
+reloads); a &quot;new identity&quot; action rotates to a fresh, unlinkable key. The private key never leaves the
+tab.</p>
+<ul>
+<li><strong>Publish:</strong> the broadcaster signs a record and publishes it to public DHT gateways (pkarr —
+<em>public-key addressable records</em>): <code>publicKey → { origin relay address, access = public }</code>. The
+record is signed, so it cannot be forged.</li>
+<li><strong>Resolve:</strong> a viewer reads that record straight off the DHT and verifies the signature. <strong>No
+directory server; discovery is key-gated</strong> — a stream is reachable only to someone who already holds
+its public key. The broker keeps no record of which streams ran (see §6).</li>
+</ul>
+<p>Reserving a relay and getting a token happens <strong>directly against the broker</strong>: the browser posts to
+<code>/cdn/assign</code>, and the broker reserves a relay, reads the origin relay&#39;s address, and issues a scoped
+token — see §5.</p>
+<hr>
+<h2>5. Communication flows (wire-level, with privacy annotations)</h2>
+<p>Every request the browser makes to the broker carries a <strong>public access key</strong> (<code>Bearer pk_…</code>). This
+key is public <em>by design</em>: it ships in the pages, identifies a <em>usage tier</em> (not a user), and its
+safety is capability + limits, not secrecy — it authorizes only rate-limited, self-serve relay
+reservation and token issuance for one tier&#39;s broadcasts. The operator can <strong>rotate</strong> it to
+invalidate every copy instantly.</p>
+<h3>Broadcaster go-live</h3>
+<ol>
+<li><strong>store salt</strong> — <code>PUT /pub/salt/&lt;publicKey&gt;</code> {stream salt, rotate secret}. <em>Broker sees the salt
+(benign — decodes nothing) and the broadcaster&#39;s IP (§7).</em></li>
+<li><strong>derive content key</strong> — in-browser, from the <code>#…</code> key + salts. <em>Never leaves the browser.</em></li>
+<li><strong>reserve a relay</strong> — <code>POST /cdn/assign</code> {broadcast = publicKey, role: publish} + access key. The
+broker reserves an origin relay, reads its address, and returns <code>{ relay, origin address, token }</code>.
+<em>Broker sees the broadcaster&#39;s IP + coarse geo from the incoming request. It issues the publish
+token itself.</em></li>
+<li><strong>connect</strong> — to the origin relay over WebTransport (QUIC in the browser). <em>Relay sees the
+broadcaster&#39;s IP (network floor). Media is ciphertext; the token&#39;s scope is this public key only.</em></li>
+<li><strong>announce</strong> — sign and publish the DHT record (public key → origin relay). <em>Discovery gateways see
+the broadcaster&#39;s IP alongside the public key; the record is world-readable and durable (no
+content).</em></li>
+</ol>
+<h3>Viewer watch</h3>
+<ol>
+<li><strong>read the key</strong> — from the share link (required; no key → nothing to watch). <em>Local only.</em></li>
+<li><strong>resolve</strong> — look the public key up on the DHT. ⚠️ <em>A discovery gateway sees the viewer&#39;s IP
+alongside the public key — a viewer↔content linkage to third-party infrastructure. Mitigation:
+Tor/VPN, or self-host the gateway (§7).</em></li>
+<li><strong>reserve a relay</strong> — <code>POST /cdn/assign</code> {broadcast = publicKey, role: watch, origin address} +
+access key. The broker issues the subscribe token and places the viewer, returning <code>{ relay, token }</code>. <strong>Placement:</strong> if the viewer&#39;s nearest relay <em>is</em> the origin&#39;s relay, the broker
+co-locates them (direct connection, no extra hop); otherwise it stands up an edge relay that pulls
+from the origin. <em>Broker sees the viewer&#39;s IP + coarse geo (§7).</em></li>
+<li><strong>fetch salt</strong> — <code>GET /pub/salt/&lt;publicKey&gt;</code>; derive the content key. <em>Broker sees salt (benign) +
+IP.</em></li>
+<li><strong>connect</strong> — to the edge relay, subscribe under the public key. <em>Relay sees the viewer&#39;s IP
+(network floor). Ciphertext only.</em></li>
+</ol>
+<h3>Token, key &amp; abuse shapes</h3>
+<ul>
+<li><strong>Tokens are clean:</strong> <code>{ publish: [&lt;publicKey&gt;] | [], subscribe: [&lt;publicKey&gt;], expiry }</code> — no IP,
+geo, email, or account id; only the pseudonymous public key and an expiry. Issued by the broker and
+validated at the relay against a pushed public verify-key.</li>
+<li><strong>The access key is public;</strong> abuse is bounded server-side: a per-key + per-IP rate window (default
+60/min, override per tier) plus an optional CAPTCHA on publish. Revoke = rotate the key.</li>
+<li><strong>Geo</strong> comes from the incoming request&#39;s own IP at the edge — no forwarding, no stored coordinates.</li>
+</ul>
+<hr>
+<h2>6. What each party knows (code-verified)</h2>
+<h3>6a. Relay — <em>untrusted</em></h3>
+<p>The relay never reads, logs, or reports the client IP; the autoscaler counts connections only. It is a
+unikernel with no persistent disk. <strong>Sees (transient):</strong> peer IP:port as live network state; the
+token&#39;s subscribe scope (= the public key); byte counts. <strong>Ceiling:</strong> a root operator could packet-
+capture &quot;IP X is watching public key Y, right now&quot; — unavoidable in any software; the user&#39;s
+mitigations are Tor/VPN plus an unlinkable public key.</p>
+<h3>6b. Broker — <em>central, ours</em></h3>
+<p>The browser calls it directly, so it <strong>sees the broadcaster&#39;s and viewer&#39;s IP</strong> (from the incoming
+request). It receives the public access key (a usage tier, not a user), the broadcast&#39;s public key,
+and — for a viewer — the origin relay address. It <strong>issues</strong> per-broadcast transport tokens (and
+cannot decode — it never sees the <code>#…</code> key). It persists only <strong>non-identifying operational samples</strong>
+for capacity and billing (relay-seconds and connection/egress counts per box and per tier) — <strong>no
+broadcast public key, no per-viewer data, no stored IP.</strong> The abuse-limit counter is keyed by a
+<strong>one-way hash of the IP</strong> (HMAC under a server secret — the raw address is never stored) and expires
+in ≈2 min. <em>(An earlier build kept a per-broadcast lifecycle log and a per-broadcast usage row; both
+were identity-bearing and analytics-only, and have been removed — the broker no longer records which
+streams were live.)</em></p>
+<h3>6c. Page host — <em>varies</em></h3>
+<p>Serves only the two static HTML shells plus the public access key. <strong>Holds no secret, does no
+coordination, serves no salts, signs no tokens, sees no media connection.</strong> For a local-file open it
+isn&#39;t involved at all. The residual power is the <em>code host</em> (§8). In <em>owned</em> mode the page host also
+serves the code — but its <strong>published hash</strong> lets anyone confirm the bytes are the published build, so
+a host that tampers is detectable, not trusted.</p>
+<h3>6d. Data-at-rest inventory (what a seizure yields)</h3>
+<table>
+<thead>
+<tr>
+<th>Store</th>
+<th>Holds</th>
+<th>Identity-bearing?</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>broker salts</td>
+<td>global + per-stream salts (+ an owner hash), expiring</td>
+<td>No — salts decode nothing without the <code>#…</code> key</td>
+</tr>
+<tr>
+<td>broker rate counters</td>
+<td>per-(key, <strong>hashed-IP</strong>) request counts, ≈2 min expiry</td>
+<td>No — one-way IP hash, auto-expires</td>
+</tr>
+<tr>
+<td>broker operational samples</td>
+<td>relay-seconds + conn/egress counts, per box + tier</td>
+<td>No — no broadcast key, no IP, no viewer</td>
+</tr>
+<tr>
+<td>broker billing samples</td>
+<td>tier + relay-seconds</td>
+<td>Tier-level only</td>
+</tr>
+<tr>
+<td>broker signing key</td>
+<td>the token-signing private key</td>
+<td>Issues transport tokens; <strong>cannot decode</strong></td>
+</tr>
+<tr>
+<td>DHT record (public)</td>
+<td>public key → origin relay address; world-readable, durable</td>
+<td>Pseudonymous; no content, no person</td>
+</tr>
+<tr>
+<td>broker key-request list</td>
+<td>a prospective operator&#39;s name + email + note</td>
+<td>Ordinary contact info (opt-in form only; never a viewer)</td>
+</tr>
+<tr>
+<td>relay</td>
+<td><em>nothing persisted</em></td>
+<td>—</td>
+</tr>
+<tr>
+<td>page host</td>
+<td>the two static files + public access key</td>
+<td>None</td>
+</tr>
+<tr>
+<td>code host</td>
+<td>the client bundle (+ audio-codec wasm)</td>
+<td>None (public code)</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>7. Residual exposures (ranked) + recommendations</h2>
+<ul>
+<li><strong>MEDIUM/HIGH — the broker sees the browser IP.</strong> Calling the broker directly is what makes geo
+accurate and removes an extra hop, but it hands the broker the broadcaster&#39;s and viewer&#39;s IP
+(transiently; not rolled up; the abuse counter stores only a one-way IP hash and auto-expires in
+≈2 min). <em>Mitigations:</em> Tor/VPN; or offer an opt-in same-origin relay hop for callers who want
+the app to shield their IP (trades the two-file simplicity).</li>
+<li><strong>MEDIUM — publish-collision under a public key.</strong> Because the access key is public and the broker
+will issue a <em>publish</em> token for any broadcast name, a griefer could publish-collide on someone
+else&#39;s public key. They <strong>cannot inject valid media</strong> (no <code>#…</code> key; content is end-to-end) — only
+disrupt availability. <em>Planned fix:</em> self-signed publish tokens (the relay verifies against the
+broadcast&#39;s own public key), which makes publish authority cryptographic and removes the broker&#39;s
+signing key entirely; viewers then need no token at all.</li>
+<li><strong>MEDIUM — discovery IP ↔ public key.</strong> A third-party gateway sees the resolving browser&#39;s IP and
+the public key. Records are signed (unforgeable) and live on the public DHT (the gateway is a
+swappable bridge). <em>Mitigations:</em> Tor/VPN; or self-host the gateway (a one-line change in
+<code>src/crypto/dht.ts</code>).</li>
+<li><strong>MEDIUM — browser IP at the relay (network floor).</strong> Any relay terminating a connection inherently
+sees the peer IP. Not removable in software; the user&#39;s tool is Tor/VPN.</li>
+<li><strong>MEDIUM — the code host is the client&#39;s TCB.</strong> In the default (thin) mode, one server delivers the
+JavaScript. Mitigated (not eliminated) by <strong>enforced Subresource Integrity</strong> — the pages pin the
+exact hash and the host serves the code with the headers that make the browser actually validate it,
+so the code can&#39;t be silently swapped — plus the code is small, open-source, and inspectable.
+<strong>Eliminated</strong> in <em>owned</em> mode (§8, §10): the self-contained copy loads no code from us.</li>
+<li><strong>MEDIUM — the share link&#39;s distribution channel.</strong> The <code>#…</code> key never appears in an HTTP request,
+so it&#39;s absent from relay, proxy, and access logs (that&#39;s the whole reason it lives in the fragment).
+But the <em>link itself</em> is only as private as how you share it: whatever channel carries it (messenger,
+email), your browser history/sync, bookmarks, extensions, and any URL shortener you run it through all
+see the full link — and a backdoored client could read <code>location.hash</code> (the code-host TCB again, §8
+floor 2). <em>Mitigations:</em> share over a private channel, avoid shorteners, use owned mode + a browser you
+trust.</li>
+<li><strong>LOW — key-request contact info.</strong> The &quot;request a key&quot; form stores a prospective <em>operator&#39;s</em> name<ul>
+<li>email (+ note) — ordinary contact info, never tied to a viewer or a broadcast. Only exists if
+someone asks for their own key.</li>
+</ul>
+</li>
+<li><strong>LOW — precise geo at the broker.</strong> The broker sees the browser&#39;s real coarse geo. <em>Recommend:</em>
+coarsen to state / country before it reaches the ranker.</li>
+<li><strong>LOW — catalog metadata.</strong> The codec/resolution catalog is cleartext by design (never content).</li>
+<li><strong>Benign — the broker sees salts.</strong> By construction salts ≠ the <code>#…</code> key, so it cannot decode.</li>
+</ul>
+<hr>
+<h2>8. The hard floors (be honest with users)</h2>
+<ol>
+<li><strong>IPs are visible at the edges.</strong> A relay, a discovery gateway, and the broker each see the peer
+IP; you can decline to <em>store</em> it (we do), not to <em>see</em> it. Network anonymity is the user&#39;s tool
+(Tor/VPN).</li>
+<li><strong>Someone delivers the client code.</strong> On the plain web, whoever serves the JavaScript can backdoor
+it per-user, undetectably — that server is the trusted computing base. The app narrows this three
+ways: the pages can be <strong>hosted anywhere or opened locally</strong>; they <strong>pin the exact code hash</strong>
+(Subresource Integrity), so the default host can&#39;t swap it; and the whole client is open-source and
+small. <strong>Owned mode removes it:</strong> you run your own downloaded copy, so <em>no</em> code loads from us at
+all, and you can check that copy against the <strong>published hash.</strong> The remaining gap to a <em>fully
+verifiable</em> client is a <strong>reproducible build</strong> (proving those bytes correspond to the published
+source) — the one open item on this floor.</li>
+<li><strong>Prospective surveillance.</strong> Minimization defeats &quot;hand over your history,&quot; not &quot;start logging now&quot;
+for a party that still runs live infrastructure the target uses. The broker is such a party and sees
+IPs while connected — so the structural mitigations (Tor/VPN, self-host the discovery gateway,
+self-signed tokens, bring your own relay) are what raise the floor.</li>
+<li><strong>Monetization reintroduces identity.</strong> Paid accounts create person ↔ public key ↔ payment records.
+If anonymity matters, decouple payment from broadcast identity (prepaid / blind tokens), or accept
+that a paid tier is not an anonymous tier.</li>
+</ol>
+<hr>
+<h2>9. Status at a glance</h2>
+<table>
+<thead>
+<tr>
+<th>Property</th>
+<th>Today</th>
+<th>How to strengthen</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>A relay can decode content</td>
+<td>No ✓</td>
+<td>—</td>
+</tr>
+<tr>
+<td>The broker can decode content</td>
+<td>No ✓</td>
+<td>—</td>
+</tr>
+<tr>
+<td>The code host can decode content</td>
+<td>No ✓</td>
+<td>—</td>
+</tr>
+<tr>
+<td>A server holds a list of broadcasts</td>
+<td>No — DHT discovery ✓</td>
+<td>—</td>
+</tr>
+<tr>
+<td>The app holds any secret / coordinates</td>
+<td>No — two static files ✓</td>
+<td>—</td>
+</tr>
+<tr>
+<td>A central token-signing key exists</td>
+<td>Yes ⚠️</td>
+<td>Roadmap: self-signed tokens remove it</td>
+</tr>
+<tr>
+<td>Publish-collision resistant</td>
+<td>No — public key can be reserved ⚠️</td>
+<td>Roadmap: verify publish against the broadcast&#39;s own key</td>
+</tr>
+<tr>
+<td>The broker sees the browser IP</td>
+<td>Yes — direct call ⚠️</td>
+<td>Tor/VPN, or an opt-in shielding hop</td>
+</tr>
+<tr>
+<td>A viewer IP is stored anywhere</td>
+<td>No — only a ≈2 min one-way-hashed counter ✓</td>
+<td>—</td>
+</tr>
+<tr>
+<td>Precise geo is stored</td>
+<td>No ✓</td>
+<td>—</td>
+</tr>
+<tr>
+<td>Precise geo seen by the broker</td>
+<td>Yes ⚠️</td>
+<td>Coarsen to state / country</td>
+</tr>
+<tr>
+<td>Real identities stored</td>
+<td>No — no accounts ✓</td>
+<td>—</td>
+</tr>
+<tr>
+<td>Chat metadata</td>
+<td>None — no chat ✓</td>
+<td>—</td>
+</tr>
+<tr>
+<td>Key revocation lever</td>
+<td>Per-stream + global salt; rotate the access key</td>
+<td>True kill switch once salt delivery is access-gated</td>
+</tr>
+<tr>
+<td>Discovery gateway sees IP ↔ public key</td>
+<td>Yes ⚠️</td>
+<td>Self-host the gateway</td>
+</tr>
+<tr>
+<td>Who can backdoor the client (TCB)</td>
+<td>Thin mode: the code host (hash-pinned) ⚠️ · Owned mode: <strong>nobody</strong> (you host it) ✓</td>
+<td>Reproducible build closes the last gap</td>
+</tr>
+<tr>
+<td>The client is verifiable</td>
+<td>Partial — hash-pinned · owned copy · open source</td>
+<td>Full — reproducible build vs the published hash</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>10. Privacy options you control (a menu of levers)</h2>
+<p>Everything above describes the <em>defaults</em>. Beyond them, a user or operator can pull specific levers to
+harden a specific exposure. Each is independent — stack the ones that match your threat. Ranked
+roughly from &quot;anyone, in seconds&quot; to &quot;most independence.&quot;</p>
+<table>
+<thead>
+<tr>
+<th>Lever</th>
+<th>Closes / hardens</th>
+<th>How</th>
+<th>Cost / honest limit</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Tor / VPN</strong></td>
+<td>The IP every hop sees (broker, relays, discovery) — §8 floor 1</td>
+<td>Run the browser behind Tor or a VPN; encryption + discovery are unchanged</td>
+<td>Latency; you trust your VPN/Tor instead</td>
+</tr>
+<tr>
+<td><strong>Fresh identity</strong></td>
+<td>Linking two of your streams to one broadcaster</td>
+<td>The &quot;new identity&quot; action mints a new, unlinkable public key (new share link)</td>
+<td>Old links stop working (that&#39;s the point)</td>
+</tr>
+<tr>
+<td><strong>Rotate / kill switches</strong></td>
+<td>A leaked link, or a stream you want cut off</td>
+<td>In-app <em>reset key</em> (per-stream salt) · operator <em>global salt</em> (re-keys all live streams) · <strong>rotate the access key</strong> (kills every copy)</td>
+<td>Salt delivery isn&#39;t access-gated yet, so a cut-off viewer can re-fetch salts (§7) — a true kill switch lands with gating</td>
+</tr>
+<tr>
+<td><strong>Bring your own access key</strong></td>
+<td>Sharing one tier&#39;s quota / rate-limit / revocation with strangers</td>
+<td>Request a key, or an operator mints one (add a tenant + enable self-serve)</td>
+<td>Still rides our broker + relay fleet; the key is a <em>tier tag</em>, <strong>not</strong> anonymity</td>
+</tr>
+<tr>
+<td><strong>Own your copy</strong></td>
+<td>The <strong>code-host TCB</strong> — a compromised or compelled host backdooring the client (§2, §8 floor 2)</td>
+<td>Download the self-contained bundle and <strong>run it off your own computer</strong> (double-click <code>send.html</code>), or host the folder on your own site — no code loads from us; check it against the <strong>published hash</strong></td>
+<td>You host it; the media path still uses our broker + relay fleet. A reproducible build (to prove the download matches the source) is roadmap</td>
+</tr>
+<tr>
+<td><strong>Self-host the discovery gateway</strong></td>
+<td>Discovery <strong>IP ↔ public key</strong> leaking to third-party gateways (§7)</td>
+<td>Point at your own gateway (one line in <code>src/crypto/dht.ts</code>); records are DHT-native + signed, so the gateway is just a swappable bridge</td>
+<td>You run a gateway; other hops unchanged</td>
+</tr>
+<tr>
+<td><strong>Bring your own relay</strong> 🔜 <em>roadmap</em></td>
+<td>The <strong>last shared dependency</strong> — the broker&#39;s relay reservation + DHT coordination</td>
+<td>A config switch (not yet built) points an owned copy straight at an <strong>open Media-over-QUIC relay</strong> — e.g. Cloudflare&#39;s, a hosted one such as moq.pro (free up to 500 GB), or one you run yourself — with no broker and no access key; discovery via the share link</td>
+<td>The client already supports open relays; the switch + putting the salt in the link are the remaining work. Then <em>no part of the path is ours</em></td>
+</tr>
+</tbody></table>
+<p><strong>How far each mode gets you:</strong></p>
+<ul>
+<li><strong>Thin mode (default two pages)</strong> — content-blind relays + broker, DHT discovery, no accounts. The
+code host is the client&#39;s TCB, pinned by SRI.</li>
+<li><strong>Owned mode (self-contained copy you run yourself)</strong> — <em>plus</em> no code-host TCB: the code is yours,
+checkable against the published hash. The media path is unchanged.</li>
+<li><strong>Owned + your own relay (roadmap)</strong> — <em>plus</em> no broker and no shared fleet: a fully party-less path
+where the only infrastructure you rely on is a relay you chose or run. Combined with self-signed
+tokens (which remove the broker&#39;s signing key and need no viewer token at all), this is the end
+state — self-hostable end to end.</li>
+</ul>
+<p>The irreducible floor stays honest: <strong>live video needs <em>a</em> relay</strong> (real-time fan-out to many viewers
+can&#39;t be purely peer-to-peer at scale), and <strong>any relay you connect to sees your IP.</strong> The design&#39;s
+stance is to make every party either content-blind, swappable, or removable — never to pretend the
+relay isn&#39;t there.</p>
+<hr>
+<p>*Code refs: client crypto — <code>src/crypto/{media-crypto,dht,node-id,link-keys}.ts</code>; the two static pages
+<code>send.html</code> / <code>view.html</code> + the loaded client bundle; owned-copy build <code>vite.selfcontained.config.ts</code></p>
+<ul>
+<li><code>scripts/build-own.mjs</code> (§10); broker endpoints <code>/cdn/assign</code> and <code>/pub/salt</code>; plus the relay
+installer script.*</li>
+</ul>
+
+</div>
+</body>
+</html>

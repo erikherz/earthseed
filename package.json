@@ -1,0 +1,36 @@
+{
+  "name": "earthseed",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "build:app": "vite build --config vite.hosted.config.ts",
+    "build:own": "vite build --config vite.selfcontained.config.ts && node scripts/build-own.mjs",
+    "build:static": "node scripts/build-static.mjs",
+    "deploy": "npm run build:app && npm run build:own && npm run build:static && wrangler deploy",
+    "keygen": "node scripts/moq-keygen.mjs",
+    "cf-typegen": "wrangler types",
+    "build:min": "vite build --config vite.minimal.config.ts"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.2",
+    "vite": "^7.3.0",
+    "wrangler": "^4.54.0"
+  },
+  "dependencies": {
+    "@kixelated/libavjs-webcodecs-polyfill": "^0.5.5",
+    "@moq/publish": "0.2.15",
+    "@moq/watch": "0.2.17",
+    "@moq/web-transport-ws": "0.1.2",
+    "buffer": "^6.0.3",
+    "pkarr": "^1.4.1",
+    "sodium-javascript": "^0.8.0"
+  },
+  "overrides": {
+    "@moq/net": "0.1.5",
+    "@moq/hang": "0.2.11"
+  }
+}
