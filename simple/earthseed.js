@@ -766,8 +766,13 @@ async function startWatch(opts) {
         const src = ac.createBufferSource();
         src.buffer = buf;
         src.connect(ac.destination);
+        // Keep a small, BOUNDED buffer so audio stays near-live. Re-sync to a ~80ms cushion on
+        // BOTH underrun (playHead behind now) AND overrun (playHead too far ahead) — the latter is
+        // what fixes accumulating latency when frames arrive in bursts or the source runs fast.
         const now = ac.currentTime;
-        if (playHead < now) playHead = now + 0.05; // fell behind → resync with a little slack
+        const TARGET = 0.08; // ~80ms cushion
+        const MAX_AHEAD = 0.25; // never let scheduled audio drift more than 250ms ahead
+        if (playHead < now + 0.02 || playHead - now > MAX_AHEAD) playHead = now + TARGET;
         src.start(playHead);
         playHead += buf.duration;
       },
