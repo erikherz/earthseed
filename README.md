@@ -12,14 +12,45 @@ Live at **[earthseed.live](https://earthseed.live)**.
 - **Read it:** [`simple/earthseed.js`](simple/earthseed.js) — our entire client, one unminified file.
 - **Trust model:** [`simple/TRUST.md`](simple/TRUST.md) · **client README:** [`simple/README.md`](simple/README.md)
 
-## How it works
+## How a stream travels — and what's exchanged
 
+Two browsers, one broker, a relay fleet. Follow the numbers. The **content key lives only in the
+share link** and is derived on each device — nothing in the middle can decrypt your video.
+
+```mermaid
+flowchart TB
+  BR["🔗 Broker · tinymoq.com<br/>gates connections · serves public salts<br/>content-blind — never sees your key"]
+
+  subgraph BC["🎥 Broadcaster browser"]
+    direction TB
+    B1["① mint node id (Ed25519 public key)"]
+    B2["② mint #35;k= — 32 random bytes (stays in the link)"]
+    B5["⑤ CK = HKDF(#35;k=, salts)"]
+    B6["⑥ encode → AES-256-GCM encrypt"]
+    B1 --> B2 --> B5 --> B6
+  end
+
+  subgraph VW["📺 Viewer browser"]
+    direction TB
+    V7["⑦ read node · origin · #35;k= from link"]
+    V10["⑩ CK = HKDF(#35;k=, salts)"]
+    V11["⑪ decrypt → decode → play"]
+    V7 --> V10 --> V11
+  end
+
+  O["📡 Origin relay<br/>encrypted — can't decode"]
+  E["📡 Edge relay<br/>encrypted — can't decode"]
+
+  BC -. "④ assign publish (pk_) · PUT salt<br/>← origin EID + publish JWT" .-> BR
+  BR -. "⑧⑨ get salt · assign watch<br/>← edge relay + subscribe JWT" .-> VW
+  BC == "③ share link: node + origin + #35;k=" ==> VW
+  BC == "⑥ WebTransport ?jwt · encrypted video" ==> O
+  O == "iroh pull · encrypted" ==> E
+  E == "⑪ WebTransport ?jwt · encrypted video" ==> VW
 ```
- Broadcaster browser ──encrypted──▶ origin relay ──▶ edge relay ──encrypted──▶ Viewer browser
-   encrypts each frame              (can't decode — only handles encrypted data)     decrypts locally
-        │                                                                                  ▲
-        └─ broker just assigns a relay + a short-lived token; your video never flows through it ─┘
-```
+
+Dotted lines are the **control plane** (talking to the broker); thick lines are the **data plane**
+(your encrypted media). Only the two browsers ever hold `CK`.
 
 - **End-to-end encryption.** Each broadcast's key is derived in the browser (`HKDF-SHA256` over a
   random value that lives only in the `#…` fragment of the share link, plus public salts). Media is
@@ -30,6 +61,30 @@ Live at **[earthseed.live](https://earthseed.live)**.
   token — your video never passes through it, and it stores nothing about your stream's content.
 - **No accounts, no directory.** The stream's identity is a public key; there's no login and no
   server-side list of streams. A stream is reachable only to someone who has its share link.
+
+## The values being exchanged
+
+Everything in the path is one of these. Only one of them is a secret.
+
+| Value | Secret? | What it is |
+|---|---|---|
+| `pk_…` | No | **Publishable key.** Identifies a tenant for quota/limits; can mint relay tokens but **can't decrypt**. Ships in the page. |
+| `node id` | No | An **Ed25519 public key** (base32). The stream's identity and the relay track name. |
+| `origin EID` | No | Which relay holds the origin, so a viewer's edge knows where to pull from. Routing only. |
+| `salts` + `epoch` | No | Public **HKDF inputs** (a global kill-switch salt ‖ a per-stream salt). Rotating one re-keys the stream. |
+| `JWT` | Short-lived | A per-broadcast relay token authorizing the **connection** (publish or subscribe scope). Not a content key. |
+| `#k=` → `CK` | **Yes** | **The secret.** 32 bytes in the link fragment (never sent to a server) → the `AES-256-GCM` key via HKDF. Held only by the two browsers. |
+
+## Who can see what
+
+The design makes every party in the middle either content-blind or removable.
+
+| Party | Can see | Never sees |
+|---|---|---|
+| **Broker** (tinymoq.com) | node id, tenant `pk_`, public salts, coarse geo; mints tokens | your `#k=`, the key `CK`, your video &amp; audio |
+| **Relay fleet** | a connection token, encrypted (unreadable) frames, the catalog (codec/resolution) | your `#k=`, the key `CK`, your video &amp; audio |
+| **Someone with the link** | everything — the link carries `#k=` | — (share it carefully) |
+| **Someone without the link** | at most scrambled, unreadable data | anything decryptable |
 
 ## Small enough to read
 
