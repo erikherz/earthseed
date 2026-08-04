@@ -53,15 +53,16 @@ function relayUrl() {
 }
 
 // Native-only: we ship no WASM/WebSocket fallback (that is what keeps the review surface tiny).
-// Capture uses MediaStreamTrackProcessor, which today is Chromium-only — so broadcasting needs a
-// recent Chrome or Edge. Watching needs WebTransport + WebCodecs (Chrome/Edge; Safari 18+).
+// Broadcasting needs WebTransport + WebCodecs encode; watching needs WebTransport + WebCodecs
+// decode. Both are present on recent Chrome/Edge AND Safari on iOS 18+ / macOS. (Capture avoids
+// MediaStreamTrackProcessor, which is Chromium-only, so Safari/iOS can broadcast too.)
 /** @returns {string|null} a human reason if unsupported, else null */
 function unsupportedReason(forBroadcast) {
-  const need = "Please use a recent Chrome or Edge.";
-  if (!("WebTransport" in globalThis)) return `This browser can't stream here (no WebTransport). ${need}`;
-  if (typeof globalThis.VideoEncoder === "undefined") return `This browser is missing WebCodecs. ${need}`;
-  if (forBroadcast && typeof MediaStreamTrackProcessor === "undefined")
-    return `This browser can't capture frames here (no MediaStreamTrackProcessor). ${need}`;
+  const need = "Try a recent Chrome or Edge, or Safari on iOS 18+ / macOS.";
+  if (!("WebTransport" in globalThis)) return `This browser can't stream here — no WebTransport. ${need}`;
+  if (typeof VideoDecoder === "undefined") return `This browser is missing WebCodecs. ${need}`;
+  if (forBroadcast && (typeof VideoEncoder === "undefined" || typeof VideoFrame === "undefined"))
+    return `This browser can't encode video here (no WebCodecs). ${need}`;
   return null;
 }
 
@@ -494,12 +495,12 @@ async function startBroadcast(opts) {
     latencyMode: "realtime",
   });
 
-  /** @type {AudioEncoder|null} */ let aEncoder = null;
-  if (audioTrack) {
-    const a = audioTrack.getSettings();
-    const sampleRate = a.sampleRate ?? 48000;
-    const numberOfChannels = a.channelCount ?? 1;
-    aEncoder = new AudioEncoder({
+  // Audio encoder is created lazily by whichever capture path succeeds (below), so its config
+  // matches the capture's real sample rate. @type {AudioEncoder|null}
+  let aEncoder = null;
+  /** @param {number} sampleRate @param {number} numberOfChannels */
+  const makeAudioEncoder = (sampleRate, numberOfChannels) => {
+    const enc = new AudioEncoder({
       output: (chunk) => {
         if (!catalog.audio) catalog.audio = { codec: AUDIO_CODEC, sampleRate, numberOfChannels };
         const bytes = new Uint8Array(chunk.byteLength);
@@ -508,8 +509,9 @@ async function startBroadcast(opts) {
       },
       error: (e) => status(`audio encoder error: ${e.message}`),
     });
-    aEncoder.configure({ codec: AUDIO_CODEC, sampleRate, numberOfChannels, bitrate: 64_000 });
-  }
+    enc.configure({ codec: AUDIO_CODEC, sampleRate, numberOfChannels, bitrate: 64_000 });
+    return enc;
+  };
 
   // Serve the tracks the relay asks for.
   (async () => {
@@ -535,41 +537,122 @@ async function startBroadcast(opts) {
     }
   })();
 
-  // Capture loops.
-  const vProc = new MediaStreamTrackProcessor({ track: videoTrack });
-  const vReader = vProc.readable.getReader();
+  // ── VIDEO capture (cross-browser) ──
+  // Pull frames from a hidden <video> playing the stream, via requestVideoFrameCallback +
+  // new VideoFrame(video). We deliberately avoid MediaStreamTrackProcessor (Chromium-only, absent
+  // on iOS/Safari). This path works on Chrome/Edge AND Safari 17+/iOS 17+.
+  const capVideo = document.createElement("video");
+  capVideo.srcObject = new MediaStream([videoTrack]);
+  capVideo.muted = true;
+  capVideo.playsInline = true;
+  // Must be attached to the DOM (not display:none) or the compositor never presents frames and
+  // requestVideoFrameCallback won't fire. Keep it effectively invisible.
+  capVideo.style.cssText = "position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;pointer-events:none";
+  document.body.appendChild(capVideo);
+  try {
+    await capVideo.play();
+  } catch {
+    /* autoplay of a muted stream is allowed; ignore */
+  }
+  // Poll the video for new frames (dedup by currentTime so we don't re-encode a held frame and so
+  // timestamps stay strictly increasing). A timer works everywhere — including offscreen/headless —
+  // where requestVideoFrameCallback can stall. Poll a bit above the source rate so we don't miss frames.
+  const fps = vsettings.frameRate ?? 30;
   let lastKey = 0;
-  (async () => {
-    while (running) {
-      const { value: frame, done } = await vReader.read();
-      if (done || !frame) break;
-      if (vEncoder.encodeQueueSize > 2) {
-        frame.close();
-        continue;
-      }
-      const now = frame.timestamp / 1000;
-      const key = forceKeyframe || now - lastKey >= KEYFRAME_INTERVAL_MS;
-      if (key) {
-        lastKey = now;
-        forceKeyframe = false;
-      }
-      vEncoder.encode(frame, { keyFrame: key });
-      frame.close();
+  let lastCt = -1;
+  const captureTimer = setInterval(() => {
+    if (!running) return;
+    const ct = capVideo.currentTime;
+    if (capVideo.readyState < 2 || ct === lastCt || vEncoder.encodeQueueSize > 2) return;
+    lastCt = ct;
+    const tsMs = ct * 1000;
+    let frame = null;
+    try {
+      frame = new VideoFrame(capVideo, { timestamp: Math.max(0, Math.round(tsMs * 1000)) });
+    } catch {
+      /* no current frame yet */
     }
-  })();
+    if (!frame) return;
+    const key = forceKeyframe || tsMs - lastKey >= KEYFRAME_INTERVAL_MS;
+    if (key) {
+      lastKey = tsMs;
+      forceKeyframe = false;
+    }
+    try {
+      vEncoder.encode(frame, { keyFrame: key });
+    } catch {}
+    frame.close();
+  }, Math.max(10, Math.round(1000 / (fps * 1.5))));
 
-  /** @type {ReadableStreamDefaultReader<AudioData>|null} */ let aReader = null;
-  if (audioTrack && aEncoder) {
-    const aProc = new MediaStreamTrackProcessor({ track: audioTrack });
-    aReader = /** @type {any} */ (aProc).readable.getReader();
+  // ── AUDIO capture (best-effort) ──
+  // Chromium: MediaStreamTrackProcessor. Safari/iOS: an AudioWorklet that forwards PCM. If neither
+  // works, we broadcast video-only rather than failing.
+  /** @type {() => void} */ let stopAudio = () => {};
+  if (audioTrack) {
     (async () => {
-      while (running && aReader) {
-        const { value: data, done } = await aReader.read();
-        if (done || !data) break;
-        try {
-          aEncoder.encode(data);
-        } catch {}
-        data.close();
+      try {
+        if (typeof MediaStreamTrackProcessor !== "undefined") {
+          const a = audioTrack.getSettings();
+          aEncoder = makeAudioEncoder(a.sampleRate ?? 48000, a.channelCount ?? 1);
+          const reader = /** @type {any} */ (new MediaStreamTrackProcessor({ track: audioTrack })).readable.getReader();
+          stopAudio = () => {
+            try {
+              reader.cancel();
+            } catch {}
+          };
+          while (running) {
+            const { value, done } = await reader.read();
+            if (done || !value) break;
+            try {
+              aEncoder.encode(value);
+            } catch {}
+            value.close();
+          }
+        } else {
+          // Safari/iOS: capture PCM through an AudioWorklet → AudioData → encoder (mono).
+          const ac = new AudioContext();
+          try {
+            await ac.resume();
+          } catch {}
+          const sampleRate = ac.sampleRate;
+          const source = ac.createMediaStreamSource(new MediaStream([audioTrack]));
+          const code =
+            "class Cap extends AudioWorkletProcessor{process(i){const c=i[0];if(c&&c[0])this.port.postMessage(c[0].slice(0));return true}}registerProcessor('es-cap',Cap)";
+          const url = URL.createObjectURL(new Blob([code], { type: "application/javascript" }));
+          await ac.audioWorklet.addModule(url);
+          URL.revokeObjectURL(url);
+          const node = new AudioWorkletNode(ac, "es-cap");
+          source.connect(node); // NOT connected to destination — no local echo
+          aEncoder = makeAudioEncoder(sampleRate, 1);
+          let tsSamples = 0;
+          node.port.onmessage = (e) => {
+            if (!running || !aEncoder) return;
+            const block = /** @type {Float32Array} */ (e.data);
+            if (!block?.length) return;
+            try {
+              const ad = new AudioData({
+                format: "f32-planar",
+                sampleRate,
+                numberOfFrames: block.length,
+                numberOfChannels: 1,
+                timestamp: Math.round((tsSamples / sampleRate) * 1e6),
+                data: /** @type {BufferSource} */ (/** @type {unknown} */ (block)),
+              });
+              aEncoder.encode(ad);
+              ad.close();
+            } catch {}
+            tsSamples += block.length;
+          };
+          stopAudio = () => {
+            try {
+              source.disconnect();
+              node.disconnect();
+              ac.close();
+            } catch {}
+          };
+        }
+      } catch {
+        status("audio unavailable — broadcasting video only");
       }
     })();
   }
@@ -579,10 +662,13 @@ async function startBroadcast(opts) {
       running = false;
       wake?.();
       try {
-        vReader.cancel();
+        clearInterval(captureTimer);
+        capVideo.pause();
+        capVideo.srcObject = null;
+        capVideo.remove();
       } catch {}
       try {
-        aReader?.cancel();
+        stopAudio();
       } catch {}
       try {
         vEncoder.close();
