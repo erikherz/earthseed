@@ -30,7 +30,7 @@
     "ENTERPRISE_MODE": "crosspull"
   },
   "assets": {
-    "directory": "./dist",
+    "directory": "./simple",
     "binding": "ASSETS",
     // Serve /send.html and /view.html literally (no pretty-URL redirect to /send),
     // so the file names match the "two files" model + the download links, and the

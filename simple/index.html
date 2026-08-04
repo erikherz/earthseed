@@ -3,61 +3,252 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Private live streaming</title>
+    <title>Earthseed — private live streaming, small enough to read</title>
+    <meta
+      name="description"
+      content="End-to-end-encrypted live streaming. Your video is encrypted in your browser; the relay and broker only ever move ciphertext they can't read."
+    />
     <style>
-      body { margin: 0; background: #fff; color: #000; font-family: system-ui, -apple-system, Arial, sans-serif; line-height: 1.55; }
-      .wrap { max-width: 680px; margin: 0 auto; padding: 32px 16px 64px; }
-      h1 { font-size: 1.5rem; font-weight: 700; margin: 0 0 12px; }
-      h2 { font-size: 1.1rem; font-weight: 700; margin: 28px 0 8px; }
-      p { margin: 10px 0; }
-      a { color: #000; }
-      .links a { display: inline-block; margin-right: 16px; font-weight: 600; }
-      code { background: #f2f2f2; padding: 1px 5px; border-radius: 3px; font-size: 0.9em; }
-      ul { padding-left: 22px; }
-      li { margin: 6px 0; }
-      hr { border: none; border-top: 1px solid #ddd; margin: 28px 0; }
+      :root {
+        --bg: #0a0e16;
+        --card: #141a24;
+        --border: #222b38;
+        --text: #e0e0e0;
+        --muted: #8a93a3;
+        --blue: #60a5fa;
+        --green: #34d399;
+        --purple: #a78bfa;
+        --grad: linear-gradient(135deg, #60a5fa 0%, #34d399 50%, #a78bfa 100%);
+        --btn-grad: linear-gradient(135deg, #2fb88a 0%, #149a6b 100%);
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        line-height: 1.6;
+        -webkit-font-smoothing: antialiased;
+      }
+      a { color: var(--green); text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      .wrap { max-width: 1000px; margin: 0 auto; padding: 0 20px; }
+      .hero { text-align: center; padding: 72px 20px 40px; }
+      .eyebrow {
+        display: inline-block; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.14em;
+        color: var(--green); border: 1px solid var(--border); background: var(--card);
+        padding: 6px 14px; border-radius: 999px; margin-bottom: 22px;
+      }
+      h1 { font-size: clamp(1.8rem, 5vw, 3rem); line-height: 1.1; margin: 0 0 16px; text-wrap: balance; }
+      .grad { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+      .sub { color: var(--muted); font-size: 1.1rem; max-width: 620px; margin: 0 auto 28px; text-wrap: pretty; }
+      .cta { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+      .btn {
+        padding: 13px 28px; border-radius: 9px; font-weight: 600; font-size: 1rem; cursor: pointer;
+        border: 1px solid var(--border); background: var(--card); color: var(--text);
+      }
+      .btn.primary { background: var(--btn-grad); border: none; color: #fff; }
+      section { padding: 40px 0; }
+      h2 { font-size: 1.5rem; margin: 0 0 8px; text-align: center; }
+      .lead { color: var(--muted); text-align: center; max-width: 640px; margin: 0 auto 28px; }
+      .diagram { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 24px; }
+      .diagram svg { width: 100%; height: auto; display: block; }
+      .steps { list-style: none; padding: 0; margin: 22px 0 0; display: grid; grid-template-columns: 1fr 1fr; gap: 8px 24px; }
+      @media (max-width: 640px) { .steps { grid-template-columns: 1fr; } }
+      .steps li { color: var(--muted); font-size: 0.92rem; padding-left: 30px; position: relative; }
+      .steps b { color: var(--text); font-weight: 600; }
+      .num { position: absolute; left: 0; top: 1px; width: 20px; height: 20px; border-radius: 50%;
+        background: rgba(96,165,250,0.14); color: var(--blue); font-size: 0.72rem; font-weight: 700;
+        display: inline-flex; align-items: center; justify-content: center; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; }
+      .kv { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; }
+      .kv code { color: var(--green); font-size: 0.95rem; font-weight: 600; }
+      .kv p { margin: 6px 0 0; color: var(--muted); font-size: 0.9rem; }
+      .kv.secret { border-color: rgba(167,139,250,0.5); background: linear-gradient(160deg, rgba(167,139,250,0.08), transparent); }
+      .kv.secret code { color: var(--purple); }
+      .tbl-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 14px; }
+      table { border-collapse: collapse; width: 100%; font-size: 0.92rem; }
+      th, td { text-align: left; padding: 12px 16px; border-bottom: 1px solid var(--border); vertical-align: top; }
+      th { color: var(--muted); font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; }
+      td:first-child { font-weight: 600; white-space: nowrap; }
+      tr:last-child td { border-bottom: none; }
+      .see { color: var(--green); }
+      .no { color: #f87171; }
+      .cards2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+      @media (max-width: 640px) { .cards2 { grid-template-columns: 1fr; } }
+      .feature { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 22px; }
+      .feature h3 { margin: 0 0 6px; font-size: 1.05rem; }
+      .feature p { margin: 0; color: var(--muted); font-size: 0.92rem; }
+      footer { border-top: 1px solid var(--border); padding: 28px 0; color: var(--muted); font-size: 0.88rem; text-align: center; }
+      .note { color: var(--muted); font-size: 0.82rem; text-align: center; margin-top: 12px; }
     </style>
   </head>
   <body>
-    <div class="wrap">
-      <h1>Private live streaming</h1>
-      <p>
-        Go live from your camera and share a link so anyone with it can watch. No account, no
-        install. Your video is <strong>encrypted in your browser</strong> — the relay that carries
-        it only ever sees ciphertext it can't read.
+    <div class="hero wrap">
+      <span class="eyebrow">End-to-end encrypted</span>
+      <h1>Private live streaming,<br /><span class="grad">small enough to read</span></h1>
+      <p class="sub">
+        Go live from your camera and share a link. Your video is encrypted <b>in your browser</b> —
+        the relay that carries it, and the broker that connects you, only ever see ciphertext they
+        can't read. No accounts. No server-side list of streams.
       </p>
-      <p class="links">
-        <a href="./broadcast.html">Broadcast</a>
-        <a href="./watch.html">Watch</a>
-      </p>
-
-      <h2>Small enough to read</h2>
-      <p>
-        Each page loads exactly two pieces of JavaScript, on purpose:
-      </p>
-      <ul>
-        <li>
-          <strong>Our whole client</strong> —
-          <a href="https://github.com/erikherz/earthseed/blob/main/simple/earthseed.js" target="_blank" rel="noopener"><code>earthseed.js</code></a>:
-          one unminified, documented file that runs in the browser as-is (no build step). It does
-          capture, encode, <strong>encrypt</strong>, decrypt, decode and render. What you read is
-          what runs.
-        </li>
-        <li>
-          <strong>The transport</strong> —
-          <a href="https://www.npmjs.com/package/@moq/net/v/0.1.5" target="_blank" rel="noopener"><code>@moq/net</code></a>
-          (Media over QUIC), loaded <em>directly from its published package</em> at a pinned
-          version. We don't vendor or modify it — you can verify it upstream.
-        </li>
-      </ul>
-      <p>No accounts, no analytics, no server-side list of streams.</p>
-
-      <h2>How the key works</h2>
-      <p>
-        Each broadcast has a content key derived in your browser. The random part lives only in the
-        <code>#…</code> fragment of the share link — browsers never send a URL fragment to a server —
-        so no relay or host can derive it. Whoever has the link can watch; nobody else can decrypt.
-      </p>
+      <div class="cta">
+        <a class="btn primary" href="./broadcast.html">Broadcast</a>
+        <a class="btn" href="https://github.com/erikherz/earthseed" target="_blank" rel="noopener">Read the code</a>
+      </div>
     </div>
+
+    <section class="wrap">
+      <h2>How a stream travels — and what's exchanged</h2>
+      <p class="lead">
+        Two browsers, one broker, a relay fleet. Follow the numbers. Notice that the <span style="color:var(--purple)">content key</span>
+        lives only in the share link and is derived on each device — nothing in the middle can decrypt your video.
+      </p>
+      <div class="diagram">
+        <svg viewBox="0 0 960 560" role="img" aria-label="Workflow map: the broadcaster browser mints an identity and a content key, gets a gated relay and salts from the broker, encrypts video and publishes to an origin relay; the viewer browser opens the share link, gets salts and an edge relay from the broker, derives the same key, and decrypts. The relay fleet and broker only handle ciphertext.">
+          <defs>
+            <linearGradient id="g" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="960" y2="560">
+              <stop offset="0" stop-color="#60a5fa" /><stop offset="0.5" stop-color="#34d399" /><stop offset="1" stop-color="#a78bfa" />
+            </linearGradient>
+            <marker id="a" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#34d399" /></marker>
+            <marker id="ab" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#60a5fa" /></marker>
+          </defs>
+
+          <!-- BROKER (top) -->
+          <rect x="360" y="20" width="240" height="66" rx="12" fill="#141a24" stroke="#222b38" />
+          <text x="480" y="45" text-anchor="middle" fill="#e0e0e0" font-size="14" font-weight="600">Broker · tinymoq.com</text>
+          <text x="480" y="62" text-anchor="middle" fill="#8a93a3" font-size="10">gates connections · serves public salts</text>
+          <text x="480" y="77" text-anchor="middle" fill="#34d399" font-size="10">🔒 content-blind — never sees your key</text>
+
+          <!-- SHARE LINK pill (center bridge) -->
+          <text x="480" y="150" text-anchor="middle" fill="#8a93a3" font-size="10">③ you send the share link</text>
+          <rect x="270" y="160" width="420" height="40" rx="20" fill="#0a0e16" stroke="url(#g)" stroke-width="1.5" />
+          <text x="480" y="179" text-anchor="middle" fill="#cdd4df" font-size="11" font-family="ui-monospace,monospace">watch.html?node=…&amp;o=…</text>
+          <text x="480" y="193" text-anchor="middle" font-size="11" font-family="ui-monospace,monospace"><tspan fill="#8a93a3">#k=</tspan><tspan fill="#a78bfa" font-weight="700">the content key (secret)</tspan></text>
+
+          <!-- BROADCASTER browser (left) -->
+          <rect x="24" y="250" width="280" height="180" rx="12" fill="#141a24" stroke="#222b38" />
+          <rect x="24" y="250" width="280" height="26" rx="12" fill="#0d1119" />
+          <circle cx="42" cy="263" r="4" fill="#ff5f57" /><circle cx="56" cy="263" r="4" fill="#febc2e" /><circle cx="70" cy="263" r="4" fill="#34d399" />
+          <text x="290" y="267" text-anchor="end" fill="#8a93a3" font-size="9">broadcaster browser</text>
+          <text x="44" y="303" fill="#e0e0e0" font-size="11.5">① mint <tspan fill="#60a5fa">node id</tspan> — Ed25519 public key</text>
+          <text x="44" y="326" fill="#e0e0e0" font-size="11.5">② mint <tspan fill="#a78bfa">#k=</tspan> — 32 random bytes</text>
+          <text x="44" y="349" fill="#e0e0e0" font-size="11.5">⑤ <tspan fill="#34d399">CK</tspan> = HKDF(#k=, salts)</text>
+          <text x="44" y="372" fill="#e0e0e0" font-size="11.5">⑥ encode → <tspan fill="#34d399">AES-256-GCM</tspan> encrypt</text>
+          <text x="44" y="404" fill="#8a93a3" font-size="10">camera → WebCodecs → ciphertext</text>
+
+          <!-- VIEWER browser (right) -->
+          <rect x="656" y="250" width="280" height="180" rx="12" fill="#141a24" stroke="#222b38" />
+          <rect x="656" y="250" width="280" height="26" rx="12" fill="#0d1119" />
+          <circle cx="674" cy="263" r="4" fill="#ff5f57" /><circle cx="688" cy="263" r="4" fill="#febc2e" /><circle cx="702" cy="263" r="4" fill="#34d399" />
+          <text x="916" y="267" text-anchor="end" fill="#8a93a3" font-size="9">viewer browser</text>
+          <text x="676" y="303" fill="#e0e0e0" font-size="11.5">⑦ read node · origin · <tspan fill="#a78bfa">#k=</tspan> from link</text>
+          <text x="676" y="326" fill="#e0e0e0" font-size="11.5">⑩ <tspan fill="#34d399">CK</tspan> = HKDF(#k=, salts)</text>
+          <text x="676" y="349" fill="#e0e0e0" font-size="11.5">⑪ <tspan fill="#34d399">decrypt</tspan> → decode → play</text>
+          <text x="676" y="404" fill="#8a93a3" font-size="10">ciphertext → WebCodecs → &lt;canvas&gt;</text>
+
+          <!-- FLEET (bottom) -->
+          <rect x="300" y="474" width="150" height="62" rx="11" fill="#10241c" stroke="url(#g)" stroke-width="1.4" />
+          <text x="375" y="500" text-anchor="middle" fill="#34d399" font-size="12.5" font-weight="600">Origin relay</text>
+          <text x="375" y="517" text-anchor="middle" fill="#8a93a3" font-size="9.5">ciphertext only</text>
+          <rect x="510" y="474" width="150" height="62" rx="11" fill="#10241c" stroke="url(#g)" stroke-width="1.4" />
+          <text x="585" y="500" text-anchor="middle" fill="#34d399" font-size="12.5" font-weight="600">Edge relay</text>
+          <text x="585" y="517" text-anchor="middle" fill="#8a93a3" font-size="9.5">ciphertext only</text>
+
+          <!-- CONTROL PLANE (dashed blue) — to/from broker -->
+          <line x1="230" y1="250" x2="372" y2="88" stroke="#60a5fa" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#ab)" />
+          <text x="250" y="150" text-anchor="middle" fill="#60a5fa" font-size="9">④ assign publish</text>
+          <text x="252" y="163" text-anchor="middle" fill="#8a93a3" font-size="8.5">(Bearer pk_) · PUT salt</text>
+          <text x="250" y="223" text-anchor="middle" fill="#8a93a3" font-size="8.5">← origin EID + publish JWT</text>
+
+          <line x1="588" y1="88" x2="730" y2="250" stroke="#60a5fa" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#ab)" />
+          <text x="712" y="150" text-anchor="middle" fill="#60a5fa" font-size="9">⑧⑨ get salt · assign watch</text>
+          <text x="712" y="223" text-anchor="middle" fill="#8a93a3" font-size="8.5">← edge relay + subscribe JWT</text>
+
+          <!-- DATA PLANE (solid gradient) — media path -->
+          <line x1="150" y1="430" x2="298" y2="495" stroke="url(#g)" stroke-width="2.4" marker-end="url(#a)" />
+          <text x="196" y="452" text-anchor="middle" fill="#8a93a3" font-size="9">⑥ WebTransport ?jwt</text>
+          <line x1="452" y1="505" x2="508" y2="505" stroke="url(#g)" stroke-width="2.4" marker-end="url(#a)" />
+          <text x="480" y="497" text-anchor="middle" fill="#8a93a3" font-size="9">iroh pull</text>
+          <line x1="662" y1="495" x2="810" y2="430" stroke="url(#g)" stroke-width="2.4" marker-end="url(#a)" />
+          <text x="770" y="452" text-anchor="middle" fill="#8a93a3" font-size="9">⑪ WebTransport ?jwt</text>
+          <text x="480" y="548" text-anchor="middle" fill="#34d399" font-size="10">AES-GCM ciphertext + cleartext catalog (codec/resolution only)</text>
+        </svg>
+      </div>
+      <ol class="steps">
+        <li><span class="num">1</span><b>Identity.</b> The browser mints an Ed25519 keypair; the public key is the stream's name.</li>
+        <li><span class="num">2</span><b>Content key seed.</b> 32 random bytes (<code>#k=</code>) that will live only in the link.</li>
+        <li><span class="num">3</span><b>Share.</b> You hand someone the link — that (and only that) lets them watch.</li>
+        <li><span class="num">4</span><b>Assign + salt.</b> The broker gives a gated relay + short-lived token and public salts.</li>
+        <li><span class="num">5</span><b>Derive key.</b> <code>CK = HKDF(#k=, salts)</code> — computed in the browser, sent nowhere.</li>
+        <li><span class="num">6</span><b>Encrypt + publish.</b> Each frame is AES-256-GCM encrypted, then sent to the origin relay.</li>
+        <li><span class="num">7</span><b>Open link.</b> The viewer reads the node, origin, and <code>#k=</code> from the URL.</li>
+        <li><span class="num">8</span><b>Salt + edge.</b> The viewer fetches the salts and a gated edge relay from the broker.</li>
+        <li><span class="num">10</span><b>Derive same key.</b> Same inputs → same <code>CK</code>, independently, in the browser.</li>
+        <li><span class="num">11</span><b>Decrypt + play.</b> Ciphertext in, video out — only here and on the broadcaster.</li>
+      </ol>
+    </section>
+
+    <section class="wrap">
+      <h2>The values being exchanged</h2>
+      <p class="lead">Everything in the path is one of these. Only one of them is a secret.</p>
+      <div class="grid">
+        <div class="kv"><code>pk_…</code><p>Public publishable key. Identifies a tenant for quotas/limits; can mint relay tokens but <b>can't decrypt</b>. Ships in the page.</p></div>
+        <div class="kv"><code>node id</code><p>An Ed25519 public key (base32). The stream's identity and the relay track name. Public.</p></div>
+        <div class="kv"><code>origin EID</code><p>Which relay holds the origin, so a viewer's edge knows where to pull from. Routing only; public.</p></div>
+        <div class="kv"><code>salts + epoch</code><p>Public HKDF inputs (a global kill-switch salt ‖ a per-stream salt). Rotating one re-keys the stream.</p></div>
+        <div class="kv"><code>JWT</code><p>A short-lived, per-broadcast relay token that authorizes the <em>connection</em> (publish or subscribe scope). Not a content key.</p></div>
+        <div class="kv secret"><code>#k=  →  CK</code><p><b>The secret.</b> 32 bytes in the link fragment (never sent to a server) → <code>AES-256-GCM</code> key via HKDF. Held only by the two browsers.</p></div>
+      </div>
+    </section>
+
+    <section class="wrap">
+      <h2>Who can see what</h2>
+      <p class="lead">The design makes every party in the middle either content-blind or removable.</p>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>Party</th><th>Can see</th><th>Never sees</th></tr></thead>
+          <tbody>
+            <tr><td>Broker (tinymoq.com)</td><td class="see">node id, tenant pk_, public salts, coarse geo; mints tokens</td><td class="no">your <code>#k=</code>, the key CK, your video &amp; audio</td></tr>
+            <tr><td>Relay fleet</td><td class="see">a connection token, ciphertext frames, the catalog (codec/resolution)</td><td class="no">your <code>#k=</code>, the key CK, your video &amp; audio</td></tr>
+            <tr><td>Someone with the link</td><td class="see">everything — the link carries <code>#k=</code></td><td class="no">— (share it carefully)</td></tr>
+            <tr><td>Someone without the link</td><td class="see">at most opaque ciphertext</td><td class="no">anything decryptable</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="wrap">
+      <h2>Small enough to read</h2>
+      <p class="lead">Each page loads exactly two pieces of JavaScript — on purpose.</p>
+      <div class="cards2">
+        <div class="feature">
+          <h3>Our whole client</h3>
+          <p>
+            <a href="https://github.com/erikherz/earthseed/blob/main/simple/earthseed.js" target="_blank" rel="noopener"><code>earthseed.js</code></a>
+            — one unminified, documented file that runs in the browser as-is (no build step). It does
+            capture, encode, <b>encrypt</b>, decrypt, decode and render. What you read is what runs.
+          </p>
+        </div>
+        <div class="feature">
+          <h3>The transport</h3>
+          <p>
+            <a href="https://www.npmjs.com/package/@moq/net/v/0.1.5" target="_blank" rel="noopener"><code>@moq/net</code></a>
+            (Media over QUIC), loaded <em>directly from its published package</em> at a pinned version.
+            We don't vendor or modify it — verify it upstream.
+          </p>
+        </div>
+      </div>
+      <div class="cta" style="margin-top: 22px">
+        <a class="btn primary" href="./broadcast.html">Go live</a>
+        <a class="btn" href="./watch.html">Open a watch link</a>
+      </div>
+      <p class="note">Works on recent Chrome/Edge and Safari on iOS 18+ / macOS. Audio starts muted — tap to unmute.</p>
+    </section>
+
+    <footer class="wrap">
+      Open source · <a href="https://github.com/erikherz/earthseed" target="_blank" rel="noopener">github.com/erikherz/earthseed</a>
+      · no accounts, no analytics, no server-side list of streams
+    </footer>
   </body>
 </html>
