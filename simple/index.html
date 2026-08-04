@@ -114,7 +114,7 @@
         lives only in the share link and is derived on each device — nothing in the middle can decrypt your video.
       </p>
       <div class="diagram">
-        <svg viewBox="0 0 960 560" role="img" aria-label="Workflow map: the broadcaster browser mints an identity and a content key, gets a gated relay and salts from the broker, encrypts video and publishes to an origin relay; the viewer browser opens the share link, gets salts and an edge relay from the broker, derives the same key, and decrypts. The relay fleet and broker only handle ciphertext.">
+        <svg viewBox="0 0 960 560" role="img" aria-label="Workflow map: the broadcaster browser mints an identity and a content key, gets a gated relay and salts from the broker, encrypts video and publishes to an origin relay; the viewer browser opens the share link, gets salts and an edge relay from the broker, derives the same key, and decrypts. The relay fleet and broker only ever handle encrypted data they can't read.">
           <defs>
             <linearGradient id="g" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="960" y2="560">
               <stop offset="0" stop-color="#60a5fa" /><stop offset="0.5" stop-color="#34d399" /><stop offset="1" stop-color="#a78bfa" />
