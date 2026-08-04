@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Private live streaming</title>
+    <style>
+      body { margin: 0; background: #fff; color: #000; font-family: system-ui, -apple-system, Arial, sans-serif; line-height: 1.55; }
+      .wrap { max-width: 680px; margin: 0 auto; padding: 32px 16px 64px; }
+      h1 { font-size: 1.5rem; font-weight: 700; margin: 0 0 12px; }
+      h2 { font-size: 1.1rem; font-weight: 700; margin: 28px 0 8px; }
+      p { margin: 10px 0; }
+      a { color: #000; }
+      .links a { display: inline-block; margin-right: 16px; font-weight: 600; }
+      code { background: #f2f2f2; padding: 1px 5px; border-radius: 3px; font-size: 0.9em; }
+      ul { padding-left: 22px; }
+      li { margin: 6px 0; }
+      hr { border: none; border-top: 1px solid #ddd; margin: 28px 0; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>Private live streaming</h1>
+      <p>
+        Go live from your camera and share a link so anyone with it can watch. No account, no
+        install. Your video is <strong>encrypted in your browser</strong> — the relay that carries
+        it only ever sees ciphertext it can't read.
+      </p>
+      <p class="links">
+        <a href="./broadcast.html">Broadcast</a>
+        <a href="./watch.html">Watch</a>
+      </p>
+
+      <h2>Small enough to read</h2>
+      <p>
+        Each page loads exactly two pieces of JavaScript, on purpose:
+      </p>
+      <ul>
+        <li>
+          <strong>Our whole client</strong> —
+          <a href="https://github.com/erikherz/earthseed/blob/main/simple/earthseed.js" target="_blank" rel="noopener"><code>earthseed.js</code></a>:
+          one unminified, documented file that runs in the browser as-is (no build step). It does
+          capture, encode, <strong>encrypt</strong>, decrypt, decode and render. What you read is
+          what runs.
+        </li>
+        <li>
+          <strong>The transport</strong> —
+          <a href="https://www.npmjs.com/package/@moq/net/v/0.1.5" target="_blank" rel="noopener"><code>@moq/net</code></a>
+          (Media over QUIC), loaded <em>directly from its published package</em> at a pinned
+          version. We don't vendor or modify it — you can verify it upstream.
+        </li>
+      </ul>
+      <p>No accounts, no analytics, no server-side list of streams.</p>
+
+      <h2>How the key works</h2>
+      <p>
+        Each broadcast has a content key derived in your browser. The random part lives only in the
+        <code>#…</code> fragment of the share link — browsers never send a URL fragment to a server —
+        so no relay or host can derive it. Whoever has the link can watch; nobody else can decrypt.
+      </p>
+    </div>
+  </body>
+</html>

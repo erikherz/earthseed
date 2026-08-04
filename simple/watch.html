@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Watch</title>
+    <meta name="earthseed-key" content="pk_Am-UpPEuGCt5dsnR8xqzOFX2mEYDSCeMGrDWxXli4LU" />
+    <script>
+      window.ES_RELAY = "https://draft-14.cloudflare.mediaoverquic.com/";
+    </script>
+    <!-- @moq/net loaded directly from its pinned published package (verify upstream):
+         https://www.npmjs.com/package/@moq/net/v/0.1.5 -->
+    <script type="importmap">
+      { "imports": { "@moq/net": "https://esm.sh/@moq/net@0.1.5" } }
+    </script>
+    <style>
+      body { margin: 0; background: #fff; color: #000; font-family: system-ui, -apple-system, Arial, sans-serif; }
+      .wrap { max-width: 720px; margin: 0 auto; padding: 24px 16px; }
+      h1 { font-size: 1.3rem; font-weight: 700; margin: 0 0 16px; }
+      canvas { width: 100%; aspect-ratio: 16 / 9; background: #000; display: block; border: 1px solid #ccc; object-fit: contain; }
+      #status { color: #444; font-size: 0.9rem; margin-top: 8px; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>Watch</h1>
+      <canvas id="video"></canvas>
+      <div id="status">Loading…</div>
+    </div>
+    <!-- Our whole client — readable, unminified, open source:
+         https://github.com/erikherz/earthseed/blob/main/simple/earthseed.js -->
+    <script type="module">
+      import { runWatch } from "./earthseed.js";
+      runWatch();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Broadcast</title>
+    <meta name="robots" content="noindex" />
+    <!-- PUBLIC publishable key (safe to expose; it ships in the page). Used in broker mode to mint
+         short-lived per-broadcast relay tokens. It can mint tokens but never decode media. -->
+    <meta name="earthseed-key" content="pk_Am-UpPEuGCt5dsnR8xqzOFX2mEYDSCeMGrDWxXli4LU" />
+    <script>
+      // Relay used in open-relay mode (?relay= overrides). Broker mode ignores this.
+      window.ES_RELAY = "https://draft-14.cloudflare.mediaoverquic.com/";
+    </script>
+    <!-- Two includes, on purpose:
+         (1) @moq/net — Luke Curley's Media-over-QUIC transport, loaded DIRECTLY from its published
+             package, pinned to an exact version. We do NOT vendor or modify it; verify it upstream:
+             https://www.npmjs.com/package/@moq/net/v/0.1.5
+         (2) ./earthseed.js — our ENTIRE client, unminified and readable (loaded at the bottom). -->
+    <script type="importmap">
+      { "imports": { "@moq/net": "https://esm.sh/@moq/net@0.1.5" } }
+    </script>
+    <style>
+      body { margin: 0; background: #fff; color: #000; font-family: system-ui, -apple-system, Arial, sans-serif; }
+      .wrap { max-width: 720px; margin: 0 auto; padding: 24px 16px; }
+      h1 { font-size: 1.3rem; font-weight: 700; margin: 0 0 16px; }
+      video { width: 100%; aspect-ratio: 16 / 9; background: #000; display: block; border: 1px solid #ccc; object-fit: contain; }
+      .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 12px 0; }
+      input { flex: 1; min-width: 180px; padding: 9px 10px; border: 1px solid #999; font: inherit; }
+      button { padding: 9px 16px; border: 1px solid #000; background: #fff; color: #000; font: inherit; cursor: pointer; }
+      button:disabled { opacity: 0.4; cursor: not-allowed; }
+      #status { color: #444; font-size: 0.9rem; margin-top: 4px; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>Broadcast</h1>
+      <video id="preview" muted autoplay playsinline></video>
+      <div class="row">
+        <button id="go">Go live</button>
+      </div>
+      <div class="row">
+        <input id="share" type="text" readonly placeholder="viewer link appears here when you go live" />
+        <button id="copy">Copy viewer link</button>
+      </div>
+      <div id="status">Loading…</div>
+    </div>
+    <!-- Our whole client — readable, unminified, open source:
+         https://github.com/erikherz/earthseed/blob/main/simple/earthseed.js -->
+    <script type="module">
+      import { runBroadcast } from "./earthseed.js";
+      runBroadcast();
+    </script>
+  </body>
+</html>

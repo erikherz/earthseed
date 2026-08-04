@@ -184,3 +184,6 @@ public/own.zip
 dist-min/
 .DS_Store
 .claude/
+
+# static deploy staging for simple/
+dist-simple/
