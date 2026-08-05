@@ -83,8 +83,8 @@ The design makes every party in the middle either content-blind or removable.
 |---|---|---|
 | **Broker** (tinymoq.com) | node id, tenant `pk_`, public salts, coarse geo; mints tokens | your `#k=`, the key `CK`, your video &amp; audio |
 | **Relay fleet** | a connection token, encrypted (unreadable) frames, the catalog (codec/resolution) | your `#k=`, the key `CK`, your video &amp; audio |
-| **Someone with the link** | everything — the link carries `#k=` | — (share it carefully) |
-| **Someone without the link** | at most scrambled, unreadable data | anything decryptable |
+| **Someone with the link** | your video &amp; audio — the link carries `#k=`, so anyone with it can watch (share it carefully) | can't publish as you or rotate your key |
+| **Someone without the link** | at most encrypted, unreadable frames — plus the cleartext catalog (codec/resolution) and traffic size/timing | your video, audio, or key — nothing decryptable |
 
 ## Small enough to read
 

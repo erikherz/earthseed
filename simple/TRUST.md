@@ -51,8 +51,10 @@ per encoded chunk (audio and video):
   mints tokens. It **never** sees `#k=`, `CK`, or your media.
 - **Relay fleet** sees: a connection `JWT`, ciphertext frames, and the cleartext catalog. It
   **never** sees `#k=`, `CK`, or your media. (Hermit unikernel relays keep no persistent disk.)
-- **Someone with the link** can watch — the link carries `#k=`. Share it carefully.
-- **Someone without the link** gets at most opaque ciphertext.
+- **Someone with the link** can watch (decrypt your video and audio) — the link carries `#k=`. Share
+  it carefully. They still **can't publish as you or rotate your key**.
+- **Someone without the link** gets at most opaque ciphertext — plus the cleartext catalog
+  (codec/resolution) and traffic size/timing. Never anything decryptable.
 
 ## The trusted computing base (what you must trust)
 

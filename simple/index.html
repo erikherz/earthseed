@@ -42,12 +42,13 @@
       h1 { font-size: clamp(1.8rem, 5vw, 3rem); line-height: 1.1; margin: 0 0 16px; text-wrap: balance; }
       .grad { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
       .sub { color: var(--muted); font-size: 1.1rem; max-width: 620px; margin: 0 auto 28px; text-wrap: pretty; }
-      .two-points { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; max-width: 720px; margin: 0 auto; text-align: left; }
-      @media (max-width: 640px) { .two-points { grid-template-columns: 1fr; } }
+      .two-points { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; max-width: 940px; margin: 0 auto; text-align: left; }
+      @media (max-width: 760px) { .two-points { grid-template-columns: 1fr; } }
+      .pt a { color: var(--green); }
       .pt { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; color: var(--muted); font-size: 0.95rem; }
       .pt b { color: var(--text); }
       .pt-ic { font-size: 1.3rem; display: block; margin-bottom: 8px; }
-      .cta { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+      .cta { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-top: 32px; }
       .btn {
         padding: 13px 28px; border-radius: 9px; font-weight: 600; font-size: 1rem; cursor: pointer;
         border: 1px solid var(--border); background: var(--card); color: var(--text);
@@ -97,10 +98,10 @@
         <b>encrypted on your device</b> before it ever leaves, so:
       </p>
       <div class="two-points">
-        <div class="pt"><span class="pt-ic">📡</span><b>The relay</b> carries your video but <b>can't decode it</b> — it only ever handles encrypted data.</div>
-        <div class="pt"><span class="pt-ic">🔗</span><b>The broker</b> just connects you to a relay. <b>Your video never passes through it</b>, and it keeps no record of your stream's content.</div>
+        <div class="pt"><span class="pt-ic">🌐</span><b>The browser</b> executes 100% open source software (<a href="https://github.com/erikherz/earthseed" target="_blank" rel="noopener">copy it</a>).</div>
+        <div class="pt"><span class="pt-ic">📡</span><b>The relay</b> carries your video but <b>can't decode it</b> — token protected, no operator access.</div>
+        <div class="pt"><span class="pt-ic">🔗</span><b>The broker</b> connects you to a relay. <b>Your video never passes through it</b>, and it keeps no record of your stream.</div>
       </div>
-      <p class="sub" style="margin-top: 20px">No accounts. No server-side list of who's streaming.</p>
       <div class="cta">
         <a class="btn primary" href="./broadcast.html">Broadcast</a>
         <a class="btn" href="https://github.com/erikherz/earthseed" target="_blank" rel="noopener">Read the code</a>
@@ -110,7 +111,7 @@
     <section class="wrap">
       <h2>How a stream travels — and what's exchanged</h2>
       <p class="lead">
-        Two browsers, one broker, a relay fleet. Follow the numbers. Notice that the <span style="color:var(--purple)">content key</span>
+        Two browsers, one broker, a relay fleet. Notice that the <span style="color:var(--purple)">content key</span>
         lives only in the share link and is derived on each device — nothing in the middle can decrypt your video.
       </p>
       <div class="diagram">
@@ -220,8 +221,8 @@
           <tbody>
             <tr><td>Broker (tinymoq.com)</td><td class="see">node id, tenant pk_, public salts, coarse geo; mints tokens</td><td class="no">your <code>#k=</code>, the key CK, your video &amp; audio</td></tr>
             <tr><td>Relay fleet</td><td class="see">a connection token, encrypted (unreadable) frames, the catalog (codec/resolution)</td><td class="no">your <code>#k=</code>, the key CK, your video &amp; audio</td></tr>
-            <tr><td>Someone with the link</td><td class="see">everything — the link carries <code>#k=</code></td><td class="no">— (share it carefully)</td></tr>
-            <tr><td>Someone without the link</td><td class="see">at most scrambled, unreadable data</td><td class="no">anything decryptable</td></tr>
+            <tr><td>Someone with the link</td><td class="see">your video &amp; audio — the link carries <code>#k=</code>, so anyone with it can watch (share it carefully)</td><td class="no">can't publish as you or rotate your key</td></tr>
+            <tr><td>Someone without the link</td><td class="see">at most encrypted, unreadable frames — plus the cleartext catalog (codec/resolution) and traffic size/timing</td><td class="no">your video, audio, or key — nothing decryptable</td></tr>
           </tbody>
         </table>
       </div>
@@ -252,7 +253,7 @@
 
     <footer class="wrap">
       Open source · <a href="https://github.com/erikherz/earthseed" target="_blank" rel="noopener">github.com/erikherz/earthseed</a>
-      · no accounts, no analytics, no server-side list of streams
+      · <a href="https://www.linkedin.com/in/erikherz/" target="_blank" rel="noopener">erik@vivoh.com</a>
     </footer>
   </body>
 </html>

@@ -35,8 +35,20 @@ import * as Moq from "@moq/net";
 
 /* ═══════════════════════════════ 1. CONFIG ═══════════════════════════════ */
 
-// A free, public, OPEN MoQ relay (Cloudflare's). Used only in "open-relay mode" (see below).
-// Broadcaster and viewer must use the same relay. Change it here or via ?relay=<url>.
+// The relay is PURE TRANSPORT and sits OUTSIDE the trust boundary. Every media frame is
+// AES-256-GCM encrypted in the browser (§2) BEFORE it ever reaches @moq/net, so the relay only
+// forwards opaque, already-encrypted MoQ objects it can't read and never holds the key. That is
+// exactly why the security works over ANY relay — Cloudflare's, our fleet's, or a hostile one: the
+// relay is not part of the encryption, it's a dumb pipe. @moq/net negotiates the wire dialect at
+// session setup (moq-lite, a forwards-compatible subset of IETF moq-transport), so it interoperates
+// with any moq-transport relay/CDN.
+//
+// DEFAULT_RELAY is used ONLY in "open-relay mode" (?relay= or window.ES_RELAY): the zero-backend
+// path where broadcaster and viewer share one public relay directly, no broker. It points at
+// Cloudflare's public MoQ endpoint; "draft-14" is version-matched to the pinned @moq/net@0.1.5 —
+// NOT stale (a newer draft-NN host would negotiate a protocol version this client doesn't speak).
+// Broadcaster and viewer must use the SAME relay. Broker mode (the default) ignores this and uses
+// the gated relay the broker assigns.
 const DEFAULT_RELAY = "https://draft-14.cloudflare.mediaoverquic.com/";
 
 /** The relay this page should use: ?relay= param → window.ES_RELAY → the default. */
