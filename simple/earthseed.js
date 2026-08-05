@@ -486,14 +486,9 @@ async function startBroadcast(opts) {
     },
     error: (e) => status(`video encoder error: ${e.message}`),
   });
-  vEncoder.configure({
-    codec: VIDEO_CODEC,
-    width,
-    height,
-    framerate: vsettings.frameRate ?? 30,
-    bitrate: 2_000_000,
-    latencyMode: "realtime",
-  });
+  // NOTE: the video encoder is configured LATER (in the capture section), once we know the
+  // camera's DISPLAYED dimensions/orientation. Configuring here from getSettings() would pin
+  // us to the sensor's landscape coded size and letterbox/rotate portrait phone capture.
 
   // Audio encoder is created lazily by whichever capture path succeeds (below), so its config
   // matches the capture's real sample rate. @type {AudioEncoder|null}
@@ -537,16 +532,25 @@ async function startBroadcast(opts) {
     }
   })();
 
-  // ── VIDEO capture (cross-browser) ──
-  // Pull frames from a hidden <video> playing the stream, via requestVideoFrameCallback +
-  // new VideoFrame(video). We deliberately avoid MediaStreamTrackProcessor (Chromium-only, absent
-  // on iOS/Safari). This path works on Chrome/Edge AND Safari 17+/iOS 17+.
+  // ── VIDEO capture (cross-browser) + orientation normalization ──
+  // Pull frames from a hidden <video> playing the stream. We deliberately avoid
+  // MediaStreamTrackProcessor (Chromium-only, absent on iOS/Safari); this path works on
+  // Chrome/Edge AND Safari 17+/iOS 17+.
+  //
+  // ORIENTATION: a phone camera delivers frames in the SENSOR's fixed orientation plus a
+  // "rotate this for display" flag. The <video> element honors that flag, but on iOS Safari
+  // `new VideoFrame(videoElement)` does NOT — it hands back the un-rotated sensor pixels, which
+  // then encode/decode straight and show up rotated 90°/180° for the viewer. Drawing the <video>
+  // into a 2D canvas, by contrast, ALWAYS renders it as displayed (rotation applied) on every
+  // browser. So we capture through a canvas: the encoded pixels are always upright and correctly
+  // shaped, and no rotation metadata has to survive the encode→relay→decode path. Sizing to the
+  // DISPLAYED dimensions (videoWidth/Height, which are post-rotation) also fixes portrait letterbox.
   const capVideo = document.createElement("video");
   capVideo.srcObject = new MediaStream([videoTrack]);
   capVideo.muted = true;
   capVideo.playsInline = true;
-  // Must be attached to the DOM (not display:none) or the compositor never presents frames and
-  // requestVideoFrameCallback won't fire. Keep it effectively invisible.
+  // Must be attached to the DOM (not display:none) or the compositor never presents frames.
+  // Keep it effectively invisible.
   capVideo.style.cssText = "position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;pointer-events:none";
   document.body.appendChild(capVideo);
   try {
@@ -554,10 +558,38 @@ async function startBroadcast(opts) {
   } catch {
     /* autoplay of a muted stream is allowed; ignore */
   }
+  // Wait for the real DISPLAYED dimensions (post-rotation) before configuring the encoder.
+  await new Promise((res) => {
+    if (capVideo.videoWidth && capVideo.videoHeight) return res(undefined);
+    capVideo.addEventListener("loadedmetadata", () => res(undefined), { once: true });
+    setTimeout(() => res(undefined), 3000);
+  });
+
+  const fps = vsettings.frameRate ?? 30;
+  // Offscreen canvas we draw each displayed frame into, then wrap as a VideoFrame. Sized to the
+  // displayed orientation; re-sized (and the encoder reconfigured) if the phone is rotated.
+  const capCanvas = document.createElement("canvas");
+  const capCtx = /** @type {CanvasRenderingContext2D} */ (capCanvas.getContext("2d"));
+  let capW = 0;
+  let capH = 0;
+  /** @param {number} w @param {number} h */
+  const configureVideo = (w, h) => {
+    capW = w;
+    capH = h;
+    capCanvas.width = w;
+    capCanvas.height = h;
+    try {
+      vEncoder.configure({ codec: VIDEO_CODEC, width: w, height: h, framerate: fps, bitrate: 2_000_000, latencyMode: "realtime" });
+    } catch (e) {
+      status(`video configure error: ${e instanceof Error ? e.message : e}`);
+    }
+    forceKeyframe = true; // a reconfigure must be followed by a keyframe so the decoder re-syncs
+  };
+  configureVideo(capVideo.videoWidth || width, capVideo.videoHeight || height);
+
   // Poll the video for new frames (dedup by currentTime so we don't re-encode a held frame and so
   // timestamps stay strictly increasing). A timer works everywhere — including offscreen/headless —
-  // where requestVideoFrameCallback can stall. Poll a bit above the source rate so we don't miss frames.
-  const fps = vsettings.frameRate ?? 30;
+  // where requestVideoFrameCallback can stall. Poll a bit above the source rate.
   let lastKey = 0;
   let lastCt = -1;
   const captureTimer = setInterval(() => {
@@ -565,14 +597,23 @@ async function startBroadcast(opts) {
     const ct = capVideo.currentTime;
     if (capVideo.readyState < 2 || ct === lastCt || vEncoder.encodeQueueSize > 2) return;
     lastCt = ct;
+    // Orientation change (portrait⇄landscape): re-size the canvas + reconfigure the encoder. VP8
+    // decoders re-sync on the next keyframe, and the viewer's canvas tracks displayWidth/Height.
+    const vw = capVideo.videoWidth;
+    const vh = capVideo.videoHeight;
+    if (vw && vh && (vw !== capW || vh !== capH)) configureVideo(vw, vh);
     const tsMs = ct * 1000;
+    try {
+      capCtx.drawImage(capVideo, 0, 0, capW, capH); // renders AS DISPLAYED → upright pixels
+    } catch {
+      return; // nothing decodable yet
+    }
     let frame = null;
     try {
-      frame = new VideoFrame(capVideo, { timestamp: Math.max(0, Math.round(tsMs * 1000)) });
+      frame = new VideoFrame(capCanvas, { timestamp: Math.max(0, Math.round(tsMs * 1000)) });
     } catch {
-      /* no current frame yet */
+      return;
     }
-    if (!frame) return;
     const key = forceKeyframe || tsMs - lastKey >= KEYFRAME_INTERVAL_MS;
     if (key) {
       lastKey = tsMs;
@@ -872,7 +913,9 @@ export async function runBroadcast() {
       }
 
       set("starting camera…");
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 }, audio: true });
+      // `ideal` (not exact) lets a phone hand us its natural orientation (portrait or landscape)
+      // instead of being forced into a landscape 1280×720 buffer.
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 } }, audio: true });
       preview.srcObject = stream;
 
       set("connecting…");
