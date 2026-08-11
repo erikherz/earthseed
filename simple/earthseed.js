@@ -43,32 +43,18 @@ import * as Moq from "@moq/net";
 
 // The relay is PURE TRANSPORT and sits OUTSIDE the trust boundary. Every media frame is
 // AES-256-GCM encrypted in the browser (§2) BEFORE it ever reaches @moq/net, so the relay only
-// forwards opaque, already-encrypted MoQ objects it can't read and never holds the key. That is
-// exactly why the security works over ANY relay — Cloudflare's, our fleet's, or a hostile one: the
-// relay is not part of the encryption, it's a dumb pipe. @moq/net negotiates the wire dialect at
-// session setup (moq-lite, a forwards-compatible subset of IETF moq-transport), so it interoperates
-// with any moq-transport relay/CDN.
+// forwards opaque, already-encrypted MoQ objects it can't read and never holds the key. The relay
+// is not part of the encryption, it's a dumb pipe. @moq/net negotiates the wire dialect at session
+// setup (moq-lite, a forwards-compatible subset of IETF moq-transport), so it interoperates with
+// any moq-transport relay/CDN.
 //
-// DEFAULT_RELAY is used ONLY in "open-relay mode" (?relay= or window.ES_RELAY): the zero-backend
-// path where broadcaster and viewer share one public relay directly, no broker. It points at
-// Cloudflare's public MoQ endpoint; "draft-14" is version-matched to the pinned @moq/net@0.1.5 —
-// NOT stale (a newer draft-NN host would negotiate a protocol version this client doesn't speak).
-// Broadcaster and viewer must use the SAME relay. Broker mode (the default) ignores this and uses
-// the gated relay the broker assigns.
-const DEFAULT_RELAY = "https://draft-14.cloudflare.mediaoverquic.com/";
-
-/** The relay this page should use: ?relay= param → window.ES_RELAY → the default. */
-function relayChoice() {
-  const param = new URLSearchParams(location.search).get("relay");
-  return (param && param.trim()) || window.ES_RELAY || DEFAULT_RELAY;
-}
-
-/** The relay connect URL as https://host/ (default port stripped). */
-function relayUrl() {
-  const u = new URL(relayChoice());
-  if (u.port === "443") u.port = "";
-  return `${u.origin}/`;
-}
+// There is exactly ONE path to a relay: the broker assigns one and issues a short-lived token for
+// it. An earlier "open-relay" mode let a page skip the broker and use any public MoQ endpoint
+// directly. It was removed deliberately: with no broker there is nothing to authorize a publisher,
+// so ANYONE could publish to ANY broadcast name — the hole that the claim proof in §3 closes on
+// the brokered path could never be closed on that one. Keeping a second, unauthorized path would
+// have meant keeping the hole. Content encryption was never the difference between the two; the
+// difference was whether anyone checked who was allowed to publish.
 
 // Native-only: we ship no WASM/WebSocket fallback (that is what keeps the review surface tiny).
 // Broadcasting needs WebTransport + WebCodecs encode; watching needs WebTransport + WebCodecs
@@ -1067,13 +1053,8 @@ async function startWatch(opts) {
 }
 
 /* ═══════════════════════════════ 5. PAGE CONTROLLERS ═══════════════════════════════ */
-// Two modes, chosen by the presence of ?relay= :
-//   • Broker mode (default): identity + broker-gated relay/token + per-stream salt.
-//   • Open-relay mode (?relay=<url>): no broker; any open MoQ relay; fixed dev salts. Still E2E.
-
-// Fixed salts for open-relay mode ONLY. (Broker mode uses per-stream salts from the broker.)
-const DEV_GLOBAL_SALT = "c3Bpa2UtZ2xvYmFs"; // "spike-global"
-const DEV_STREAM_SALT = "c3Bpa2Utc3RyZWFt"; // "spike-stream"
+// One path: node identity → broker-gated relay + token (proving the name is ours) → per-stream
+// salt → content key. See §1 for why the unauthorized second path was removed.
 
 /** @param {string} id */
 const $ = (id) => /** @type {any} */ (document.getElementById(id));
@@ -1084,14 +1065,12 @@ export async function runBroadcast() {
   const reason = unsupportedReason(true);
   if (reason) return set(reason);
 
-  const openRelay = new URLSearchParams(location.search).has("relay");
   const preview = $("preview");
   const goBtn = $("go");
   /** @type {{stop():void}|null} */ let bc = null;
 
-  // ── passcode controls. Broker mode only: open-relay mode is the zero-backend dev path with fixed
-  // salts, so there is no per-stream secret to layer a passcode onto.
-  const pcWrap = $("pcwrap"), pcToggle = $("usepc"), pcRow = $("pcrow"), pcField = $("passcode"),
+  // ── passcode controls.
+  const pcToggle = $("usepc"), pcRow = $("pcrow"), pcField = $("passcode"),
     regenBtn = $("regen"), pcHint = $("pchint");
   const PC_PREF = "es:pc-on"; // remember the broadcaster's choice across sessions
   /** @type {string|null} */ let nodeId = null;
@@ -1156,7 +1135,7 @@ export async function runBroadcast() {
 
       // Stretch ONCE here, then hand the bytes to every deriveMediaKey call (including rotations).
       /** @type {Uint8Array|null} */ let pw = null;
-      if (!openRelay && pcToggle?.checked) {
+      if (pcToggle?.checked) {
         const passcode = getOrCreatePasscode(node.id);
         if (pcField) pcField.value = passcode;
         set("preparing passcode…");
@@ -1164,20 +1143,14 @@ export async function runBroadcast() {
       }
       armKey();
 
-      let relay, originEid = null;
-      if (openRelay) {
-        await deriveMediaKey({ fragmentKeyB64: fragmentKey, globalSaltB64: DEV_GLOBAL_SALT, streamSaltB64: DEV_STREAM_SALT, streamId: node.id, epoch: 0 });
-        relay = relayUrl();
-      } else {
-        set("assigning a relay…");
-        const pub = await assignPublish(node); // signs a broker challenge to prove the name is ours
-        if (pub.error) return set(`broker error: ${pub.error}`);
-        const salt = await putSalt(node.id, newStreamSalt(), getOrCreateRotateSecret(node.id));
-        if (!salt?.stream) return set("could not set the stream salt");
-        await deriveMediaKey({ fragmentKeyB64: fragmentKey, globalSaltB64: salt.global, streamSaltB64: salt.stream, streamId: node.id, epoch: salt.epoch, pw });
-        relay = connectUrl(pub.relay_url, pub.jwt);
-        originEid = pub.origin_endpoint_id;
-      }
+      set("assigning a relay…");
+      const pub = await assignPublish(node); // signs a broker challenge to prove the name is ours
+      if (pub.error) return set(`broker error: ${pub.error}`);
+      const salt = await putSalt(node.id, newStreamSalt(), getOrCreateRotateSecret(node.id));
+      if (!salt?.stream) return set("could not set the stream salt");
+      await deriveMediaKey({ fragmentKeyB64: fragmentKey, globalSaltB64: salt.global, streamSaltB64: salt.stream, streamId: node.id, epoch: salt.epoch, pw });
+      const relay = connectUrl(pub.relay_url, pub.jwt);
+      const originEid = pub.origin_endpoint_id;
 
       set("starting camera…");
       // `ideal` (not exact) lets a phone hand us its natural orientation (portrait or landscape)
@@ -1190,7 +1163,6 @@ export async function runBroadcast() {
 
       const link = new URL("watch.html", location.href);
       link.searchParams.set("node", node.id);
-      if (openRelay) link.searchParams.set("relay", relayChoice());
       if (originEid) link.searchParams.set("o", originEid);
       link.hash = `k=${fragmentKey}`;
       $("share").value = link.toString();
@@ -1220,19 +1192,14 @@ export async function runBroadcast() {
   wireCopy("copy", () => $("share").value, "Copy viewer link");
   wireCopy("copypc", () => $("passcode").value, "Copy");
 
-  // Open-relay mode has no broker-issued per-stream salt, so no passcode either.
-  if (openRelay) {
-    if (pcWrap) pcWrap.hidden = true;
-  } else {
-    try {
-      if (pcToggle) pcToggle.checked = localStorage.getItem(PC_PREF) === "1";
-    } catch {
-      /* private mode — default off */
-    }
-    await syncPcUi(); // restores the passcode into the field if the toggle was left on
+  try {
+    if (pcToggle) pcToggle.checked = localStorage.getItem(PC_PREF) === "1";
+  } catch {
+    /* private mode — default off */
   }
+  await syncPcUi(); // restores the passcode into the field if the toggle was left on
 
-  set(openRelay ? "ready (open-relay mode) — press “Go live”" : "ready — press “Go live”");
+  set("ready — press “Go live”");
 }
 
 // How many consecutive AES-GCM tag failures before we conclude the key is wrong rather than the
@@ -1326,7 +1293,6 @@ export async function runWatch() {
   const node = (params.get("node") || "").trim();
   const originEid = params.get("o");
   const fragmentKey = fragmentKeyFromHash();
-  const openRelay = params.has("relay");
   if (!node || !fragmentKey) return set("this link is missing its stream id or #k= key");
 
   // The stretched passcode, once (and if) the viewer supplies one. Held here so the rotation poller
@@ -1335,50 +1301,44 @@ export async function runWatch() {
   /** @type {{global:string, stream:string, epoch:number}|null} */ let salts = null;
 
   armKey();
-  let relay;
-  if (openRelay) {
-    await deriveMediaKey({ fragmentKeyB64: fragmentKey, globalSaltB64: DEV_GLOBAL_SALT, streamSaltB64: DEV_STREAM_SALT, streamId: node, epoch: 0 });
-    relay = relayUrl();
-  } else {
-    set("waiting for broadcaster…");
-    let salt = await getSalt(node);
-    for (let i = 0; i < 30 && !salt?.stream; i++) {
-      await new Promise((r) => setTimeout(r, 2000));
-      salt = await getSalt(node);
-    }
-    if (!salt?.stream) return set("stream is not live");
-    salts = salt;
-    // Nothing tells us up front whether this stream needs a passcode — asking the broker would mean
-    // the broker knowing which streams are protected. So try without one; the GCM tag answers.
-    await deriveMediaKey({ fragmentKeyB64: fragmentKey, globalSaltB64: salt.global, streamSaltB64: salt.stream, streamId: node, epoch: salt.epoch, pw });
-    const edge = await assignWatch(node, originEid || "");
-    if (edge.error) return set(`broker error: ${edge.error}`);
-    relay = connectUrl(edge.relay_url, edge.jwt);
-    // Rotation: if the broadcaster resets the salt, its epoch bumps — re-derive so playback follows.
-    setInterval(async () => {
-      const s = await getSalt(node);
-      if (s?.stream && s.epoch !== currentEpoch()) {
-        salts = s;
-        await deriveMediaKey({ fragmentKeyB64: fragmentKey, globalSaltB64: s.global, streamSaltB64: s.stream, streamId: node, epoch: s.epoch, pw });
-      }
-    }, 5000);
-
-    wirePasscodePrompt({
-      node,
-      fragmentKey,
-      getSalts: () => salts,
-      setPw: (v) => (pw = v),
-      hasPw: () => !!pw,
-      lock: (m) => {
-        statusLocked = true;
-        setForced(m);
-      },
-      unlock: (m) => {
-        statusLocked = false;
-        setForced(m);
-      },
-    });
+  set("waiting for broadcaster…");
+  let salt = await getSalt(node);
+  for (let i = 0; i < 30 && !salt?.stream; i++) {
+    await new Promise((r) => setTimeout(r, 2000));
+    salt = await getSalt(node);
   }
+  if (!salt?.stream) return set("stream is not live");
+  salts = salt;
+  // Nothing tells us up front whether this stream needs a passcode — asking the broker would mean
+  // the broker knowing which streams are protected. So try without one; the GCM tag answers.
+  await deriveMediaKey({ fragmentKeyB64: fragmentKey, globalSaltB64: salt.global, streamSaltB64: salt.stream, streamId: node, epoch: salt.epoch, pw });
+  const edge = await assignWatch(node, originEid || "");
+  if (edge.error) return set(`broker error: ${edge.error}`);
+  const relay = connectUrl(edge.relay_url, edge.jwt);
+  // Rotation: if the broadcaster resets the salt, its epoch bumps — re-derive so playback follows.
+  setInterval(async () => {
+    const s = await getSalt(node);
+    if (s?.stream && s.epoch !== currentEpoch()) {
+      salts = s;
+      await deriveMediaKey({ fragmentKeyB64: fragmentKey, globalSaltB64: s.global, streamSaltB64: s.stream, streamId: node, epoch: s.epoch, pw });
+    }
+  }, 5000);
+
+  wirePasscodePrompt({
+    node,
+    fragmentKey,
+    getSalts: () => salts,
+    setPw: (v) => (pw = v),
+    hasPw: () => !!pw,
+    lock: (m) => {
+      statusLocked = true;
+      setForced(m);
+    },
+    unlock: (m) => {
+      statusLocked = false;
+      setForced(m);
+    },
+  });
 
   set("connecting…");
   try {

@@ -118,12 +118,14 @@ Audio starts muted — tap to unmute.
 
 ## Host it yourself
 
-It's static — put `simple/earthseed.js` + `broadcast.html` + `watch.html` on any HTTPS host. Two modes:
+It's static — put `simple/earthseed.js` + `broadcast.html` + `watch.html` on any HTTPS host. Set
+your own public key with `<meta name="earthseed-key" content="pk_…">` (it's public — safe to ship).
+The broker supplies a gated relay, a short-lived per-broadcast token and the public salts; it never
+sees your content.
 
-- **Broker mode (default):** a gated relay + short-lived token from the broker. Set your own public
-  key with `<meta name="earthseed-key" content="pk_…">` (it's public — safe to ship).
-- **Open-relay mode:** add `?relay=https://your.relay/` to `broadcast.html` — no broker; any open MoQ
-  relay. Still end-to-end encrypted. Zero backend, great for a review.
+Every broadcast goes through the broker, deliberately — it is what verifies that a publisher owns
+the broadcast name it is claiming. An earlier no-broker "open-relay" mode was removed for exactly
+that reason: with nothing to authorize a publisher, anyone could publish to anyone's stream.
 
 Typecheck the client (no build needed): `npx tsc --noEmit -p simple/tsconfig.json`.
 

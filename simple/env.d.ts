@@ -5,7 +5,3 @@ declare class MediaStreamTrackProcessor<T = VideoFrame> {
   constructor(init: { track: MediaStreamTrack; maxBufferSize?: number });
   readonly readable: ReadableStream<T>;
 }
-
-interface Window {
-  ES_RELAY?: string;
-}

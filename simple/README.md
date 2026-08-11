@@ -37,13 +37,19 @@ Works on recent **Chrome/Edge** and **Safari on iOS 18+ / macOS**. Audio starts 
 
 ## Host it yourself
 
-It's static — put `earthseed.js` + the two HTML files on any HTTPS host. Two modes:
+It's static — put `earthseed.js` + the two HTML files on any HTTPS host. Set your own publishable
+key via `<meta name="earthseed-key" content="pk_…">` (it's public — safe to ship). The broker
+handles relay assignment, per-broadcast tokens and public salts; it never sees your content.
 
-- **Broker mode (default):** uses the tinymoq broker for a gated relay + short-lived token and
-  per-stream salts. Set your own publishable key via `<meta name="earthseed-key" content="pk_…">`
-  (it's public — safe to ship).
-- **Open-relay mode:** add `?relay=https://your.relay/` to `broadcast.html`. No broker; streams
-  through any open MoQ relay you point at. Still end-to-end encrypted. Great for a zero-backend review.
+Note that self-hosting the client doesn't come with the security headers this repo ships in
+`_headers` — that file is a Cloudflare asset-server mechanism and is inert elsewhere. Set
+`Content-Security-Policy: frame-ancestors 'none'; base-uri 'none'; object-src 'none'`,
+`X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer` on your own host.
+
+There used to be an "open-relay" mode that skipped the broker and used any public MoQ endpoint.
+It was removed: with no broker there is nothing to authorize a publisher, so anyone could publish
+to anyone's broadcast name. Keeping an unauthorized second path would have meant keeping that hole
+open, and the narrow use case this is built for values that gate more than it values flexibility.
 
 ## How it works (short version)
 

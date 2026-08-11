@@ -111,9 +111,12 @@ why the watch page discovers it by trying rather than by asking.
    (`0.1.5`). We don't modify it; you can diff the pinned version against upstream.
 3. **The browser** — WebCrypto, WebCodecs, WebTransport.
 4. **However you host the pages** — whoever serves `earthseed.js` could serve different code. If
-   that's a concern, host it yourself (it's static) or run open-relay mode.
+   that's a concern, host it yourself: the client is static, and it talks to the broker from
+   whatever origin you put it on.
 
-You do **not** have to trust the broker or the relay with your content — that's the point.
+You do **not** have to trust the broker or the relay with your content — that's the point. You
+*do* have to trust the broker to be **available**, and to gate publishing honestly; see the
+honest limits below.
 
 ## Honest limits
 
@@ -134,8 +137,13 @@ You do **not** have to trust the broker or the relay with your content — that'
   *in transit and from the infrastructure*, not from the people you invite.
 - **"Read exactly what runs" is a goal, not a proof.** The client ships unminified and unbundled
   so it's readable, but verifying the *hosted* bytes against this repo is on you (or self-host).
-- **Broker availability / trust for tokens.** In broker mode the broker can refuse to mint a token
-  (deny service) — but it still can't read content. Open-relay mode removes it entirely.
+- **The broker is a required dependency, on purpose.** It can refuse to mint a token and deny you
+  service — though it still can't read your content. There is deliberately no way to route around
+  it. An earlier "open-relay" mode let a page skip the broker and use any public MoQ endpoint, and
+  it was removed: with no broker there is nothing to authorize a publisher, so anyone could publish
+  to anyone's broadcast name. That trade is the honest shape of this product — **availability
+  depends on us; confidentiality does not.** If you need to remove that dependency, host the client
+  yourself *and* run your own broker and relays; the client is static and the protocol is here.
 - **Metadata.** The broker learns that *some* stream (by node id) exists and coarse geo; the relay
   learns traffic timing/volume. The content stays encrypted.
 

@@ -5,13 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Broadcast</title>
     <meta name="robots" content="noindex" />
-    <!-- PUBLIC publishable key (safe to expose; it ships in the page). Used in broker mode to mint
-         short-lived per-broadcast relay tokens. It can mint tokens but never decode media. -->
+    <!-- PUBLIC publishable key (safe to expose; it ships in the page). Identifies the tenant to the
+         broker, which mints short-lived per-broadcast relay tokens. On its own it authorizes
+         nothing: publishing also requires signing the broker's challenge with this stream's node
+         key, so this key cannot claim a broadcast name. It never decodes media. -->
     <meta name="earthseed-key" content="pk_Am-UpPEuGCt5dsnR8xqzOFX2mEYDSCeMGrDWxXli4LU" />
-    <script>
-      // Relay used in open-relay mode (?relay= overrides). Broker mode ignores this.
-      window.ES_RELAY = "https://draft-14.cloudflare.mediaoverquic.com/";
-    </script>
     <!-- Two includes, on purpose:
          (1) @moq/net — Luke Curley's Media-over-QUIC transport, loaded DIRECTLY from its published
              package, pinned to an exact version. We do NOT vendor or modify it; verify it upstream:
@@ -58,7 +56,7 @@
       </div>
       <!-- The passcode is a SECOND secret, deliberately not in the link. It never reaches any
            server: it is mixed into the content key, so a wrong one just fails to decrypt. -->
-      <div id="pcwrap">
+      <div>
         <div class="row">
           <label class="check"><input type="checkbox" id="usepc" /> Require a passcode to watch</label>
         </div>
