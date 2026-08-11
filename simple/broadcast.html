@@ -32,6 +32,10 @@
       #status { color: #444; font-size: 0.9rem; margin-top: 4px; }
       .home { display: inline-block; margin-bottom: 12px; color: #555; font-size: 0.85rem; text-decoration: none; }
       .home:hover { color: #000; }
+      .hint { color: #777; font-size: 0.85rem; margin: -6px 0 4px; }
+      label.check { display: flex; align-items: center; gap: 7px; cursor: pointer; font-size: 0.95rem; }
+      input[type="checkbox"] { flex: 0 0 auto; min-width: 0; margin: 0; }
+      #passcode { font-family: ui-monospace, monospace; font-size: 1.05rem; letter-spacing: 0.06em; }
     </style>
   </head>
   <body>
@@ -45,6 +49,23 @@
       <div class="row">
         <input id="share" type="text" readonly placeholder="viewer link appears here when you go live" />
         <button id="copy">Copy viewer link</button>
+      </div>
+      <!-- The passcode is a SECOND secret, deliberately not in the link. It never reaches any
+           server: it is mixed into the content key, so a wrong one just fails to decrypt. -->
+      <div id="pcwrap">
+        <div class="row">
+          <label class="check"><input type="checkbox" id="usepc" /> Require a passcode to watch</label>
+        </div>
+        <div class="row" id="pcrow" hidden>
+          <input id="passcode" type="text" readonly aria-label="Passcode" />
+          <button id="copypc">Copy</button>
+          <button id="regen">Regenerate</button>
+        </div>
+        <div class="hint" id="pchint" hidden>
+          Send the link and the passcode by <strong>different</strong> means — read the passcode
+          aloud, or text it. Anyone who gets both can watch. Regenerating locks out everyone holding
+          the old passcode, and takes effect the next time you go live.
+        </div>
       </div>
       <div id="status">Loading…</div>
     </div>

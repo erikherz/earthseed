@@ -17,7 +17,13 @@
  * Each broadcast has a content key derived in the browser:
  *     CK = HKDF-SHA256(fragmentKey, globalSalt ‖ streamSalt, "earthseed-media-v1|<id>|<epoch>")
  * The fragmentKey is 32 random bytes that live ONLY in the "#k=" fragment of the share link, which
- * browsers never transmit to any server. Media is encrypted with AES-256-GCM per frame BEFORE it
+ * browsers never transmit to any server. A broadcaster can OPTIONALLY also require a passcode — a
+ * short second secret deliberately kept OUT of the link and handed to the viewer over a different
+ * channel (spoken, SMS). It is stretched with PBKDF2 into PW and mixed in, which selects v2:
+ *     CK = HKDF-SHA256(fragmentKey ‖ PW, globalSalt ‖ streamSalt, "earthseed-media-v2|<id>|<epoch>")
+ * The passcode is never stored on, sent to, or verified by any server — a wrong one simply yields a
+ * wrong key and the GCM tag fails in the viewer's browser.
+ * Media is encrypted with AES-256-GCM per frame BEFORE it
  * touches @moq/net, so the relay and the broker only ever move ciphertext they cannot read. The
  * broker (tinymoq.com) gates the *connection* (a short-lived per-broadcast token) and serves the
  * public salts; it never sees the key. The codec catalog (resolution/codec, not content) is sent
@@ -25,7 +31,7 @@
  *
  * ── Layout of this file ──
  *   1. Config            relay choice, browser-support gate
- *   2. Crypto            varint framing, AES-GCM encrypt/decrypt, HKDF, link keys, node identity
+ *   2. Crypto            varint framing, AES-GCM encrypt/decrypt, HKDF, link keys, node identity, passcode
  *   3. Broker client     assign a gated relay + token, get/put the public salts
  *   4. Media loop        capture→encode→encrypt→publish ; consume→decrypt→decode→paint/play
  *   5. Page controllers  runBroadcast() / runWatch() — wire the two HTML pages
@@ -148,6 +154,18 @@ function unpackFrame(frame) {
 /** @type {(() => void)|null} */ let keyReadyResolve = null;
 /** @type {number|null} */ let derivedEpoch = null;
 
+// ── decrypt-failure signal. A missing or wrong passcode is indistinguishable from any other wrong
+// key: AES-GCM simply fails its tag check. That failure IS the verifier — no passcode is ever
+// checked against a server, and none is published anywhere — so the watch page listens here to
+// decide when to ask for one. Called with the running count of CONSECUTIVE tag failures, or 0 the
+// moment a frame decrypts cleanly again (i.e. "recovered").
+/** @type {((consecutiveFailures:number) => void)|null} */ let onDecryptStatus = null;
+let decryptFailures = 0;
+/** Clear the failure run — call when a viewer submits a new passcode, so the next run is fresh. */
+function resetDecryptFailures() {
+  decryptFailures = 0;
+}
+
 /** Re-arm: subsequent frames queue until the next deriveMediaKey(). Call before going live/connecting. */
 function armKey() {
   key = null;
@@ -169,7 +187,13 @@ function b64urlToBytes(s) {
 /**
  * Derive the per-broadcast content key CK and release any queued frames. Re-callable on rotation
  * (a new salt/epoch yields a fresh key).
- * @param {{fragmentKeyB64:string, globalSaltB64:string, streamSaltB64:string, streamId:string, epoch:number}} p
+ *
+ * `pw` is the ALREADY-STRETCHED passcode from stretchPasscode(), or null/absent when the broadcast
+ * has no passcode. Its presence is what selects the derivation version, which is why turning the
+ * feature on breaks nothing: without a passcode this is byte-identical to what shipped before.
+ * Pass the stretched bytes, never the raw passcode — this runs again on every salt rotation and
+ * must stay cheap (see stretchPasscode).
+ * @param {{fragmentKeyB64:string, globalSaltB64:string, streamSaltB64:string, streamId:string, epoch:number, pw?:Uint8Array|null}} p
  */
 async function deriveMediaKey(p) {
   const g = b64urlToBytes(p.globalSaltB64);
@@ -177,10 +201,16 @@ async function deriveMediaKey(p) {
   const salt = new Uint8Array(g.byteLength + s.byteLength);
   salt.set(g, 0);
   salt.set(s, g.byteLength);
-  const info = new TextEncoder().encode(`earthseed-media-v1|${p.streamId}|${p.epoch}`);
-  const ikm = await crypto.subtle.importKey("raw", bs(b64urlToBytes(p.fragmentKeyB64)), "HKDF", false, [
-    "deriveKey",
-  ]);
+  const fk = b64urlToBytes(p.fragmentKeyB64);
+  const pw = p.pw || null;
+  let ikmBytes = fk;
+  if (pw) {
+    ikmBytes = new Uint8Array(fk.byteLength + pw.byteLength);
+    ikmBytes.set(fk, 0);
+    ikmBytes.set(pw, fk.byteLength);
+  }
+  const info = new TextEncoder().encode(`earthseed-media-${pw ? "v2" : "v1"}|${p.streamId}|${p.epoch}`);
+  const ikm = await crypto.subtle.importKey("raw", bs(ikmBytes), "HKDF", false, ["deriveKey"]);
   key = await crypto.subtle.deriveKey(
     { name: "HKDF", hash: "SHA-256", salt: bs(salt), info: bs(info) },
     ikm,
@@ -221,9 +251,19 @@ async function decryptFrame(frame) {
   const ts = frame.subarray(0, vlen);
   const nonce = frame.subarray(vlen, vlen + NONCE_BYTES);
   const ct = frame.subarray(vlen + NONCE_BYTES);
-  const pt = new Uint8Array(
-    await crypto.subtle.decrypt({ name: ALGO, iv: bs(nonce), additionalData: bs(ts) }, key, bs(ct))
-  );
+  /** @type {Uint8Array} */ let pt;
+  try {
+    pt = new Uint8Array(
+      await crypto.subtle.decrypt({ name: ALGO, iv: bs(nonce), additionalData: bs(ts) }, key, bs(ct))
+    );
+  } catch (e) {
+    onDecryptStatus?.(++decryptFailures); // wrong key — the watch page turns a run of these into a passcode prompt
+    throw e;
+  }
+  if (decryptFailures) {
+    decryptFailures = 0;
+    onDecryptStatus?.(0); // recovered: the key in hand is the right one
+  }
   const out = new Uint8Array(vlen + pt.byteLength);
   out.set(ts, 0);
   out.set(pt, vlen);
@@ -245,22 +285,22 @@ function randomB64url(nBytes) {
   for (const b of bytes) bin += String.fromCharCode(b);
   return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
-/** @param {string} storageKey @param {number} nBytes */
-function getOrCreate(storageKey, nBytes) {
+/** @param {string} storageKey @param {() => string} make */
+function getOrCreate(storageKey, make) {
   try {
     const existing = localStorage.getItem(storageKey);
     if (existing) return existing;
-    const fresh = randomB64url(nBytes);
+    const fresh = make();
     localStorage.setItem(storageKey, fresh);
     return fresh;
   } catch {
-    return randomB64url(nBytes); // private-mode fallback: ephemeral
+    return make(); // private-mode fallback: ephemeral
   }
 }
 /** The broadcaster's fragment key for this stream (stable across reloads → stable share link). @param {string} id */
-const getOrCreateFragmentKey = (id) => getOrCreate(`es:k:${id}`, FRAGMENT_KEY_BYTES);
+const getOrCreateFragmentKey = (id) => getOrCreate(`es:k:${id}`, () => randomB64url(FRAGMENT_KEY_BYTES));
 /** The broadcaster's rotate secret (proves salt ownership to the broker). @param {string} id */
-const getOrCreateRotateSecret = (id) => getOrCreate(`es:rs:${id}`, ROTATE_SECRET_BYTES);
+const getOrCreateRotateSecret = (id) => getOrCreate(`es:rs:${id}`, () => randomB64url(ROTATE_SECRET_BYTES));
 /** A fresh per-broadcast salt (minted on go-live and on every "reset key"). */
 const newStreamSalt = () => randomB64url(STREAM_SALT_BYTES);
 /** Read the fragment key a viewer received in the share link's #k= fragment. */
@@ -328,6 +368,89 @@ async function getOrCreateNode() {
   const keyPair = await mintKeyPair();
   await persistNode(keyPair);
   return finalizeNode(keyPair);
+}
+
+// ── passcode: an OPTIONAL second secret required for playback, deliberately NOT in the link.
+// The broadcaster reads it to the viewer over a different channel than the link (phone, SMS, in
+// person), so no single intermediary — not the broker, not the relay, not whatever carried the
+// link — ever holds both halves. It is never stored on, sent to, or verified by any server. It is
+// stretched into PW and mixed into the content key (see deriveMediaKey), so a wrong passcode just
+// produces a wrong AES key and the GCM tag fails locally in the viewer's browser. There is nothing
+// in the middle to leak, and no verifier is published anywhere.
+//
+// It also gives the broadcaster the revocation they otherwise lack: regenerating locks out everyone
+// holding an old link, WITHOUT changing the link or burning the node identity.
+const PASSCODE_CHARS = 8; // 8 × 5 bits = 40 bits — see PBKDF2_ITERATIONS for why that is enough
+const PASSCODE_GROUP = 4; // rendered xxxx-xxxx, easier to read aloud
+
+// PBKDF2 cost. This is the whole defense for a short passcode: an attacker who has the link already
+// holds the fragment key and can fetch the public salts, so the passcode is their only unknown and
+// they can grind it offline with no rate limiting. Unstretched, 40 bits falls in seconds. Iteration
+// count multiplies THEIR cost per guess and OUR cost exactly once per session, so the budget is
+// whatever the slowest device we support can spend on connect. Retune by measuring
+// crypto.subtle.deriveBits on a mid-range phone, not a laptop.
+const PBKDF2_ITERATIONS = 5_000_000;
+
+/** Mint a passcode: PASSCODE_CHARS symbols from B32, grouped for reading aloud. */
+function newPasscode() {
+  // B32 is exactly 32 symbols and a byte has 256 values, so masking the low 5 bits is uniform —
+  // no modulo bias. B32 (RFC4648) also has no 0/O or 1/l/I to misread over a phone.
+  const bytes = new Uint8Array(PASSCODE_CHARS);
+  crypto.getRandomValues(bytes);
+  let out = "";
+  for (let i = 0; i < PASSCODE_CHARS; i++) {
+    if (i && i % PASSCODE_GROUP === 0) out += "-";
+    out += B32[bytes[i] & 31];
+  }
+  return out;
+}
+/** This stream's passcode — stable across reloads until regenerated. @param {string} id */
+const getOrCreatePasscode = (id) => getOrCreate(`es:pc:${id}`, newPasscode);
+/**
+ * Replace the stored passcode. Deliberately does NOT re-derive: a regenerated passcode takes effect
+ * at the next go-live, so viewers of a broadcast in progress are not cut off mid-stream. Revoking
+ * therefore means regenerate → stop → go live again.
+ * @param {string} id
+ */
+function regeneratePasscode(id) {
+  const fresh = newPasscode();
+  try {
+    localStorage.setItem(`es:pc:${id}`, fresh);
+  } catch {
+    /* private-mode: this session only */
+  }
+  return fresh;
+}
+/** Canonical KDF input. PBKDF2 is exact-match, so "K7FM-3QXR" and "k7fm3qxr" must agree. */
+const normalizePasscode = (s) => s.replace(/[\s-]/g, "").toLowerCase();
+
+/**
+ * Stretch a passcode into 32 bytes of key material (PW).
+ *
+ * Salted with the STREAM ID rather than the rotating salts, for two reasons. First, links must not
+ * break: a broadcaster shares a link, stops, and goes live again later, and streamId is stable
+ * across that while the stream salt is not — anything rotating here would silently invalidate a
+ * passcode on every restart. Second, cost: this way PW is computed ONCE per session and cached,
+ * while the rotating salts still do their work in the cheap HKDF step. streamId is public, so
+ * precomputation against one stream is possible; it is unique per broadcaster, so there is no
+ * cross-stream table.
+ * @param {string} passcode @param {string} streamId
+ */
+async function stretchPasscode(passcode, streamId) {
+  const ikm = await crypto.subtle.importKey(
+    "raw",
+    bs(new TextEncoder().encode(normalizePasscode(passcode))),
+    "PBKDF2",
+    false,
+    ["deriveBits"]
+  );
+  const salt = new TextEncoder().encode(`earthseed-pc-v1|${streamId}`);
+  const bits = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", hash: "SHA-256", salt: bs(salt), iterations: PBKDF2_ITERATIONS },
+    ikm,
+    256
+  );
+  return new Uint8Array(bits);
 }
 
 /* ═══════════════════════════════ 3. BROKER CLIENT ═══════════════════════════════ */
@@ -761,24 +884,35 @@ async function startWatch(opts) {
   const catalog = /** @type {{video?:any, audio?:any}} */ (await catGroup?.readJson());
   if (!catalog?.video) throw new Error("no catalog");
 
-  const vDecoder = new VideoDecoder({
-    output: (frame) => {
-      if (opts.canvas.width !== frame.displayWidth) opts.canvas.width = frame.displayWidth;
-      if (opts.canvas.height !== frame.displayHeight) opts.canvas.height = frame.displayHeight;
-      ctx.drawImage(frame, 0, 0);
-      frame.close();
-      if (!painted) {
-        painted = true;
-        status("▶ playing");
-      }
-    },
-    error: (e) => status(`video decoder error: ${e.message}`),
-  });
-  vDecoder.configure({
-    codec: catalog.video.codec,
-    codedWidth: catalog.video.codedWidth,
-    codedHeight: catalog.video.codedHeight,
-  });
+  // Replaceable on purpose: WebCodecs CLOSES a decoder permanently on any error, and every later
+  // decode() then throws "VideoDecoder is not configured" — so one bad chunk means video is dead for
+  // the session unless we rebuild. Safari/iOS is far stricter than Chromium about what counts as bad.
+  /** @type {VideoDecoder} */ let vDecoder;
+  const makeVideoDecoder = () => {
+    vDecoder = new VideoDecoder({
+      output: (frame) => {
+        if (opts.canvas.width !== frame.displayWidth) opts.canvas.width = frame.displayWidth;
+        if (opts.canvas.height !== frame.displayHeight) opts.canvas.height = frame.displayHeight;
+        ctx.drawImage(frame, 0, 0);
+        frame.close();
+        if (!painted) {
+          painted = true;
+          status("▶ playing");
+        }
+      },
+      error: (e) => status(`video decoder error: ${e.message}`),
+    });
+    try {
+      vDecoder.configure({
+        codec: catalog.video.codec,
+        codedWidth: catalog.video.codedWidth,
+        codedHeight: catalog.video.codedHeight,
+      });
+    } catch (e) {
+      status(`video configure error: ${e instanceof Error ? e.message : e}`);
+    }
+  };
+  makeVideoDecoder();
   status("connected — waiting for video…");
 
   const videoTrack = broadcast.subscribe("video", 2);
@@ -786,15 +920,28 @@ async function startWatch(opts) {
     while (running) {
       const group = await videoTrack.nextGroupOrdered();
       if (!group) break;
-      let first = true; // first frame of a group is the keyframe
+      // Every group opens with a keyframe, and `first` labels it. It advances ONLY on a successful
+      // decode, so if the keyframe is lost — a wrong key while a viewer is still typing a passcode,
+      // most obviously — the next delta would inherit the "key" label. Feeding a delta as a keyframe
+      // is exactly what kills the decoder on iOS. Abandon the group instead: without its keyframe
+      // nothing in it is decodable anyway, and the next group brings a fresh one.
+      let first = true;
+      let lost = false;
       for (;;) {
         const raw = await group.readFrame();
         if (!raw) break;
+        if (lost) continue; // drain the group so the transport can advance
         try {
           const { tsMicros, payload } = unpackFrame(await decryptFrame(raw));
+          if (first && vDecoder.state !== "configured") makeVideoDecoder(); // a keyframe is the only safe place to resync
+          if (vDecoder.state !== "configured") {
+            lost = true; // closed mid-group — wait for the next keyframe to rebuild
+            continue;
+          }
           vDecoder.decode(new EncodedVideoChunk({ type: first ? "key" : "delta", timestamp: tsMicros, data: payload }));
           first = false;
         } catch (e) {
+          if (first) lost = true;
           status(`video frame dropped: ${e instanceof Error ? e.message : e}`);
         }
       }
@@ -884,7 +1031,7 @@ const DEV_STREAM_SALT = "c3Bpa2Utc3RyZWFt"; // "spike-stream"
 /** @param {string} id */
 const $ = (id) => /** @type {any} */ (document.getElementById(id));
 
-/** Wire the broadcast page (#preview #go #share #copy #status). */
+/** Wire the broadcast page (#preview #go #share #copy #status + the passcode controls). */
 export async function runBroadcast() {
   const set = (m) => ($("status").textContent = m);
   const reason = unsupportedReason(true);
@@ -895,18 +1042,62 @@ export async function runBroadcast() {
   const goBtn = $("go");
   /** @type {{stop():void}|null} */ let bc = null;
 
+  // ── passcode controls. Broker mode only: open-relay mode is the zero-backend dev path with fixed
+  // salts, so there is no per-stream secret to layer a passcode onto.
+  const pcWrap = $("pcwrap"), pcToggle = $("usepc"), pcRow = $("pcrow"), pcField = $("passcode"),
+    regenBtn = $("regen"), pcHint = $("pchint");
+  const PC_PREF = "es:pc-on"; // remember the broadcaster's choice across sessions
+  /** @type {string|null} */ let nodeId = null;
+
+  /** Reflect the toggle: show the passcode when on, and remember the choice. */
+  const syncPcUi = async () => {
+    const on = !!pcToggle?.checked;
+    if (pcRow) pcRow.hidden = !on;
+    if (pcHint) pcHint.hidden = !on;
+    try {
+      localStorage.setItem(PC_PREF, on ? "1" : "0");
+    } catch {
+      /* private mode — the toggle just won't persist */
+    }
+    if (!on || !pcField || pcField.value) return;
+    // Identity is minted lazily, here and at go-live, so merely opening this page doesn't create one.
+    if (!nodeId) nodeId = (await getOrCreateNode()).id;
+    pcField.value = getOrCreatePasscode(nodeId);
+  };
+  pcToggle?.addEventListener("change", syncPcUi);
+
+  regenBtn?.addEventListener("click", () => {
+    // Guarded rather than live-applied: the content key is NOT re-derived mid-broadcast, so showing
+    // a new passcode while the old one is still the working one would hand out a code that fails.
+    if (bc || !nodeId || !pcField) return;
+    pcField.value = regeneratePasscode(nodeId);
+    set("new passcode — it takes effect the next time you go live");
+  });
+
   goBtn.addEventListener("click", async () => {
     if (bc) {
       bc.stop();
       bc = null;
       goBtn.textContent = "Go live";
+      if (pcToggle) pcToggle.disabled = false;
+      if (regenBtn) regenBtn.disabled = false;
       set("stopped");
       return;
     }
     goBtn.disabled = true;
     try {
       const node = await getOrCreateNode();
+      nodeId = node.id;
       const fragmentKey = getOrCreateFragmentKey(node.id);
+
+      // Stretch ONCE here, then hand the bytes to every deriveMediaKey call (including rotations).
+      /** @type {Uint8Array|null} */ let pw = null;
+      if (!openRelay && pcToggle?.checked) {
+        const passcode = getOrCreatePasscode(node.id);
+        if (pcField) pcField.value = passcode;
+        set("preparing passcode…");
+        pw = await stretchPasscode(passcode, node.id);
+      }
       armKey();
 
       let relay, originEid = null;
@@ -919,7 +1110,7 @@ export async function runBroadcast() {
         if (pub.error) return set(`broker error: ${pub.error}`);
         const salt = await putSalt(node.id, newStreamSalt(), getOrCreateRotateSecret(node.id));
         if (!salt?.stream) return set("could not set the stream salt");
-        await deriveMediaKey({ fragmentKeyB64: fragmentKey, globalSaltB64: salt.global, streamSaltB64: salt.stream, streamId: node.id, epoch: salt.epoch });
+        await deriveMediaKey({ fragmentKeyB64: fragmentKey, globalSaltB64: salt.global, streamSaltB64: salt.stream, streamId: node.id, epoch: salt.epoch, pw });
         relay = connectUrl(pub.relay_url, pub.jwt);
         originEid = pub.origin_endpoint_id;
       }
@@ -940,6 +1131,9 @@ export async function runBroadcast() {
       link.hash = `k=${fragmentKey}`;
       $("share").value = link.toString();
       goBtn.textContent = "Stop";
+      // Locked while live: the key is fixed for this broadcast, so neither can take effect now.
+      if (pcToggle) pcToggle.disabled = true;
+      if (regenBtn) regenBtn.disabled = true;
     } catch (e) {
       set(`error: ${e instanceof Error ? e.message : e}`);
     } finally {
@@ -947,22 +1141,112 @@ export async function runBroadcast() {
     }
   });
 
-  $("copy").addEventListener("click", async () => {
+  /** @param {string} btnId @param {() => string} value @param {string} label */
+  const wireCopy = (btnId, value, label) =>
+    $(btnId)?.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(value());
+        $(btnId).textContent = "Copied!";
+        setTimeout(() => ($(btnId).textContent = label), 1500);
+      } catch {
+        /* clipboard blocked — the value is visible in the field */
+      }
+    });
+  wireCopy("copy", () => $("share").value, "Copy viewer link");
+  wireCopy("copypc", () => $("passcode").value, "Copy");
+
+  // Open-relay mode has no broker-issued per-stream salt, so no passcode either.
+  if (openRelay) {
+    if (pcWrap) pcWrap.hidden = true;
+  } else {
     try {
-      await navigator.clipboard.writeText($("share").value);
-      $("copy").textContent = "Copied!";
-      setTimeout(() => ($("copy").textContent = "Copy viewer link"), 1500);
+      if (pcToggle) pcToggle.checked = localStorage.getItem(PC_PREF) === "1";
     } catch {
-      /* clipboard blocked — the link is visible in the field */
+      /* private mode — default off */
     }
-  });
+    await syncPcUi(); // restores the passcode into the field if the toggle was left on
+  }
 
   set(openRelay ? "ready (open-relay mode) — press “Go live”" : "ready — press “Go live”");
 }
 
-/** Wire the watch page (#video #status). */
+// How many consecutive AES-GCM tag failures before we conclude the key is wrong rather than the
+// stream being briefly odd. With a correct key decryption never fails, so this only needs to be
+// high enough to not fire on a single corrupt frame; video alone delivers ~30/s, so it is quick.
+const PASSCODE_PROMPT_AFTER = 5;
+
+/**
+ * Turn a run of tag failures into a passcode prompt, and a submitted passcode into a re-derived key.
+ *
+ * This is the entirety of "checking" a passcode. Nothing is sent anywhere and nothing is compared
+ * against a stored copy: the viewer's browser rebuilds the content key from what was typed, and the
+ * GCM tag either validates or it does not. That is why no system in the middle can leak, approve, or
+ * be tricked about a passcode — none of them is ever told one.
+ * @param {{node:string, fragmentKey:string, getSalts:() => ({global:string,stream:string,epoch:number}|null),
+ *          setPw:(v:Uint8Array|null) => void, hasPw:() => boolean,
+ *          lock:(m:string) => void, unlock:(m:string) => void}} p
+ */
+function wirePasscodePrompt(p) {
+  const row = $("pcrow"), field = $("passcode"), btn = $("pcgo");
+  if (!row || !field || !btn) return;
+  let asking = false;
+
+  const ask = () => {
+    if (asking) return;
+    asking = true;
+    row.hidden = false;
+    // Same signal, read at two moments: before any passcode was tried, and after one was.
+    p.lock(p.hasPw() ? "wrong passcode — check with the broadcaster" : "this stream needs a passcode");
+    field.focus();
+    field.select();
+  };
+
+  const submit = async () => {
+    const typed = field.value.trim();
+    const salts = p.getSalts();
+    if (!typed || !salts) return;
+    btn.disabled = true;
+    p.lock("checking passcode…");
+    try {
+      const pw = await stretchPasscode(typed, p.node); // the deliberately slow step
+      p.setPw(pw);
+      resetDecryptFailures(); // fresh run: if this one is wrong too, ask() fires again
+      asking = false;
+      await deriveMediaKey({ fragmentKeyB64: p.fragmentKey, globalSaltB64: salts.global, streamSaltB64: salts.stream, streamId: p.node, epoch: salts.epoch, pw });
+      p.lock("unlocking…"); // the next frame decides; onDecryptStatus reports either way
+    } catch (e) {
+      p.lock(`passcode error: ${e instanceof Error ? e.message : e}`);
+    } finally {
+      btn.disabled = false;
+    }
+  };
+
+  btn.addEventListener("click", submit);
+  field.addEventListener("keydown", (/** @type {KeyboardEvent} */ e) => {
+    if (e.key === "Enter") submit();
+  });
+
+  onDecryptStatus = (consecutive) => {
+    if (consecutive === 0) {
+      row.hidden = true; // a frame decrypted — the key in hand is right
+      asking = false;
+      p.unlock("▶ playing");
+      return;
+    }
+    if (consecutive >= PASSCODE_PROMPT_AFTER) ask();
+  };
+}
+
+/** Wire the watch page (#video #status + the passcode prompt). */
 export async function runWatch() {
-  const set = (m) => ($("status").textContent = m);
+  // The status line has two writers — this controller and the media loop, which reports every
+  // dropped frame. While we are asking for a passcode the media loop is dropping EVERY frame, so
+  // lock the line or the prompt is instantly overwritten by the noise it caused.
+  let statusLocked = false;
+  const setForced = (m) => ($("status").textContent = m);
+  const set = (m) => {
+    if (!statusLocked) setForced(m);
+  };
   const reason = unsupportedReason(false);
   if (reason) return set(reason);
 
@@ -972,6 +1256,11 @@ export async function runWatch() {
   const fragmentKey = fragmentKeyFromHash();
   const openRelay = params.has("relay");
   if (!node || !fragmentKey) return set("this link is missing its stream id or #k= key");
+
+  // The stretched passcode, once (and if) the viewer supplies one. Held here so the rotation poller
+  // re-derives WITH it rather than silently dropping back to the no-passcode key.
+  /** @type {Uint8Array|null} */ let pw = null;
+  /** @type {{global:string, stream:string, epoch:number}|null} */ let salts = null;
 
   armKey();
   let relay;
@@ -986,16 +1275,37 @@ export async function runWatch() {
       salt = await getSalt(node);
     }
     if (!salt?.stream) return set("stream is not live");
-    await deriveMediaKey({ fragmentKeyB64: fragmentKey, globalSaltB64: salt.global, streamSaltB64: salt.stream, streamId: node, epoch: salt.epoch });
+    salts = salt;
+    // Nothing tells us up front whether this stream needs a passcode — asking the broker would mean
+    // the broker knowing which streams are protected. So try without one; the GCM tag answers.
+    await deriveMediaKey({ fragmentKeyB64: fragmentKey, globalSaltB64: salt.global, streamSaltB64: salt.stream, streamId: node, epoch: salt.epoch, pw });
     const edge = await assignWatch(node, originEid || "");
     if (edge.error) return set(`broker error: ${edge.error}`);
     relay = connectUrl(edge.relay_url, edge.jwt);
     // Rotation: if the broadcaster resets the salt, its epoch bumps — re-derive so playback follows.
     setInterval(async () => {
       const s = await getSalt(node);
-      if (s?.stream && s.epoch !== currentEpoch())
-        await deriveMediaKey({ fragmentKeyB64: fragmentKey, globalSaltB64: s.global, streamSaltB64: s.stream, streamId: node, epoch: s.epoch });
+      if (s?.stream && s.epoch !== currentEpoch()) {
+        salts = s;
+        await deriveMediaKey({ fragmentKeyB64: fragmentKey, globalSaltB64: s.global, streamSaltB64: s.stream, streamId: node, epoch: s.epoch, pw });
+      }
     }, 5000);
+
+    wirePasscodePrompt({
+      node,
+      fragmentKey,
+      getSalts: () => salts,
+      setPw: (v) => (pw = v),
+      hasPw: () => !!pw,
+      lock: (m) => {
+        statusLocked = true;
+        setForced(m);
+      },
+      unlock: (m) => {
+        statusLocked = false;
+        setForced(m);
+      },
+    });
   }
 
   set("connecting…");

@@ -27,6 +27,12 @@ The share link looks like `watch.html?node=<id>&o=<origin>#k=<key>`. The part af
 content key; browsers never send a URL fragment to a server, so **only someone with the whole
 link can decrypt the stream.**
 
+Optionally tick **Require a passcode to watch** before going live. That mints a short second secret
+that is *not* in the link — read it to your viewer over a different channel and they type it into
+the watch page. It never reaches any server; it is mixed into the key, so a wrong one just fails to
+decrypt. **Regenerate** locks out everyone holding the old passcode, without changing your link; it
+applies the next time you go live. See [TRUST.md](./TRUST.md).
+
 Works on recent **Chrome/Edge** and **Safari on iOS 18+ / macOS**. Audio starts muted — tap to unmute.
 
 ## Host it yourself

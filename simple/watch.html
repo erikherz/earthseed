@@ -22,6 +22,11 @@
       .home { display: inline-block; margin-bottom: 12px; color: #555; font-size: 0.85rem; text-decoration: none; }
       .home:hover { color: #000; }
       .hint { color: #777; font-size: 0.85rem; margin-top: 4px; }
+      .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 12px 0; }
+      input { flex: 1; min-width: 180px; padding: 9px 10px; border: 1px solid #999; font: inherit; }
+      button { padding: 9px 16px; border: 1px solid #000; background: #fff; color: #000; font: inherit; cursor: pointer; }
+      button:disabled { opacity: 0.4; cursor: not-allowed; }
+      #passcode { font-family: ui-monospace, monospace; font-size: 1.05rem; letter-spacing: 0.06em; }
     </style>
   </head>
   <body>
@@ -30,6 +35,13 @@
       <h1>Watch</h1>
       <canvas id="video"></canvas>
       <div id="status">Loading…</div>
+      <!-- Shown only if frames fail to decrypt, which is how this page learns a passcode is needed:
+           nothing is asked of any server, the AES-GCM tag simply doesn't validate. -->
+      <div class="row" id="pcrow" hidden>
+        <input id="passcode" type="text" placeholder="passcode from the broadcaster"
+               autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" aria-label="Passcode" />
+        <button id="pcgo">Unlock</button>
+      </div>
       <div class="hint">Tap the video to unmute.</div>
     </div>
     <!-- Our whole client — readable, unminified, open source:

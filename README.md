@@ -61,6 +61,10 @@ Dotted lines are the **control plane** (talking to the broker); thick lines are 
   token — your video never passes through it, and it stores nothing about your stream's content.
 - **No accounts, no directory.** The stream's identity is a public key; there's no login and no
   server-side list of streams. A stream is reachable only to someone who has its share link.
+- **Optional passcode.** A broadcaster can require a short second secret that is deliberately kept
+  *out* of the link and sent by another channel, so the link alone isn't enough. It's never stored
+  on or verified by a server — a wrong passcode just yields a wrong key. Regenerating it revokes
+  old viewers without changing the link.
 
 ## The values being exchanged
 
@@ -74,6 +78,7 @@ Everything in the path is one of these. Only one of them is a secret.
 | `salts` + `epoch` | No | Public **HKDF inputs** (a global kill-switch salt ‖ a per-stream salt). Rotating one re-keys the stream. |
 | `JWT` | Short-lived | A per-broadcast relay token authorizing the **connection** (publish or subscribe scope). Not a content key. |
 | `#k=` → `CK` | **Yes** | **The secret.** 32 bytes in the link fragment (never sent to a server) → the `AES-256-GCM` key via HKDF. Held only by the two browsers. |
+| `passcode` | **Yes** | **Optional second secret.** 8 characters, deliberately **not in the link** — spoken or texted to the viewer, stretched with PBKDF2 and mixed into `CK`. Never sent to or checked by any server. |
 
 ## Who can see what
 
