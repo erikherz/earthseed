@@ -301,6 +301,26 @@ function getOrCreate(storageKey, make) {
 const getOrCreateFragmentKey = (id) => getOrCreate(`es:k:${id}`, () => randomB64url(FRAGMENT_KEY_BYTES));
 /** The broadcaster's rotate secret (proves salt ownership to the broker). @param {string} id */
 const getOrCreateRotateSecret = (id) => getOrCreate(`es:rs:${id}`, () => randomB64url(ROTATE_SECRET_BYTES));
+/**
+ * Mint a FRESH fragment key, invalidating every link already handed out. Without this the key is
+ * immortal: anyone who ever received a link could decrypt every later broadcast, since salts are
+ * public and re-fetchable, so rotating them revokes nobody.
+ *
+ * Takes effect at the NEXT go-live (the content key is not re-derived mid-broadcast, so current
+ * viewers are not cut off). Deliberately touches ONLY the fragment key — clearing the rotate secret
+ * would lock this broadcaster out of its own stream salt until the broker's record expires, and
+ * clearing the node identity would change the stream id too.
+ * @param {string} id
+ */
+function regenerateFragmentKey(id) {
+  const fresh = randomB64url(FRAGMENT_KEY_BYTES);
+  try {
+    localStorage.setItem(`es:k:${id}`, fresh);
+  } catch {
+    /* private-mode: this session only */
+  }
+  return fresh;
+}
 /** A fresh per-broadcast salt (minted on go-live and on every "reset key"). */
 const newStreamSalt = () => randomB64url(STREAM_SALT_BYTES);
 /** Read the fragment key a viewer received in the share link's #k= fragment. */
@@ -1093,6 +1113,22 @@ export async function runBroadcast() {
   };
   pcToggle?.addEventListener("change", syncPcUi);
 
+  const newLinkBtn = $("newlink");
+  newLinkBtn?.addEventListener("click", async () => {
+    // Same rule as the passcode: not applied mid-broadcast, so nobody watching is cut off and we
+    // never display a link that isn't the working one.
+    if (bc || !newLinkBtn) return;
+    newLinkBtn.disabled = true;
+    try {
+      if (!nodeId) nodeId = (await getOrCreateNode()).id;
+      regenerateFragmentKey(nodeId);
+      $("share").value = ""; // the old link is dead; don't leave it sitting there looking valid
+      set("new link minted — go live to get it. Every link you shared before now is dead.");
+    } finally {
+      newLinkBtn.disabled = false;
+    }
+  });
+
   regenBtn?.addEventListener("click", () => {
     // Guarded rather than live-applied: the content key is NOT re-derived mid-broadcast, so showing
     // a new passcode while the old one is still the working one would hand out a code that fails.
@@ -1108,6 +1144,7 @@ export async function runBroadcast() {
       goBtn.textContent = "Go live";
       if (pcToggle) pcToggle.disabled = false;
       if (regenBtn) regenBtn.disabled = false;
+      if (newLinkBtn) newLinkBtn.disabled = false;
       set("stopped");
       return;
     }
@@ -1158,9 +1195,10 @@ export async function runBroadcast() {
       link.hash = `k=${fragmentKey}`;
       $("share").value = link.toString();
       goBtn.textContent = "Stop";
-      // Locked while live: the key is fixed for this broadcast, so neither can take effect now.
+      // Locked while live: the key is fixed for this broadcast, so none of these can take effect now.
       if (pcToggle) pcToggle.disabled = true;
       if (regenBtn) regenBtn.disabled = true;
+      if (newLinkBtn) newLinkBtn.disabled = true;
     } catch (e) {
       set(`error: ${e instanceof Error ? e.message : e}`);
     } finally {
@@ -1222,8 +1260,15 @@ function wirePasscodePrompt(p) {
     if (asking) return;
     asking = true;
     row.hidden = false;
-    // Same signal, read at two moments: before any passcode was tried, and after one was.
-    p.lock(p.hasPw() ? "wrong passcode — check with the broadcaster" : "this stream needs a passcode");
+    // Same signal, read at two moments: before any passcode was tried, and after one was. The
+    // wording hedges on purpose — a failed tag means "wrong key", and this page cannot tell a
+    // missing passcode from a link the broadcaster has since replaced. Claiming "wrong passcode"
+    // outright would send someone chasing a passcode when what they need is a new link.
+    p.lock(
+      p.hasPw()
+        ? "that didn’t unlock it — the passcode may be wrong, or this link may be out of date"
+        : "this link may be out of date, or this stream needs a passcode"
+    );
     field.focus();
     field.select();
   };
@@ -1237,7 +1282,7 @@ function wirePasscodePrompt(p) {
     try {
       const pw = await stretchPasscode(typed, p.node); // the deliberately slow step
       p.setPw(pw);
-      resetDecryptFailures(); // fresh run: if this one is wrong too, ask() fires again
+      resetDecryptFailures(); // fresh run: if this key is wrong too, ask() fires again
       asking = false;
       await deriveMediaKey({ fragmentKeyB64: p.fragmentKey, globalSaltB64: salts.global, streamSaltB64: salts.stream, streamId: p.node, epoch: salts.epoch, pw });
       p.lock("unlocking…"); // the next frame decides; onDecryptStatus reports either way

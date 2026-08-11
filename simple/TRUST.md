@@ -78,6 +78,12 @@ why the watch page discovers it by trying rather than by asking.
   passcode **without changing your link and without burning your node identity**. It takes effect
   the **next time you go live**: the key is not re-derived mid-broadcast, so nobody currently
   watching is cut off. To revoke someone now: regenerate, stop, go live again.
+- **Revoking the link itself.** *New link* on the broadcast page mints a fresh `#k=` fragment key,
+  so **every link you have already shared stops working** — use it when a link has gone somewhere
+  it shouldn't. Same timing rule: it applies at your next go-live. Your node id, and so your stream
+  identity, is unchanged. Note that a revoked viewer cannot be told apart from one who is missing a
+  passcode — both simply hold the wrong key — so the watch page says the link *may* be out of date
+  **or** a passcode *may* be needed, rather than guessing.
 - **Opt-in, and nothing else changes.** With the toggle off, derivation is byte-identical to what it
   was before the feature existed, so **no existing link breaks.**
 

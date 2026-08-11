@@ -141,16 +141,35 @@ export default {
 
     if (isRoot || isStreamId || isStatsPage || isStatsMapPage || isGreetPage || isStreamStatsPage || isStreamStatsMapPage || isClearDataPage) {
       const indexUrl = new URL("/index.html", url.origin);
-      return env.ASSETS.fetch(new Request(indexUrl.toString(), {
+      return withSecurityHeaders(await env.ASSETS.fetch(new Request(indexUrl.toString(), {
         method: request.method,
         headers: request.headers,
-      }));
+      })));
     }
 
     // Fall through to static assets
-    return env.ASSETS.fetch(request);
+    return withSecurityHeaders(await env.ASSETS.fetch(request));
   },
 };
+
+// Baseline security headers on everything we serve as a page or script.
+//
+// This is deliberately NOT a full CSP. A real `script-src` has to account for the inline
+// <script type="importmap"> and inline module blocks in the two pages (hashes, which means a
+// build step), for the AudioWorklet built from a blob: URL, and for @moq/net being fetched
+// from esm.sh — and writing it today would mean formally whitelisting that CDN, i.e. blessing
+// the one third-party code-execution path we most want to remove. Vendor the transport first,
+// then land `script-src` as Report-Only, then enforce.
+//
+// What is here is the subset that touches no script loading and so cannot break the app:
+// clickjacking, MIME sniffing, base-tag hijacking, plugin embedding, and referrer leakage.
+function withSecurityHeaders(res: Response): Response {
+  const h = new Headers(res.headers);
+  h.set("Content-Security-Policy", "frame-ancestors 'none'; base-uri 'none'; object-src 'none'");
+  h.set("X-Content-Type-Options", "nosniff");
+  h.set("Referrer-Policy", "no-referrer");
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers: h });
+}
 
 async function handleApiRoutes(
   request: Request,

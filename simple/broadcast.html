@@ -49,6 +49,12 @@
       <div class="row">
         <input id="share" type="text" readonly placeholder="viewer link appears here when you go live" />
         <button id="copy">Copy viewer link</button>
+        <button id="newlink" title="Mint a fresh key so every link you have already shared stops working">New link</button>
+      </div>
+      <div class="hint">
+        Your link stays the same across reloads, so anyone you have ever sent it to can watch
+        again. <strong>New link</strong> mints a fresh key — every link you shared before stops
+        working. It takes effect the next time you go live.
       </div>
       <!-- The passcode is a SECOND secret, deliberately not in the link. It never reaches any
            server: it is mixed into the content key, so a wrong one just fails to decrypt. -->
