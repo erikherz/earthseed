@@ -482,9 +482,36 @@ async function brokerAssign(body) {
     return { error: String(e) };
   }
 }
-/** Assign an origin relay + publish token for this broadcaster. @param {string} nodeId */
-async function assignPublish(nodeId) {
-  const d = await brokerAssign({ broadcast: nodeId, role: "publish" });
+// ── proving the broadcast name is ours. The publishable key above is PUBLIC, so on
+// its own it would let anyone ask the broker for a publish token on anyone's
+// broadcast — the name travels in every share link. The name is also an Ed25519
+// public key (§2), so we settle it with the private half: the broker hands out a
+// short-lived challenge and we sign it. Nothing is registered anywhere; only the
+// holder of the key that MADE the name can ever produce this signature.
+const CLAIM_CONTEXT = "earthseed-claim-v1";
+
+/** @param {string} nodeId */
+async function fetchChallenge(nodeId) {
+  const r = await fetch(`${BROKER}/cdn/challenge?broadcast=${encodeURIComponent(nodeId)}`);
+  if (!r.ok) return null;
+  const d = await r.json().catch(() => null);
+  return d && typeof d.challenge === "string" ? d.challenge : null;
+}
+/** Sign the broker's challenge with the node's private key. @param {{id:string, keyPair:CryptoKeyPair}} node @param {string} challenge */
+async function signClaim(node, challenge) {
+  const msg = new TextEncoder().encode(`${CLAIM_CONTEXT}|${node.id}|${challenge}`);
+  const sig = new Uint8Array(await crypto.subtle.sign(ED25519, node.keyPair.privateKey, bs(msg)));
+  let bin = "";
+  for (const b of sig) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/** Assign an origin relay + publish token for this broadcaster. @param {{id:string, keyPair:CryptoKeyPair}} node */
+async function assignPublish(node) {
+  const challenge = await fetchChallenge(node.id);
+  if (!challenge) return { error: "could not get a claim challenge from the broker" };
+  const sig = await signClaim(node, challenge);
+  const d = await brokerAssign({ broadcast: node.id, role: "publish", challenge, sig });
   if (d.error) return d;
   if (!d.relay || !d.origin_endpoint_id) return { error: "origin assign incomplete" };
   return { relay_url: `https://${d.relay}/`, origin_endpoint_id: d.origin_endpoint_id, jwt: d.jwt ?? null };
@@ -1106,7 +1133,7 @@ export async function runBroadcast() {
         relay = relayUrl();
       } else {
         set("assigning a relay…");
-        const pub = await assignPublish(node.id);
+        const pub = await assignPublish(node); // signs a broker challenge to prove the name is ours
         if (pub.error) return set(`broker error: ${pub.error}`);
         const salt = await putSalt(node.id, newStreamSalt(), getOrCreateRotateSecret(node.id));
         if (!salt?.stream) return set("could not set the stream salt");

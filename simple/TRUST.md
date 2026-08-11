@@ -91,7 +91,10 @@ why the watch page discovers it by trying rather than by asking.
   persistent disk.)
 - **Someone with the link** can watch (decrypt your video and audio) — the link carries `#k=`. Share
   it carefully. If you set a passcode they need that too, from your other channel. They still
-  **can't publish as you or rotate your key**.
+  **can't publish as you or rotate your key**: your `node id` *is* an Ed25519 public key, and the
+  broker only issues a publish token for it against a signature — over a challenge it just issued —
+  from the matching private key, which never leaves your browser. Rotating your stream salt is
+  likewise gated on a secret only your browser holds.
 - **Someone without the link** gets at most opaque ciphertext — plus the cleartext catalog
   (codec/resolution) and traffic size/timing. Never anything decryptable.
 
