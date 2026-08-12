@@ -154,12 +154,15 @@ export default {
 
 // Baseline security headers on everything we serve as a page or script.
 //
-// Still not a full CSP, but the reason has changed. The transport is now vendored, so there is
-// no third-party script origin left to whitelist and `script-src 'self'` is finally the right
-// shape. What remains: hashing the inline importmap/module blocks in the two pages, and moving
-// the blob:-URL AudioWorklet in earthseed.js to a real file. Then Report-Only, then enforce.
-// (Note these headers only reach responses the Worker actually serves — "/" — because with no
-// `run_worker_first` the asset server answers the .html/.js paths. simple/_headers covers those.)
+// The baseline subset only, and that is enough here. These headers reach just the responses the
+// Worker actually serves — in practice "/" — because with no `run_worker_first` the asset server
+// answers the .html/.js paths itself; simple/_headers is where the real policy lives, including
+// the strict `script-src`/`connect-src` now shipping as Report-Only.
+//
+// "/" is index.html: no inline scripts, no script files, no fetches. A strict policy there would
+// constrain nothing, and duplicating the generated hash list in TypeScript would just give it a
+// second place to go stale. If the landing page ever gains script, serve it the generated policy
+// rather than hand-copying one.
 //
 // What is here is the subset that touches no script loading and so cannot break the app:
 // clickjacking, MIME sniffing, base-tag hijacking, plugin embedding, and referrer leakage.
@@ -200,6 +203,21 @@ async function handleApiRoutes(
     const saltMatch = url.pathname.match(/^\/api\/salt\/([a-z0-9]{5}|[a-z2-7]{52})$/);
     if (saltMatch) {
       return handleSaltRoute(request, env, saltMatch[1]);
+    }
+
+    // POST /api/csp-report — where the Content-Security-Policy-Report-Only header sends
+    // violations. It exists so we can see what real Safari/iOS devices make of the strict
+    // policy before enforcing it; `npx wrangler tail` is the read-side. Nothing is stored.
+    //
+    // This is deliberately unauthenticated, because a browser posting a violation has no
+    // credentials to offer — that is the shape of the feature, not an oversight. The cost of
+    // getting it wrong is log noise rather than access, and it is bounded: POST only, a hard
+    // body cap, and no persistence. Drop the header and this route when enforcement lands.
+    if (url.pathname === "/api/csp-report") {
+      if (request.method !== "POST") return new Response("method not allowed", { status: 405 });
+      const body = (await request.text().catch(() => "")).slice(0, 4096);
+      if (body) console.warn("csp-report", request.headers.get("user-agent") ?? "?", body);
+      return new Response(null, { status: 204 });
     }
 
     // ── Removed: POST /api/publish and POST /api/edge ───────────────────────

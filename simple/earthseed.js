@@ -892,11 +892,9 @@ async function startBroadcast(opts) {
           } catch {}
           const sampleRate = ac.sampleRate;
           const source = ac.createMediaStreamSource(new MediaStream([audioTrack]));
-          const code =
-            "class Cap extends AudioWorkletProcessor{process(i){const c=i[0];if(c&&c[0])this.port.postMessage(c[0].slice(0));return true}}registerProcessor('es-cap',Cap)";
-          const url = URL.createObjectURL(new Blob([code], { type: "application/javascript" }));
-          await ac.audioWorklet.addModule(url);
-          URL.revokeObjectURL(url);
+          // A real file, not a blob: URL — see audio-capture-worklet.js for why. Resolved
+          // against this module's own URL so it works regardless of the page's path.
+          await ac.audioWorklet.addModule(new URL("./audio-capture-worklet.js", import.meta.url).href);
           const node = new AudioWorkletNode(ac, "es-cap");
           source.connect(node); // NOT connected to destination — no local echo
           aEncoder = makeAudioEncoder(sampleRate, 1);

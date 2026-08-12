@@ -1,22 +1,28 @@
-# Baseline security headers for the static client.
+# Security headers for the static client.
 #
 # These have to live here rather than in the Worker: with no `run_worker_first` in
 # wrangler.jsonc, Cloudflare's asset server answers /broadcast.html, /watch.html and
 # /earthseed.js directly and the Worker never sees those requests. (The Worker sets the
 # same headers on the responses it does serve, e.g. "/".)
 #
-# Still not a full CSP, but the reason has changed. The transport is now vendored, so there
-# is no third-party script origin left to whitelist and `script-src 'self'` is finally the
-# right shape. Two things remain before it can be enforced:
-#   1. the inline <script type="importmap"> and inline module blocks in the two pages need
-#      'sha256-…' hashes (and re-hashing whenever they change);
-#   2. the AudioWorklet in earthseed.js is built from a blob: URL — allowing blob: in
-#      script-src would undo much of the benefit, so that worklet should move to a real file.
-# Do those, roll it as Content-Security-Policy-Report-Only, then enforce.
+# THE POLICY LINES BELOW ARE GENERATED. `script-src` carries a sha256 for each inline
+# <script> block in the pages, so editing a page — even its whitespace — invalidates them,
+# and a stale hash does not fail loudly: the browser just refuses the script and the page
+# does nothing. After touching any page in simple/, run:
 #
-# What is here touches no script loading and so cannot break the app: clickjacking,
-# MIME sniffing, base-tag hijacking, plugin embedding, referrer leakage.
+#     node scripts/csp-hashes.mjs --write
+#
+# and run it without --write to check for drift before deploying.
+#
+# The strict policy currently ships as Report-Only while the enforced header stays on the
+# subset that cannot break anything. Chrome is verified clean; Safari/iOS is the reason for
+# the caution, since it is the browser most likely to disagree about import maps and worklets
+# and the one hardest to debug in the field. Violations POST to /api/csp-report; watch them
+# with `npx wrangler tail`. Flip ENFORCE in scripts/csp-hashes.mjs once real devices are quiet.
 /*
+  # BEGIN generated policy
   Content-Security-Policy: frame-ancestors 'none'; base-uri 'none'; object-src 'none'
+  Content-Security-Policy-Report-Only: script-src 'self' 'sha256-7fFJleZc815CALN3PfPMsYa6Qz0a0rce/C4FxOk3/zU=' 'sha256-JCWAMn2pbmcJ89ksB/yW3efkkVZYIE7LtjDSTPgDF20=' 'sha256-sTYgfQK0g22fa73j8zdiZu5nPo2iXzr+QXxAF+ctaBs='; connect-src 'self' https://tinymoq.com https://*.moqcdn.net:*; frame-ancestors 'none'; base-uri 'none'; object-src 'none'; report-uri /api/csp-report
+  # END generated policy
   X-Content-Type-Options: nosniff
   Referrer-Policy: no-referrer

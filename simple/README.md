@@ -40,14 +40,31 @@ Works on recent **Chrome/Edge** and **Safari on iOS 18+ / macOS**. Audio starts 
 
 ## Host it yourself
 
-It's static — put `earthseed.js` + the two HTML files on any HTTPS host. Set your own publishable
-key via `<meta name="earthseed-key" content="pk_…">` (it's public — safe to ship). The broker
-handles relay assignment, per-broadcast tokens and public salts; it never sees your content.
+It's static — put `earthseed.js`, `audio-capture-worklet.js`, `vendor/` and the two HTML files on
+any HTTPS host. Set your own publishable key via `<meta name="earthseed-key" content="pk_…">`
+(it's public — safe to ship). The broker handles relay assignment, per-broadcast tokens and public
+salts; it never sees your content.
 
 Note that self-hosting the client doesn't come with the security headers this repo ships in
-`_headers` — that file is a Cloudflare asset-server mechanism and is inert elsewhere. Set
+`_headers` — that file is a Cloudflare asset-server mechanism and is inert elsewhere. Copy the
+policy out of `_headers` onto your own host, or at minimum set
 `Content-Security-Policy: frame-ancestors 'none'; base-uri 'none'; object-src 'none'`,
-`X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer` on your own host.
+`X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`.
+
+### If you edit a page, regenerate the CSP hashes
+
+`script-src` pins every inline `<script>` block in these pages by SHA-256, so changing one —
+including its indentation — invalidates the hash. This does **not** fail loudly: the browser
+refuses the script and the page quietly does nothing. After editing any HTML in `simple/`:
+
+```sh
+node scripts/csp-hashes.mjs --write   # regenerate
+node scripts/csp-hashes.mjs           # check; non-zero exit if _headers has drifted
+```
+
+The strict policy currently ships as `Content-Security-Policy-Report-Only` while the enforced
+header stays on the subset that can't break anything; violations POST to `/api/csp-report`. Flip
+`ENFORCE` in that script once real devices are quiet.
 
 There used to be an "open-relay" mode that skipped the broker and used any public MoQ endpoint.
 It was removed: with no broker there is nothing to authorize a publisher, so anyone could publish
