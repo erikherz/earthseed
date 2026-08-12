@@ -260,13 +260,20 @@
           deadlines, while a unikernel's hardening is a property of the artifact.
         </p>
         <p style="margin-top: 10px;">
+          <b>One relay carries exactly one stream.</b> Many viewers of that stream share it — that's
+          what a relay is for — but two different broadcasts are never put on the same machine,
+          anywhere. So a compromised relay is confined to a single broadcast by a machine boundary
+          rather than by a setting. Your access token names one broadcast as well, which means even
+          sharing a relay would grant nothing: two independent barriers, not one. And the fleet is
+          given only the <em>public</em> half of the signing key — it can check a token, it cannot
+          forge one.
+        </p>
+        <p style="margin-top: 10px;">
           <b>Where the argument stops.</b> The machine hosting those unikernels is still an ordinary
           Linux box running a fleet manager — "nothing to log to" is true of the relay, not of the
-          system around it, and that host is the real target. Relays are shared between broadcasts up
-          to a capacity limit rather than one per stream; what stops cross-stream access is that a
-          viewer's token names one broadcast, not that each gets its own machine. A smaller ecosystem
-          also means fewer eyes and slower patching than the Linux container world. And a unikernel
-          bounds the damage from a bug in the relay — it doesn't make the relay correct.
+          system around it, and that host is the real target. A smaller ecosystem also means fewer
+          eyes and slower patching than the Linux container world. And a unikernel bounds the damage
+          from a bug in the relay — it doesn't make the relay correct.
           <a href="https://github.com/erikherz/earthseed/blob/main/simple/TRUST.md" target="_blank" rel="noopener">TRUST.md</a>
           has the full comparison.
         </p>

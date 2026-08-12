@@ -134,15 +134,25 @@ is no `kubectl exec` equivalent to disable because there is no shell to reach, a
 can relax later to bring one back. **Security you cannot switch off beats security you must
 remember to switch on.**
 
+**One relay carries exactly one stream.** Many viewers of that stream share it — that is what a
+relay is for — but two different broadcasts are never placed on the same machine, in any locality.
+Verified rather than assumed: two streams taken live at the same moment were assigned separate
+relays on separate ports, with distinct origin endpoints. So a relay compromise is scoped to one
+broadcast by the machine boundary, not merely by policy. Token scope is a second, independent
+barrier — a viewer's token names exactly one broadcast, so co-tenancy would grant nothing even if
+it somehow occurred.
+
+**The fleet cannot mint tokens for your stream.** Each relay is provisioned with the *public* half
+of the signing key; the private key never leaves the token issuer. The relay can verify a token and
+cannot forge one. (A different deployment mode gives each relay a fresh secret that is destroyed
+when the relay is reaped — revocation by key destruction. That is not how this runs, and it is a
+weaker property than the operator simply never holding a signing key.)
+
 **The honest limits of that argument:**
 
 - **The host is still an ordinary Linux box.** It runs the fleet manager as root, terminates TLS,
   and reads relay logs. Those logs carry broadcast names and viewer counts. "No disk to log to" is
   true of the guest, not of the system it runs on — and the host, not the guest, is the real target.
-- **Relays are shared, not one-per-broadcast.** Today a relay carries multiple broadcasts up to a
-  capacity limit. Cross-stream access is prevented by token scope (a viewer token names one
-  broadcast), not by giving each stream its own machine. A dedicated relay per broadcaster is a
-  direction, not a description.
 - **A small ecosystem cuts both ways.** Fewer eyes on the code than the Linux container stack, and
   slower to patch. And having no runtime policy layer means you cannot *add* a guardrail you failed
   to build in.
