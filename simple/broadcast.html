@@ -11,12 +11,13 @@
          key, so this key cannot claim a broadcast name. It never decodes media. -->
     <meta name="earthseed-key" content="pk_Am-UpPEuGCt5dsnR8xqzOFX2mEYDSCeMGrDWxXli4LU" />
     <!-- Two includes, on purpose:
-         (1) @moq/net — Luke Curley's Media-over-QUIC transport, loaded DIRECTLY from its published
-             package, pinned to an exact version. We do NOT vendor or modify it; verify it upstream:
-             https://www.npmjs.com/package/@moq/net/v/0.1.5
+         (1) @moq/net — Luke Curley's Media-over-QUIC transport. VENDORED: built once from the
+             published package at exact versions and served from THIS origin, so no third-party
+             host can push code onto the page that holds your content key. We do not modify it;
+             reproduce the build and check the hash: simple/vendor/README.md
          (2) ./earthseed.js — our ENTIRE client, unminified and readable (loaded at the bottom). -->
     <script type="importmap">
-      { "imports": { "@moq/net": "https://esm.sh/@moq/net@0.1.5" } }
+      { "imports": { "@moq/net": "./vendor/moq-net-0.1.5.mjs" } }
     </script>
     <style>
       body { margin: 0; background: #fff; color: #000; font-family: system-ui, -apple-system, Arial, sans-serif; }

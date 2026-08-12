@@ -5,10 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Watch</title>
     <meta name="earthseed-key" content="pk_Am-UpPEuGCt5dsnR8xqzOFX2mEYDSCeMGrDWxXli4LU" />
-    <!-- @moq/net loaded directly from its pinned published package (verify upstream):
-         https://www.npmjs.com/package/@moq/net/v/0.1.5 -->
+    <!-- @moq/net, VENDORED from its published package — served by us, from this origin, so no
+         third-party host can execute code on the page that holds your content key. Built once
+         from exact npm versions; reproduce and verify the hash: simple/vendor/README.md -->
     <script type="importmap">
-      { "imports": { "@moq/net": "https://esm.sh/@moq/net@0.1.5" } }
+      { "imports": { "@moq/net": "./vendor/moq-net-0.1.5.mjs" } }
     </script>
     <style>
       body { margin: 0; background: #fff; color: #000; font-family: system-ui, -apple-system, Arial, sans-serif; }

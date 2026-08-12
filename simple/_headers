@@ -5,12 +5,14 @@
 # /earthseed.js directly and the Worker never sees those requests. (The Worker sets the
 # same headers on the responses it does serve, e.g. "/".)
 #
-# Deliberately NOT a full CSP. A real `script-src` must account for the inline
-# <script type="importmap"> and inline module blocks (hashes ⇒ a build step), the
-# AudioWorklet built from a blob: URL in earthseed.js, and @moq/net being fetched from
-# esm.sh — and writing it today would mean formally whitelisting that CDN, i.e. blessing
-# the third-party code-execution path we most want to remove. Vendor the transport first,
-# then land script-src as Report-Only, then enforce.
+# Still not a full CSP, but the reason has changed. The transport is now vendored, so there
+# is no third-party script origin left to whitelist and `script-src 'self'` is finally the
+# right shape. Two things remain before it can be enforced:
+#   1. the inline <script type="importmap"> and inline module blocks in the two pages need
+#      'sha256-…' hashes (and re-hashing whenever they change);
+#   2. the AudioWorklet in earthseed.js is built from a blob: URL — allowing blob: in
+#      script-src would undo much of the benefit, so that worklet should move to a real file.
+# Do those, roll it as Content-Security-Policy-Report-Only, then enforce.
 #
 # What is here touches no script loading and so cannot break the app: clickjacking,
 # MIME sniffing, base-tag hijacking, plugin embedding, referrer leakage.

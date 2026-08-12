@@ -101,14 +101,21 @@ why the watch page discovers it by trying rather than by asking.
   broker only issues a publish token for it against a signature — over a challenge it just issued —
   from the matching private key, which never leaves your browser. Rotating your stream salt is
   likewise gated on a secret only your browser holds.
+- **Your identity key can't be copied out of your browser.** It is generated non-extractable and
+  stored as a key *object* in IndexedDB, never as bytes — so there is no exportable copy for a
+  malicious script or extension to steal and reuse later. The trade is that an identity cannot be
+  backed up or moved between browsers: lose the browser profile and you mint a new one (and a new
+  share link). See the limits below for what this does *not* cover.
 - **Someone without the link** gets at most opaque ciphertext — plus the cleartext catalog
   (codec/resolution) and traffic size/timing. Never anything decryptable.
 
 ## The trusted computing base (what you must trust)
 
 1. **`earthseed.js`** — our client. It's one readable file; read it.
-2. **`@moq/net`** — the transport, loaded from its published package at a pinned version
-   (`0.1.5`). We don't modify it; you can diff the pinned version against upstream.
+2. **`@moq/net`** — the transport (version `0.1.5`), **vendored**: built once from the published
+   package at exact dependency versions and served from our own origin, not a CDN. It is
+   unminified, so you can read it; `simple/vendor/README.md` has the build command and the SHA-256
+   so you can reproduce it byte-for-byte and confirm we didn't change anything.
 3. **The browser** — WebCrypto, WebCodecs, WebTransport.
 4. **However you host the pages** — whoever serves `earthseed.js` could serve different code. If
    that's a concern, host it yourself: the client is static, and it talks to the broker from
@@ -137,6 +144,14 @@ honest limits below.
   *in transit and from the infrastructure*, not from the people you invite.
 - **"Read exactly what runs" is a goal, not a proof.** The client ships unminified and unbundled
   so it's readable, but verifying the *hosted* bytes against this repo is on you (or self-host).
+- **Hostile code on the page beats all of this.** If someone can run script in your tab — a
+  compromised host, a malicious extension — they can read the content key straight out of the URL
+  fragment and the passcode straight out of its input box, and they can ask your identity key to
+  sign things while the page is open. A non-extractable key means they cannot *walk away with* your
+  identity and keep publishing as you afterwards, and vendoring the transport removes the
+  third-party host that could have injected such code. Neither makes the page itself safe to lose.
+  This is why the browser and the host are in the trusted computing base above, and it is the real
+  reason to prefer a browser profile you control.
 - **The broker is a required dependency, on purpose.** It can refuse to mint a token and deny you
   service — though it still can't read your content. There is deliberately no way to route around
   it. An earlier "open-relay" mode let a page skip the broker and use any public MoQ endpoint, and

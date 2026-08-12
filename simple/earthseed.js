@@ -320,7 +320,7 @@ function fragmentKeyFromHash() {
 // IDENTITY / discovery handle / moq broadcast name — NOT the content key. Persisted so the
 // broadcaster keeps a stable share link; the private key never leaves the browser.
 const B32 = "abcdefghijklmnopqrstuvwxyz234567"; // RFC4648 lower, no padding
-const NODE_STORAGE_KEY = "es:node";
+const NODE_STORAGE_KEY = "es:node"; // LEGACY: an exported JWK. Read once, then deleted (see migrateLegacyNode).
 const ED25519 = /** @type {AlgorithmIdentifier} */ (/** @type {unknown} */ ({ name: "Ed25519" }));
 
 /** @param {Uint8Array} bytes */
@@ -341,39 +341,106 @@ function base32(bytes) {
 }
 /** @param {CryptoKeyPair} keyPair */
 async function finalizeNode(keyPair) {
+  // Public keys are ALWAYS extractable in WebCrypto regardless of the generateKey flag,
+  // so this still works with a non-extractable private half.
   const raw = new Uint8Array(await crypto.subtle.exportKey("raw", keyPair.publicKey));
   return { id: base32(raw), keyPair, raw };
 }
-async function mintKeyPair() {
-  return /** @type {CryptoKeyPair} */ (await crypto.subtle.generateKey(ED25519, true, ["sign", "verify"]));
+
+// The private half is NON-EXTRACTABLE and lives in IndexedDB as a CryptoKey object, never as
+// bytes. Script on this page can still ASK it to sign (that is unavoidable — the broadcaster's
+// own code has to sign the broker's claim challenge), but cannot read the key out and publish
+// as this identity from somewhere else, later, forever. That is the difference between a
+// session-long compromise and a permanent theft of the stream name. It is also why there is no
+// "export my identity" feature: the bytes do not exist anywhere they could be copied from.
+const NODE_DB = "earthseed";
+const NODE_STORE = "identity";
+const NODE_DB_KEY = "node-v1";
+const IDB_TIMEOUT_MS = 3000;
+
+/** @template T @param {Promise<T>} p @returns {Promise<T>} */
+function withTimeout(p) {
+  // A hung indexedDB.open would hang go-live itself; fail fast to the ephemeral path instead.
+  return Promise.race([
+    p,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("indexeddb timeout")), IDB_TIMEOUT_MS)),
+  ]);
 }
-/** @param {JsonWebKey} jwk */
+/** @param {IDBRequest} req */
+function idbRequest(req) {
+  return new Promise((resolve, reject) => {
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+function idbOpen() {
+  const req = indexedDB.open(NODE_DB, 1);
+  req.onupgradeneeded = () => req.result.createObjectStore(NODE_STORE);
+  return withTimeout(/** @type {Promise<IDBDatabase>} */ (idbRequest(req)));
+}
+/** @param {"readonly"|"readwrite"} mode @param {(s: IDBObjectStore) => IDBRequest} fn */
+async function idbWith(mode, fn) {
+  const db = await idbOpen();
+  try {
+    return await withTimeout(idbRequest(fn(db.transaction(NODE_STORE, mode).objectStore(NODE_STORE))));
+  } finally {
+    db.close();
+  }
+}
+
+async function mintKeyPair() {
+  return /** @type {CryptoKeyPair} */ (await crypto.subtle.generateKey(ED25519, false, ["sign", "verify"]));
+}
+/** Import a legacy exported JWK, dropping extractability on the way in. @param {JsonWebKey} jwk */
 async function importFromJwk(jwk) {
-  const privateKey = await crypto.subtle.importKey("jwk", jwk, ED25519, true, ["sign"]);
+  const privateKey = await crypto.subtle.importKey("jwk", jwk, ED25519, false, ["sign"]);
   const publicKey = await crypto.subtle.importKey("jwk", { kty: jwk.kty, crv: jwk.crv, x: jwk.x }, ED25519, true, [
     "verify",
   ]);
   return /** @type {CryptoKeyPair} */ ({ privateKey, publicKey });
 }
-/** @param {CryptoKeyPair} keyPair */
-async function persistNode(keyPair) {
+
+/**
+ * One-time move of a pre-existing identity out of localStorage. Same key, so the node id — and
+ * so every link already shared — is unchanged. The plaintext JWK is deleted ONLY after the
+ * IndexedDB write has resolved, so a failure anywhere leaves the old identity intact.
+ * @returns {Promise<CryptoKeyPair|null>}
+ */
+async function migrateLegacyNode() {
+  let stored = null;
   try {
-    localStorage.setItem(NODE_STORAGE_KEY, JSON.stringify(await crypto.subtle.exportKey("jwk", keyPair.privateKey)));
+    stored = localStorage.getItem(NODE_STORAGE_KEY);
   } catch {
-    /* private-mode: identity stays ephemeral this session */
+    return null;
   }
+  if (!stored) return null;
+  let keyPair;
+  try {
+    keyPair = await importFromJwk(JSON.parse(stored));
+  } catch {
+    localStorage.removeItem(NODE_STORAGE_KEY); // corrupt — nothing to preserve
+    return null;
+  }
+  await idbWith("readwrite", (s) => s.put(keyPair, NODE_DB_KEY));
+  localStorage.removeItem(NODE_STORAGE_KEY);
+  return keyPair;
 }
-/** The broadcaster's persistent node identity — loaded from localStorage or minted + saved. */
+
+/** The broadcaster's persistent node identity, minted once and kept non-extractable. */
 async function getOrCreateNode() {
   try {
-    const stored = localStorage.getItem(NODE_STORAGE_KEY);
-    if (stored) return await finalizeNode(await importFromJwk(JSON.parse(stored)));
+    const found = /** @type {CryptoKeyPair|undefined} */ (await idbWith("readonly", (s) => s.get(NODE_DB_KEY)));
+    if (found?.privateKey) return await finalizeNode(found);
+    const migrated = await migrateLegacyNode();
+    if (migrated) return await finalizeNode(migrated);
+    const keyPair = await mintKeyPair();
+    await idbWith("readwrite", (s) => s.put(keyPair, NODE_DB_KEY));
+    return await finalizeNode(keyPair);
   } catch {
-    /* corrupt — mint fresh */
+    // No IndexedDB (private mode, storage disabled, hung open): stay usable, but this
+    // identity — and so the share link — lasts only for this page.
+    return finalizeNode(await mintKeyPair());
   }
-  const keyPair = await mintKeyPair();
-  await persistNode(keyPair);
-  return finalizeNode(keyPair);
 }
 
 // ── passcode: an OPTIONAL second secret required for playback, deliberately NOT in the link.
