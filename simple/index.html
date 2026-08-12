@@ -244,10 +244,41 @@
           <h3>The transport</h3>
           <p>
             <a href="https://www.npmjs.com/package/@moq/net/v/0.1.5" target="_blank" rel="noopener"><code>@moq/net</code></a>
-            (Media over QUIC), loaded <em>directly from its published package</em> at a pinned version.
-            We don't vendor or modify it — verify it upstream.
+            (Media over QUIC), by <a href="https://github.com/kixelated" target="_blank" rel="noopener">Luke Curley</a>.
+            It is <b>unmodified</b>, but we now serve
+            <a href="https://github.com/erikherz/earthseed/blob/main/simple/vendor/moq-net-0.1.5.mjs" target="_blank" rel="noopener">our own copy</a>
+            of it instead of loading it from someone else's CDN. Here's why, and how to check us.
           </p>
         </div>
+      </div>
+
+      <div class="feature" style="margin-top: 14px;">
+        <h3>Why we copied the transport instead of linking to it</h3>
+        <p>
+          Until 12 August 2026 both pages fetched the transport live from a public CDN
+          (<code>esm.sh</code>) at a pinned version. That was a mistake, and we'd rather say so than
+          quietly change it.
+        </p>
+        <p style="margin-top: 10px;">
+          The problem is that this code runs <em>on the same page as your content key</em>. Whoever
+          serves it could swap it for something that reads your key straight out of the link and
+          mails it elsewhere — no bug on our side required. And the version pin turned out to be
+          shallower than it looked: it pinned <code>@moq/net</code> itself, but that package pulled
+          in four more (<code>@moq/qmux</code>, <code>@moq/signals</code>, <code>async-mutex</code>,
+          <code>zod</code>) as <em>version ranges</em>, resolved fresh on every request. Any new
+          release of any of them would have started running on this page without us doing anything.
+        </p>
+        <p style="margin-top: 10px;">
+          So we built it once from exact versions and now serve it ourselves. Nothing about it is
+          modified, and <b>you shouldn't take our word for that</b> — the build is reproducible.
+          <a href="https://github.com/erikherz/earthseed/blob/main/simple/vendor/README.md" target="_blank" rel="noopener">The recipe</a>
+          is four commands; run them and you should get a file whose SHA-256 matches
+          <a href="https://github.com/erikherz/earthseed/blob/main/simple/vendor/moq-net-0.1.5.mjs" target="_blank" rel="noopener">the one we ship</a>,
+          which you can also compare against
+          <a href="https://github.com/kixelated/moq" target="_blank" rel="noopener">Luke's upstream source</a>.
+          It's left unminified so it stays readable. Full reasoning and the honest limits are in
+          <a href="https://github.com/erikherz/earthseed/blob/main/simple/TRUST.md" target="_blank" rel="noopener"><code>TRUST.md</code></a>.
+        </p>
       </div>
     </section>
 

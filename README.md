@@ -98,11 +98,17 @@ Each page loads exactly two pieces of JavaScript, on purpose:
 - **Our whole client** — [`simple/earthseed.js`](simple/earthseed.js): one unminified, documented ES
   module that runs in the browser **as-is (no build step)**. It does capture, encode, **encrypt**,
   decrypt, decode and render. What you read is what runs.
-- **The transport** — [`@moq/net`](https://www.npmjs.com/package/@moq/net/v/0.1.5) (Media over QUIC),
-  loaded **directly from its published package at a pinned version** via an import map. Not vendored,
-  not modified — verify it upstream.
+- **The transport** — [`@moq/net`](https://www.npmjs.com/package/@moq/net/v/0.1.5) (Media over QUIC)
+  by [Luke Curley](https://github.com/kixelated), **unmodified but vendored** to
+  [`simple/vendor/moq-net-0.1.5.mjs`](simple/vendor/moq-net-0.1.5.mjs) and served from our own
+  origin. It used to be fetched live from `esm.sh`; that put a third party in a position to replace
+  code running on the same page as your content key, and the version pin covered only the top
+  package while its four dependencies floated as version ranges. The build is reproducible —
+  [`simple/vendor/README.md`](simple/vendor/README.md) has the commands, the SHA-256 and the
+  resolved dependency table, so you can confirm we changed nothing.
 
-No bundler, no analytics, no external scripts.
+No bundler for our own client, no analytics, no external scripts, nothing loaded from a third-party
+origin at runtime.
 
 ## Use it
 

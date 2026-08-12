@@ -14,8 +14,11 @@ move ciphertext they can't read. No accounts, no analytics, no server-side list 
 | `broadcast.html` / `watch.html` | Thin pages that load `earthseed.js` and call `runBroadcast()` / `runWatch()`. |
 
 The only third-party runtime code is the transport, [`@moq/net`](https://www.npmjs.com/package/@moq/net/v/0.1.5)
-(Media over QUIC), loaded **directly from its published package at a pinned version** via an
-`<script type="importmap">` entry — not vendored, not modified. You can verify it upstream.
+(Media over QUIC) by [Luke Curley](https://github.com/kixelated). It is **unmodified**, but it is
+**vendored** — built once from exact npm versions into [`vendor/moq-net-0.1.5.mjs`](vendor/moq-net-0.1.5.mjs)
+and served from this origin rather than fetched from a CDN at runtime, because code loaded onto
+these pages sits next to the content key. [`vendor/README.md`](vendor/README.md) explains the
+reasoning and gives a reproducible build you can hash-check against the file we ship.
 
 ## Use it
 
