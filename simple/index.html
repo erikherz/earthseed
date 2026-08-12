@@ -305,23 +305,23 @@
       </div>
 
       <div class="feature" style="margin-top: 14px;">
-        <h3>Why we copied the transport instead of linking to it</h3>
+        <h3>Why we serve our own copy instead of linking to a CDN</h3>
         <p>
-          Until 12 August 2026 both pages fetched the transport live from a public CDN
-          (<code>esm.sh</code>) at a pinned version. That was a mistake, and we'd rather say so than
-          quietly change it.
+          The transport runs <em>on the same page as your content key</em>. Whoever serves that code
+          could swap it for something that reads your key straight out of the link and mails it
+          elsewhere — no bug on our side required. So the only version of it we're willing to run is
+          one we serve ourselves, fixed at deploy time and reviewable in the repo.
         </p>
         <p style="margin-top: 10px;">
-          The problem is that this code runs <em>on the same page as your content key</em>. Whoever
-          serves it could swap it for something that reads your key straight out of the link and
-          mails it elsewhere — no bug on our side required. And the version pin turned out to be
-          shallower than it looked: it pinned <code>@moq/net</code> itself, but that package pulled
-          in four more (<code>@moq/qmux</code>, <code>@moq/signals</code>, <code>async-mutex</code>,
-          <code>zod</code>) as <em>version ranges</em>, resolved fresh on every request. Any new
-          release of any of them would have started running on this page without us doing anything.
+          <b>Pinning a version on someone else's CDN is not the same thing</b>, which is easy to
+          miss. A pin names a version, not the bytes behind it — and it only covers the package you
+          named. <code>@moq/net</code> pulls in four more (<code>@moq/qmux</code>,
+          <code>@moq/signals</code>, <code>async-mutex</code>, <code>zod</code>) as <em>version
+          ranges</em>, which a CDN resolves fresh on every request. Pin the top package and a new
+          release of any of the four still starts running on this page, unchanged on your side.
         </p>
         <p style="margin-top: 10px;">
-          So we built it once from exact versions and now serve it ourselves. Nothing about it is
+          So we build it once from exact versions and serve it from this origin. Nothing about it is
           modified, and <b>you shouldn't take our word for that</b> — the build is reproducible.
           <a href="https://github.com/erikherz/earthseed/blob/main/simple/vendor/README.md" target="_blank" rel="noopener">The recipe</a>
           is four commands; run them and you should get a file whose SHA-256 matches
