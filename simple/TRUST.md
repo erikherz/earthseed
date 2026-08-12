@@ -220,12 +220,22 @@ honest limits below.
   This is why the browser and the host are in the trusted computing base above, and it is the real
   reason to prefer a browser profile you control.
 - **The script policy is enforced, and it is not a complete answer.** The pages ship a
-  `Content-Security-Policy` that permits only scripts from this origin — each inline block pinned
-  by SHA-256 — and network connections only to the broker and the relay fleet. A script injected
-  into the page is refused rather than reported. What it cannot help with is the case where the
-  *legitimate* files are the problem: if the host serves a modified `earthseed.js`, that file is
-  same-origin and the policy permits it. CSP narrows how code gets onto the page; it does not
-  verify what the code does. That is still the trust in the host described above.
+  `Content-Security-Policy` that permits only scripts from this origin, each inline block pinned by
+  SHA-256, with `require-trusted-types-for 'script'` so the DOM sinks that enable XSS throw rather
+  than being absent by convention. A script injected into the page is refused rather than reported.
+  What it cannot help with is the case where the *legitimate* files are the problem: if the host
+  serves a modified `earthseed.js`, that file is same-origin and the policy permits it. CSP narrows
+  how code gets onto the page; it does not verify what the code does. That is still the trust in
+  the host described above.
+- **Network destinations are deliberately unrestricted, so anyone can run a fleet.** The policy
+  does **not** pin which hosts the page may connect to. That is a requirement, not an omission:
+  a partner running relays on their own domain, or an enterprise relay living inside a private
+  network, must work without us shipping a new client. Restricting it would have quietly meant
+  "only relays we operate". It costs little, because a relay only ever receives **ciphertext and a
+  broadcast-scoped token** — your content key never goes there — so the identity of the host at the
+  other end is not what protects your media. Pinning destinations would only bind an attacker who
+  could run script here *without* controlling our response headers, and anyone who can serve a
+  modified client controls both.
 - **The broker is a required dependency, on purpose.** It can refuse to mint a token and deny you
   service — though it still can't read your content. There is deliberately no way to route around
   it. An earlier "open-relay" mode let a page skip the broker and use any public MoQ endpoint, and
