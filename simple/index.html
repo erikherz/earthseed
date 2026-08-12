@@ -229,6 +229,51 @@
     </section>
 
     <section class="wrap">
+      <h2>The relays are unikernels, not containers</h2>
+      <p class="lead">
+        Security you can't switch off beats security you have to remember to switch on.
+      </p>
+      <div class="feature">
+        <p>
+          A relay never holds a key, so this isn't what protects your video — the encryption is.
+          It decides something else: how much an attacker gets if a relay falls, and how much has
+          to keep going right for that to stay true.
+        </p>
+        <p style="margin-top: 10px;">
+          The ordinary way to run this is containers on Kubernetes, and Kubernetes <em>can</em> be
+          locked down well. The trouble is that its security is a set of <b>policies someone has to
+          choose, apply, and keep applying</b> — and each one has an off switch. <code>kubectl
+          exec</code> hands you a shell inside a running workload, gated only by a permission
+          someone can grant. Containers share <b>one kernel</b>, so a kernel bug is an escape, and
+          the settings that stop a container mounting the host are enforced only if an admission
+          policy says so. Without a network policy, every workload can reach every other. The
+          container image itself ships a package manager and a shell, so the post-exploitation
+          toolkit arrives with the app.
+        </p>
+        <p style="margin-top: 10px;">
+          Our relays are <a href="https://github.com/erikherz/hermit-moq" target="_blank" rel="noopener">Hermit unikernels</a>:
+          a single program in a single address space, booted directly under a hardware-virtualisation
+          boundary. <b>There is no shell to reach</b> — not disabled, absent. No package manager, no
+          filesystem, no users, no second program to pivot to, and no persistent disk; idle relays are
+          reaped and the machine stops existing. None of that is a policy anyone can relax later,
+          which is the whole point: a hardened cluster is a state you must maintain against drift and
+          deadlines, while a unikernel's hardening is a property of the artifact.
+        </p>
+        <p style="margin-top: 10px;">
+          <b>Where the argument stops.</b> The machine hosting those unikernels is still an ordinary
+          Linux box running a fleet manager — "nothing to log to" is true of the relay, not of the
+          system around it, and that host is the real target. Relays are shared between broadcasts up
+          to a capacity limit rather than one per stream; what stops cross-stream access is that a
+          viewer's token names one broadcast, not that each gets its own machine. A smaller ecosystem
+          also means fewer eyes and slower patching than the Linux container world. And a unikernel
+          bounds the damage from a bug in the relay — it doesn't make the relay correct.
+          <a href="https://github.com/erikherz/earthseed/blob/main/simple/TRUST.md" target="_blank" rel="noopener">TRUST.md</a>
+          has the full comparison.
+        </p>
+      </div>
+    </section>
+
+    <section class="wrap">
       <h2>Small enough to read</h2>
       <p class="lead">Each page loads exactly two pieces of JavaScript — on purpose.</p>
       <div class="cards2">

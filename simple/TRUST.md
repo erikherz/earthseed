@@ -94,7 +94,7 @@ why the watch page discovers it by trying rather than by asking.
   broadcast has a passcode at all.
 - **Relay fleet** sees: a connection `JWT`, ciphertext frames, and the cleartext catalog. It
   **never** sees `#k=`, `CK`, your `passcode`, or your media. (Hermit unikernel relays keep no
-  persistent disk.)
+  persistent disk — see [why they're unikernels](#why-the-relays-are-unikernels-and-not-containers).)
 - **Someone with the link** can watch (decrypt your video and audio) — the link carries `#k=`. Share
   it carefully. If you set a passcode they need that too, from your other channel. They still
   **can't publish as you or rotate your key**: your `node id` *is* an Ed25519 public key, and the
@@ -108,6 +108,46 @@ why the watch page discovers it by trying rather than by asking.
   share link). See the limits below for what this does *not* cover.
 - **Someone without the link** gets at most opaque ciphertext — plus the cleartext catalog
   (codec/resolution) and traffic size/timing. Never anything decryptable.
+
+## Why the relays are unikernels and not containers
+
+The relay never holds a key, so this is not what protects your video — encryption is. It matters
+for everything *around* the media: how much an attacker gets if a relay falls, and how much has to
+go right, continuously, for that to stay true.
+
+The usual way to run something like this is containers on Kubernetes. Kubernetes can be hardened
+well. The difficulty is that **its security is a set of policies someone must choose, apply, and
+keep applying** — and each has an off switch:
+
+| The exposure | In Kubernetes | In a Hermit unikernel |
+|---|---|---|
+| Interactive access to a running workload | `kubectl exec` gives a shell. Gated by RBAC — a grant someone can make | **No shell exists.** No `/bin`, no `sh`, nothing to exec into |
+| Post-exploitation tooling | The image ships a userland: package manager, `curl`, shell utilities | The binary links what the relay needs. There is no second program to run |
+| Escaping to the host | Containers share **one kernel**; a kernel privilege bug is an escape. `privileged`, `hostPath`, `hostPID` are blocked only if admission policy says so | Isolation is a **KVM boundary** (`uhyve`). Not namespaces on a shared kernel |
+| Reaching other workloads | Default-allow: without a `NetworkPolicy` every pod can reach every pod | One application, one address space, no service-account token to steal |
+| What persists after the fact | Container filesystems and logs sit on the node | **No persistent disk.** Idle relays are reaped and the machine ceases to exist |
+
+The distinction is not that Kubernetes is badly built. It is that a hardened cluster is a state you
+have to *achieve and maintain*, against configuration drift, a new operator with broad RBAC, or one
+`hostPath` mount added under deadline. A unikernel's hardening is a property of the artifact: there
+is no `kubectl exec` equivalent to disable because there is no shell to reach, and no policy anyone
+can relax later to bring one back. **Security you cannot switch off beats security you must
+remember to switch on.**
+
+**The honest limits of that argument:**
+
+- **The host is still an ordinary Linux box.** It runs the fleet manager as root, terminates TLS,
+  and reads relay logs. Those logs carry broadcast names and viewer counts. "No disk to log to" is
+  true of the guest, not of the system it runs on — and the host, not the guest, is the real target.
+- **Relays are shared, not one-per-broadcast.** Today a relay carries multiple broadcasts up to a
+  capacity limit. Cross-stream access is prevented by token scope (a viewer token names one
+  broadcast), not by giving each stream its own machine. A dedicated relay per broadcaster is a
+  direction, not a description.
+- **A small ecosystem cuts both ways.** Fewer eyes on the code than the Linux container stack, and
+  slower to patch. And having no runtime policy layer means you cannot *add* a guardrail you failed
+  to build in.
+- **A bug in the relay is still a bug.** A unikernel bounds the blast radius. It does not make the
+  program correct.
 
 ## The trusted computing base (what you must trust)
 
