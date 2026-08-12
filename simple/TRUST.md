@@ -48,8 +48,13 @@ per encoded chunk (audio and video):
   clear on a separate track by design — it leaks format metadata, never content.
 - A **fresh random 96-bit nonce per chunk**; the publisher is the sole encryptor (the relay fans
   out identical ciphertext to every viewer), so nonce uniqueness is a single-writer problem.
-- **Rotation / kill-switch:** bumping the per-stream salt (a "reset key") or the global salt yields
-  a fresh `CK`; viewers re-derive on the epoch change. The old link stops decrypting new frames.
+- **Rotation / kill-switch:** the per-stream salt is minted fresh at every go-live, and the operator
+  can rotate the global salt to re-key every stream at once. Either changes `epoch`, and a viewer
+  re-derives when it does. Both take effect at the next go-live — nothing rotates mid-broadcast, so
+  a viewer's key is fixed for the session it joined.
+- **The salts reach a viewer from the broadcaster, not from us.** They travel on the same cleartext
+  catalog track that carries the codec description, so **a viewer never asks the broker for
+  anything after being placed on a relay.** They are public HKDF inputs and decrypt nothing alone.
 
 ## The passcode (optional second lock)
 
@@ -109,6 +114,9 @@ why the watch page discovers it by trying rather than by asking.
 - **Broker** sees: `node id`, tenant `pk_`, public `salts`, coarse geo (from the request); it
   mints tokens. It **never** sees `#k=`, `CK`, your `passcode`, or your media — nor whether a
   broadcast has a passcode at all.
+  **A viewer contacts it exactly once**, to be placed on a relay. After that a viewer talks only to
+  the relay, and the relay only ever carries ciphertext. So the broker sees that someone joined,
+  not how long they stayed — it holds a connection record, not an attendance record.
 - **Relay fleet** sees: a connection `JWT`, ciphertext frames, and the cleartext catalog. It
   **never** sees `#k=`, `CK`, your `passcode`, or your media. (Hermit unikernel relays keep no
   persistent disk — see [why they're unikernels](#why-the-relays-are-unikernels-and-not-containers).)

@@ -147,9 +147,15 @@ function unpackFrame(frame) {
 // moment a frame decrypts cleanly again (i.e. "recovered").
 /** @type {((consecutiveFailures:number) => void)|null} */ let onDecryptStatus = null;
 let decryptFailures = 0;
+// Recovery is reported on the failures→success TRANSITION, so zeroing the counter would swallow it:
+// a viewer who typed the RIGHT passcode got playing video under a frozen "unlocking…" and a passcode
+// box that never went away — the success path never announced itself. This flag survives the reset
+// so the next clean frame still reports.
+let reportNextSuccess = false;
 /** Clear the failure run — call when a viewer submits a new passcode, so the next run is fresh. */
 function resetDecryptFailures() {
   decryptFailures = 0;
+  reportNextSuccess = true;
 }
 
 /** Re-arm: subsequent frames queue until the next deriveMediaKey(). Call before going live/connecting. */
@@ -246,8 +252,9 @@ async function decryptFrame(frame) {
     onDecryptStatus?.(++decryptFailures); // wrong key — the watch page turns a run of these into a passcode prompt
     throw e;
   }
-  if (decryptFailures) {
+  if (decryptFailures || reportNextSuccess) {
     decryptFailures = 0;
+    reportNextSuccess = false;
     onDecryptStatus?.(0); // recovered: the key in hand is the right one
   }
   const out = new Uint8Array(vlen + pt.byteLength);
@@ -653,17 +660,9 @@ async function assignWatch(nodeId, originEid) {
   if (!d.relay) return { error: "edge assign incomplete" };
   return { relay_url: `https://${d.relay}/`, jwt: d.jwt ?? null };
 }
-/** @param {string} nodeId */
-async function getSalt(nodeId) {
-  try {
-    const r = await fetch(`${BROKER}/pub/salt/${nodeId}`);
-    if (!r.ok) return null;
-    const d = await r.json();
-    return { global: d.global, stream: d.stream ?? null, epoch: d.epoch ?? 0 };
-  } catch {
-    return null;
-  }
-}
+// No getSalt(): viewers no longer read salts from the broker at all — the broadcaster publishes
+// them on the catalog track. Only the broadcaster still calls putSalt, once per go-live, and it is
+// the PUT response that tells it the current global salt and epoch.
 /** @param {string} nodeId @param {string} stream @param {string} secret */
 async function putSalt(nodeId, stream, secret) {
   try {
@@ -694,7 +693,8 @@ const KEYFRAME_INTERVAL_MS = 2000;
 
 /**
  * Go live: capture → encode → encrypt → publish. Returns a handle with stop().
- * @param {{relayUrl:string, broadcastName:string, stream:MediaStream, onStatus?:(m:string)=>void}} opts
+ * @param {{relayUrl:string, broadcastName:string, stream:MediaStream, onStatus?:(m:string)=>void,
+ *          salts?:{global:string,stream:string,epoch:number}}} opts
  */
 async function startBroadcast(opts) {
   const status = opts.onStatus ?? (() => {});
@@ -710,8 +710,12 @@ async function startBroadcast(opts) {
   const broadcast = new Moq.Broadcast();
   conn.publish(Moq.Path.from(opts.broadcastName), broadcast);
 
-  /** @type {{video?:object, audio?:object}} */
-  const catalog = {};
+  // The salts ride the catalog so a VIEWER never has to ask the broker for them. They are public
+  // HKDF inputs (they decrypt nothing on their own), and putting them here is strictly tighter than
+  // the endpoint they replace: reading them now requires a subscribe connection, where GET
+  // /pub/salt/<nodeId> answered anyone holding a node id.
+  /** @type {{video?:object, audio?:object, salt?:{global:string,stream:string,epoch:number}}} */
+  const catalog = { salt: opts.salts };
   let running = true;
 
   /** @typedef {{track: any, group: any}} Sink */
@@ -1019,7 +1023,8 @@ async function startBroadcast(opts) {
 
 /**
  * Watch: consume → decrypt → decode → paint/play. Returns a handle with stop().
- * @param {{relayUrl:string, broadcastName:string, canvas:HTMLCanvasElement, onStatus?:(m:string)=>void}} opts
+ * @param {{relayUrl:string, broadcastName:string, canvas:HTMLCanvasElement, onStatus?:(m:string)=>void,
+ *          onSalts?:(s:{global:string,stream:string,epoch:number})=>Promise<void>}} opts
  */
 async function startWatch(opts) {
   const status = opts.onStatus ?? (() => {});
@@ -1036,8 +1041,12 @@ async function startWatch(opts) {
   const catalogTrack = broadcast.subscribe("catalog", 1);
   status("waiting for broadcaster…");
   const catGroup = await catalogTrack.nextGroupOrdered();
-  const catalog = /** @type {{video?:any, audio?:any}} */ (await catGroup?.readJson());
+  const catalog = /** @type {{video?:any, audio?:any, salt?:any}} */ (await catGroup?.readJson());
   if (!catalog?.video) throw new Error("no catalog");
+  // Derive the content key from the salts the broadcaster just published, before any frame is
+  // handled. Decryption already waits on keyReady, so ordering here is a formality rather than a
+  // race — but doing it first keeps "no plaintext without a key" obvious.
+  if (catalog.salt) await opts.onSalts?.(catalog.salt);
 
   // Replaceable on purpose: WebCodecs CLOSES a decoder permanently on any error, and every later
   // decode() then throws "VideoDecoder is not configured" — so one bad chunk means video is dead for
@@ -1307,7 +1316,7 @@ export async function runBroadcast() {
       preview.srcObject = stream;
 
       set("connecting…");
-      bc = await startBroadcast({ relayUrl: relay, broadcastName: node.id, stream, onStatus: set });
+      bc = await startBroadcast({ relayUrl: relay, broadcastName: node.id, stream, onStatus: set, salts: salt });
 
       const link = new URL("watch.html", location.href);
       link.searchParams.set("node", node.id);
@@ -1450,28 +1459,36 @@ export async function runWatch() {
   /** @type {{global:string, stream:string, epoch:number}|null} */ let salts = null;
 
   armKey();
+
+  /**
+   * Install the content key from the salts the broadcaster published in-band. Nothing tells us up
+   * front whether this stream needs a passcode — asking would mean the broker knowing which
+   * streams are protected — so we derive without one and let the GCM tag answer.
+   * @param {{global:string, stream:string, epoch:number}} s
+   */
+  const onSalts = async (s) => {
+    if (s.epoch === currentEpoch()) return; // already holding this key
+    salts = s;
+    await deriveMediaKey({ fragmentKeyB64: fragmentKey, globalSaltB64: s.global, streamSaltB64: s.stream, streamId: node, epoch: s.epoch, pw });
+  };
+
+  // A viewer's ENTIRE conversation with the broker is this one placement request. The salts arrive
+  // on the broadcaster's catalog track, so there is no salt fetch and no rotation poll — an earlier
+  // version polled GET /pub/salt every 5s for the life of the tab, uncancelled, which handed the
+  // broker a per-viewer attendance record at 5-second resolution and outlived the broadcast itself.
+  // It was watching for an epoch change that only ever happens at go-live, before any viewer of
+  // that session has connected.
+  //
+  // Retried rather than failed, because a viewer who opens the link early is the normal case: the
+  // broker cannot place an edge for a broadcast that has not started.
   set("waiting for broadcaster…");
-  let salt = await getSalt(node);
-  for (let i = 0; i < 30 && !salt?.stream; i++) {
-    await new Promise((r) => setTimeout(r, 2000));
-    salt = await getSalt(node);
+  let edge = await assignWatch(node, originEid || "");
+  for (let i = 0; i < 20 && edge.error; i++) {
+    await new Promise((r) => setTimeout(r, 3000));
+    edge = await assignWatch(node, originEid || "");
   }
-  if (!salt?.stream) return set("stream is not live");
-  salts = salt;
-  // Nothing tells us up front whether this stream needs a passcode — asking the broker would mean
-  // the broker knowing which streams are protected. So try without one; the GCM tag answers.
-  await deriveMediaKey({ fragmentKeyB64: fragmentKey, globalSaltB64: salt.global, streamSaltB64: salt.stream, streamId: node, epoch: salt.epoch, pw });
-  const edge = await assignWatch(node, originEid || "");
-  if (edge.error) return set(`broker error: ${edge.error}`);
+  if (edge.error) return set("stream is not live");
   const relay = connectUrl(edge.relay_url, edge.jwt);
-  // Rotation: if the broadcaster resets the salt, its epoch bumps — re-derive so playback follows.
-  setInterval(async () => {
-    const s = await getSalt(node);
-    if (s?.stream && s.epoch !== currentEpoch()) {
-      salts = s;
-      await deriveMediaKey({ fragmentKeyB64: fragmentKey, globalSaltB64: s.global, streamSaltB64: s.stream, streamId: node, epoch: s.epoch, pw });
-    }
-  }, 5000);
 
   wirePasscodePrompt({
     node,
@@ -1491,7 +1508,7 @@ export async function runWatch() {
 
   set("connecting…");
   try {
-    await startWatch({ relayUrl: relay, broadcastName: node, canvas: $("video"), onStatus: set });
+    await startWatch({ relayUrl: relay, broadcastName: node, canvas: $("video"), onStatus: set, onSalts });
   } catch (e) {
     set(`watch error: ${e instanceof Error ? e.message : e}`);
   }
