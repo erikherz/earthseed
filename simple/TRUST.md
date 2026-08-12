@@ -224,4 +224,8 @@ honest limits below.
 - **Broadcast & watch:** recent Chrome/Edge, and Safari on **iOS 18+ / macOS** (needs WebTransport
   + WebCodecs). Capture avoids the Chromium-only `MediaStreamTrackProcessor` so Safari/iOS works.
 - No WebSocket/WASM fallback is shipped (keeping the review surface tiny), so very old browsers
-  are out of scope.
+  are out of scope. **WebTransport is required, not preferred.** If you read the vendored transport
+  you will find WebSocket code in it — `@moq/net` implements qmux over WebSocket and will try it
+  alongside WebTransport — but our relays do not serve WebSocket, so that attempt cannot succeed
+  and nothing falls back to it. A network that blocks UDP blocks this app; it does not silently
+  downgrade to a different transport.

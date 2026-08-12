@@ -24,11 +24,20 @@ const PAGES = ["simple/index.html", "simple/broadcast.html", "simple/watch.html"
 // Everything the client talks to at runtime. WebTransport is governed by connect-src too, so
 // the relay fleet has to be here as well as the broker.
 //
-// wss: is listed SEPARATELY and is not redundant. @moq/net falls back to a WebSocket when
-// WebTransport does not come up — the common case being a network that blocks UDP — and Chrome
-// will not match a wss: URL against an https: source expression. Omitting it enforced cleanly
-// in every run where WebTransport happened to succeed, and would have broken precisely the
-// users who depend on the fallback. Caught only by enforcing it locally first.
+// wss: is listed to keep the violation reports honest, NOT because anything depends on it.
+// @moq/net opportunistically opens a WebSocket alongside WebTransport (qmux-over-WebSocket is a
+// real transport in the library), and Chrome will not match a wss: URL against an https: source.
+// The relays do not serve WebSocket, so that attempt cannot succeed regardless: with wss omitted,
+// six of six go-lives still reached "live" — two of them after the attempt was blocked. Nothing
+// breaks either way.
+//
+// It is allowed only so a benign attempt in roughly a third of broadcasts stops filing reports at
+// /api/csp-report. An endpoint that cries wolf is one nobody reads, and that endpoint is the only
+// way breakage on an untested browser reaches us. The widening is negligible: these are the same
+// hosts already permitted over https, so wss grants no reach that https did not.
+//
+// Remove it if you would rather have the tighter policy and accept the noise — the app is
+// unaffected. Revisit if the relays ever serve WebSocket, at which point it becomes load-bearing.
 const CONNECT = [
   "'self'",
   "https://tinymoq.com",
