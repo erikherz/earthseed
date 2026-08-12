@@ -49,11 +49,16 @@
         <input id="share" type="text" readonly placeholder="viewer link appears here when you go live" />
         <button id="copy">Copy viewer link</button>
         <button id="newlink" title="Mint a fresh key so every link you have already shared stops working">New link</button>
+        <button id="newid" title="Discard this identity for a new one — old links stop working entirely, and can no longer tell when you are live">New ID</button>
       </div>
       <div class="hint">
         Your link stays the same across reloads, so anyone you have ever sent it to can watch
-        again. <strong>New link</strong> mints a fresh key — every link you shared before stops
-        working. It takes effect the next time you go live.
+        again. Both of these take effect the next time you go live.
+        <br />
+        <strong>New link</strong> mints a fresh key, so old links can no longer watch — but they
+        still name you, and whoever holds one can still tell <em>when</em> you are live.
+        <strong>New ID</strong> goes further: a new identity, so old links point at nobody and
+        reveal nothing. It cannot be undone, and everyone you still want watching needs the new link.
       </div>
       <!-- The passcode is a SECOND secret, deliberately not in the link. It never reaches any
            server: it is mixed into the content key, so a wrong one just fails to decrypt. -->

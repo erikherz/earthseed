@@ -78,12 +78,29 @@ why the watch page discovers it by trying rather than by asking.
   passcode **without changing your link and without burning your node identity**. It takes effect
   the **next time you go live**: the key is not re-derived mid-broadcast, so nobody currently
   watching is cut off. To revoke someone now: regenerate, stop, go live again.
-- **Revoking the link itself.** *New link* on the broadcast page mints a fresh `#k=` fragment key,
-  so **every link you have already shared stops working** — use it when a link has gone somewhere
-  it shouldn't. Same timing rule: it applies at your next go-live. Your node id, and so your stream
-  identity, is unchanged. Note that a revoked viewer cannot be told apart from one who is missing a
-  passcode — both simply hold the wrong key — so the watch page says the link *may* be out of date
-  **or** a passcode *may* be needed, rather than guessing.
+- **Revoking the link itself.** *New link* mints a fresh `#k=` fragment key, so **every link you
+  have already shared stops decrypting** — use it when a link has gone somewhere it shouldn't. Same
+  timing rule: it applies at your next go-live. A revoked viewer cannot be told apart from one who
+  is missing a passcode — both simply hold the wrong key — so the watch page says the link *may* be
+  out of date **or** a passcode *may* be needed, rather than guessing.
+- **Revoking your identity.** *New link* leaves your `node id` unchanged, and that is not a
+  detail: the id is in every link you ever sent, and asking to watch a broadcast requires no proof
+  of anything. So **someone holding an old link can still tell when you are live**, indefinitely,
+  even though they can no longer see or hear it. *New ID* is the answer to that — it mints a new
+  keypair, so old links name an identity that never publishes again and reveal nothing at all.
+  It cannot be undone (the private key is non-extractable and is discarded), it clears this
+  stream's fragment key, passcode and rotate secret with it, and everyone you still want watching
+  needs the new link.
+
+  | Control | Old links can watch | Old links can see you're live |
+  |---|---|---|
+  | Regenerate passcode | no | **yes** |
+  | New link | no | **yes** |
+  | New ID | no | no |
+
+  What *New ID* does not do is hide you from the broker: a new id appearing from the same address
+  at the same hour is trivially linkable by whoever assigns your relay. It breaks the link between
+  you and the people you handed links to — not between you and the infrastructure.
 - **Opt-in, and nothing else changes.** With the toggle off, derivation is byte-identical to what it
   was before the feature existed, so **no existing link breaks.**
 

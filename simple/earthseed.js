@@ -426,8 +426,26 @@ async function migrateLegacyNode() {
   return keyPair;
 }
 
-/** The broadcaster's persistent node identity, minted once and kept non-extractable. */
-async function getOrCreateNode() {
+/**
+ * The identity for this page, shared by every caller.
+ *
+ * Memoised because loadOrMintNode() is not safe to run twice concurrently: two callers that both
+ * find IndexedDB empty will each mint a keypair and each store it, and the loser's id is lost while
+ * its localStorage entries survive as orphans. That is not hypothetical — ticking "require a
+ * passcode" and pressing "Go live" in quick succession did exactly that, and because the passcode
+ * is keyed by node id, the broadcaster could be shown a passcode belonging to the identity that
+ * lost the race. Reading that one aloud would hand a viewer a code that cannot decrypt.
+ * @type {Promise<{id:string,keyPair:CryptoKeyPair,raw:Uint8Array}>|null}
+ */
+let nodePromise = null;
+
+/** The broadcaster's persistent node identity, minted at most once per page. */
+function getOrCreateNode() {
+  return (nodePromise ??= loadOrMintNode());
+}
+
+/** Load the stored identity, migrate a legacy one, or mint a fresh one. Call via getOrCreateNode. */
+async function loadOrMintNode() {
   try {
     const found = /** @type {CryptoKeyPair|undefined} */ (await idbWith("readonly", (s) => s.get(NODE_DB_KEY)));
     if (found?.privateKey) return await finalizeNode(found);
@@ -441,6 +459,45 @@ async function getOrCreateNode() {
     // identity — and so the share link — lasts only for this page.
     return finalizeNode(await mintKeyPair());
   }
+}
+
+/**
+ * Discard this identity and mint a new one.
+ *
+ * There is no rotation-in-place to offer: the node id IS the Ed25519 public key, so keeping the
+ * name while changing the key is impossible by construction. A new key is a new name is a new link.
+ *
+ * Stronger than "New link", and differently so. A fresh fragment key stops old links from
+ * DECRYPTING, but the node id inside them is unchanged — and a watch assignment needs no claim
+ * proof, so anyone still holding one can learn when this broadcaster is live for as long as the
+ * identity exists. Only a new id closes that: old links then name someone who never publishes again.
+ *
+ * Irreversible. The old private key is non-extractable and is dropped here, so nobody — including
+ * us — can recover the old identity. The old per-stream material is cleared with it, so the new
+ * identity starts on a fresh fragment key, passcode and rotate secret instead of inheriting them.
+ * @param {string|null} oldId
+ */
+async function mintNewIdentity(oldId) {
+  const keyPair = await mintKeyPair();
+  let persisted = false;
+  try {
+    await idbWith("readwrite", (s) => s.put(keyPair, NODE_DB_KEY));
+    persisted = true;
+  } catch {
+    /* no IndexedDB: the new identity is real but lasts only for this page */
+  }
+  // Only discard the old stream's material once the new identity is actually stored. If the write
+  // failed, a reload returns to the old identity, and it should find its keys intact.
+  if (persisted && oldId) {
+    try {
+      for (const k of [`es:k:${oldId}`, `es:pc:${oldId}`, `es:rs:${oldId}`]) localStorage.removeItem(k);
+    } catch {
+      /* private mode — nothing was persisted to clear */
+    }
+  }
+  const node = await finalizeNode(keyPair);
+  nodePromise = Promise.resolve(node); // everyone asking from here on gets the NEW identity
+  return node;
 }
 
 // ── passcode: an OPTIONAL second secret required for playback, deliberately NOT in the link.
@@ -1173,6 +1230,31 @@ export async function runBroadcast() {
     }
   });
 
+  const newIdBtn = $("newid");
+  newIdBtn?.addEventListener("click", async () => {
+    if (bc || !newIdBtn) return;
+    // The only control here that is both irreversible and total, so it is the only one that asks.
+    if (
+      !confirm(
+        "Mint a new ID?\n\n" +
+          "Every link you have already shared stops working — not just for watching, but for " +
+          "seeing when you go live.\n\n" +
+          "This cannot be undone. Anyone who should still have access will need the new link."
+      )
+    )
+      return;
+    newIdBtn.disabled = true;
+    try {
+      nodeId = (await mintNewIdentity(nodeId)).id;
+      $("share").value = ""; // the old link is dead in every sense; don't leave it looking valid
+      if (pcField) pcField.value = ""; // the old passcode belonged to the old identity
+      await syncPcUi(); // mints a fresh one if the toggle is on
+      set("new ID minted — go live to get your new link. Everything you shared before now is dead.");
+    } finally {
+      newIdBtn.disabled = false;
+    }
+  });
+
   regenBtn?.addEventListener("click", () => {
     // Guarded rather than live-applied: the content key is NOT re-derived mid-broadcast, so showing
     // a new passcode while the old one is still the working one would hand out a code that fails.
@@ -1189,6 +1271,7 @@ export async function runBroadcast() {
       if (pcToggle) pcToggle.disabled = false;
       if (regenBtn) regenBtn.disabled = false;
       if (newLinkBtn) newLinkBtn.disabled = false;
+      if (newIdBtn) newIdBtn.disabled = false;
       set("stopped");
       return;
     }
@@ -1236,6 +1319,7 @@ export async function runBroadcast() {
       if (pcToggle) pcToggle.disabled = true;
       if (regenBtn) regenBtn.disabled = true;
       if (newLinkBtn) newLinkBtn.disabled = true;
+      if (newIdBtn) newIdBtn.disabled = true;
     } catch (e) {
       set(`error: ${e instanceof Error ? e.message : e}`);
     } finally {
