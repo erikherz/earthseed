@@ -154,12 +154,12 @@ export default {
 
 // Baseline security headers on everything we serve as a page or script.
 //
-// This is deliberately NOT a full CSP. A real `script-src` has to account for the inline
-// <script type="importmap"> and inline module blocks in the two pages (hashes, which means a
-// build step), for the AudioWorklet built from a blob: URL, and for @moq/net being fetched
-// from esm.sh — and writing it today would mean formally whitelisting that CDN, i.e. blessing
-// the one third-party code-execution path we most want to remove. Vendor the transport first,
-// then land `script-src` as Report-Only, then enforce.
+// Still not a full CSP, but the reason has changed. The transport is now vendored, so there is
+// no third-party script origin left to whitelist and `script-src 'self'` is finally the right
+// shape. What remains: hashing the inline importmap/module blocks in the two pages, and moving
+// the blob:-URL AudioWorklet in earthseed.js to a real file. Then Report-Only, then enforce.
+// (Note these headers only reach responses the Worker actually serves — "/" — because with no
+// `run_worker_first` the asset server answers the .html/.js paths. simple/_headers covers those.)
 //
 // What is here is the subset that touches no script loading and so cannot break the app:
 // clickjacking, MIME sniffing, base-tag hijacking, plugin embedding, and referrer leakage.
@@ -202,63 +202,18 @@ async function handleApiRoutes(
       return handleSaltRoute(request, env, saltMatch[1]);
     }
 
-    // ── Watch-by-pubkey (DHT) provisioning ──────────────────────────────────
-    // The DHT (pkarr) is the DIRECTORY (pubkey→origin); these two endpoints are the only
-    // server involvement, and only to keep the fleet provisioning bearer out of the browser.
-    // They store NO broadcast list. Media stays relay-blind encrypted (browser #k= + salt).
-    const NODE_ID_RE = /^[a-z2-7]{52}$/;
-    const now = Math.floor(Date.now() / 1000);
-
-    // POST /api/publish { node_id, publisher_cdn? } → assign an origin for this broadcaster and
-    // report its iroh EndpointId, which the browser writes into its signed DHT record.
-    if (request.method === "POST" && url.pathname === "/api/publish") {
-      const body = (await request.json().catch(() => ({}))) as { node_id?: string; publisher_cdn?: string };
-      const nodeId = body.node_id ?? "";
-      if (!NODE_ID_RE.test(nodeId)) return Response.json({ error: "bad node_id" }, { status: 400 });
-      const cdn = body.publisher_cdn && isFleetHost(env, body.publisher_cdn) ? body.publisher_cdn : undefined;
-      const relay = await assignRelay(env, nodeId, cdn, undefined, env.TINYMOQ_PROVISION_KEY, undefined, undefined, request);
-      if (!relay) return Response.json({ error: "origin assign failed" }, { status: 502 });
-      const eid = await fetchOriginEndpointId(relay.host, relay.port);
-      if (!eid) return Response.json({ error: "origin endpoint id unavailable" }, { status: 502 });
-      // Publisher token scoped to the BARE nodeId — the exact moq media track this path
-      // publishes under (NOT broadcastName()'s .hang form). The fleet is token-gated, so a
-      // token-less publish is rejected; a null mint (no BYOK key) fails the publish connect closed.
-      const pubJwt = await tryMintMoqToken(env, {
-        put: [nodeId],
-        get: [nodeId],
-        exp: now + PUBLISHER_TOKEN_TTL,
-      }, relay.key);
-      return Response.json({
-        relay_url: `https://${relay.host}:${relay.port}/`,
-        origin_endpoint_id: eid,
-        broadcast: nodeId,
-        jwt: pubJwt,
-      });
-    }
-
-    // POST /api/edge { node_id, origin } → assign an edge on the viewer's nearest fleet that
-    // pulls from the origin over iroh (origin = the EndpointId the browser resolved off the DHT).
-    if (request.method === "POST" && url.pathname === "/api/edge") {
-      const body = (await request.json().catch(() => ({}))) as { node_id?: string; origin?: string };
-      const nodeId = body.node_id ?? "";
-      const origin = body.origin ?? "";
-      if (!NODE_ID_RE.test(nodeId)) return Response.json({ error: "bad node_id" }, { status: 400 });
-      if (!/^[0-9a-f]{64}$/i.test(origin)) return Response.json({ error: "bad origin endpoint id" }, { status: 400 });
-      // ONE subscribe-only token scoped to the bare nodeId: serves BOTH the browser's viewer
-      // ?jwt= AND the pull pass the broker forwards to the edge's iroh cluster-connect.
-      const token = await tryMintMoqToken(env, {
-        put: [],
-        get: [nodeId],
-        exp: now + VIEWER_TOKEN_TTL,
-      });
-      // Brokered: hand the broker the EID origin + pull token + xport and let it place the
-      // viewer (edge or origin). Direct mode assigns a local edge with the same token as the pull pass.
-      const relay = fleetMode(env) === "brokered"
-        ? await assignViaBroker(env, nodeId, request, { origin, pull: token, xport: "iroh" })
-        : await assignRelay(env, nodeId, undefined, origin, env.TINYMOQ_PROVISION_KEY, token, "iroh", request);
-      if (!relay) return Response.json({ error: "edge assign failed" }, { status: 502 });
-      return Response.json({ relay_url: `https://${relay.host}:${relay.port}/`, broadcast: nodeId, jwt: token });
-    }
+    // ── Removed: POST /api/publish and POST /api/edge ───────────────────────
+    // These were the old watch-by-pubkey (DHT) provisioning pair, and they took a bare
+    // `node_id` with no authentication at all — /api/publish handed any caller a
+    // publish-scoped (`put:[nodeId]`) relay token for any name they typed. Node ids travel
+    // in every share link, so that was a standing takeover path, and it bypassed the
+    // Ed25519 claim proof the broker now requires (`/cdn/challenge` + a signature over the
+    // challenge, see simple/earthseed.js). Deleted rather than authenticated: the shipped
+    // client goes to the broker and never called these. One path, not two.
+    //
+    // The legacy vite client in src/main.ts still references them, but it is not deployed —
+    // `wrangler.jsonc` serves ./simple, where it does not exist. If it is ever revived it
+    // must go through the broker's claim proof like simple/earthseed.js does.
 
     // Provider-specific routes
     if (url.pathname.startsWith("/api/auth/google/")) {
@@ -1051,21 +1006,6 @@ function isValidOrigin(env: Env, origin: string): boolean {
 //     - BYOK:     key is null + byok true            -> Worker signs its own EdDSA token
 // /assign is sticky; in managed mode a reap/respawn yields a new key, so do NOT cache
 // the key — sign on demand with whatever this call returned.
-// Read the origin relay's iroh EndpointId from its fleet box (watch-by-pubkey path). The box
-// serves GET https://<host>/iroh?port=<relay-port> → the 64-hex EndpointId of the relay on that
-// UDP port. Fetched Worker-side (not the browser) so it needs no CORS on the box. Returns null
-// on any failure so callers can surface a clean "unavailable" rather than a hang.
-async function fetchOriginEndpointId(host: string, port: number): Promise<string | null> {
-  try {
-    const res = await fetch(`https://${host}/iroh?port=${port}`);
-    if (!res.ok) return null;
-    const eid = (await res.text()).trim();
-    return /^[0-9a-f]{64}$/i.test(eid) ? eid : null;
-  } catch {
-    return null;
-  }
-}
-
 // Additive broker hints derived from the incoming browser request — today just the viewer's
 // Cloudflare geo. The broker routes to the geo-nearest healthy fleet, but on a Worker->Worker
 // subrequest it can't see the viewer; only WE can, from request.cf. Send geo ONLY when lat/lon
