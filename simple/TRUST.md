@@ -202,13 +202,13 @@ honest limits below.
   third-party host that could have injected such code. Neither makes the page itself safe to lose.
   This is why the browser and the host are in the trusted computing base above, and it is the real
   reason to prefer a browser profile you control.
-- **The script policy is not enforced yet.** The pages ship a strict `Content-Security-Policy`
-  that would allow only our own scripts (each inline block pinned by hash) and connections only to
-  the broker and the relay fleet — but it currently ships as **`Report-Only`**, so it reports
-  violations rather than blocking them. The enforced header is still the narrower subset that
-  cannot break playback. It is staged this way because a policy that is wrong on one browser
-  breaks broadcasting on that browser, and Safari/iOS is both the likeliest to disagree and the
-  hardest to debug in the field. Until it is enforced, treat it as an audit trail, not a defence.
+- **The script policy is enforced, and it is not a complete answer.** The pages ship a
+  `Content-Security-Policy` that permits only scripts from this origin — each inline block pinned
+  by SHA-256 — and network connections only to the broker and the relay fleet. A script injected
+  into the page is refused rather than reported. What it cannot help with is the case where the
+  *legitimate* files are the problem: if the host serves a modified `earthseed.js`, that file is
+  same-origin and the policy permits it. CSP narrows how code gets onto the page; it does not
+  verify what the code does. That is still the trust in the host described above.
 - **The broker is a required dependency, on purpose.** It can refuse to mint a token and deny you
   service — though it still can't read your content. There is deliberately no way to route around
   it. An earlier "open-relay" mode let a page skip the broker and use any public MoQ endpoint, and

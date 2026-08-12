@@ -14,15 +14,19 @@
 #
 # and run it without --write to check for drift before deploying.
 #
-# The strict policy currently ships as Report-Only while the enforced header stays on the
-# subset that cannot break anything. Chrome is verified clean; Safari/iOS is the reason for
-# the caution, since it is the browser most likely to disagree about import maps and worklets
-# and the one hardest to debug in the field. Violations POST to /api/csp-report; watch them
-# with `npx wrangler tail`. Flip ENFORCE in scripts/csp-hashes.mjs once real devices are quiet.
+# ENFORCED since 12 Aug 2026 (it shipped Report-Only first). Verified clean on Chromium and on
+# WebKit 18.2 — the Safari 18 engine — because the risk was never Chrome: it was Safari
+# disagreeing about hashed inline import maps or the worklet, which would break broadcasting on
+# iOS with no console to look at. Both were checked directly: inline blocks execute under their
+# hashes, and the worklet loads from a real file.
+#
+# `report-uri` is deliberately kept on the ENFORCED policy, so anything blocked on a browser we
+# could not test still announces itself: `npx wrangler tail` shows /api/csp-report hits.
+# Rollback is ENFORCE=false in scripts/csp-hashes.mjs + --write + deploy, which returns to
+# reporting without blocking.
 /*
   # BEGIN generated policy
-  Content-Security-Policy: frame-ancestors 'none'; base-uri 'none'; object-src 'none'
-  Content-Security-Policy-Report-Only: script-src 'self' 'sha256-7fFJleZc815CALN3PfPMsYa6Qz0a0rce/C4FxOk3/zU=' 'sha256-JCWAMn2pbmcJ89ksB/yW3efkkVZYIE7LtjDSTPgDF20=' 'sha256-sTYgfQK0g22fa73j8zdiZu5nPo2iXzr+QXxAF+ctaBs='; connect-src 'self' https://tinymoq.com https://*.moqcdn.net:*; frame-ancestors 'none'; base-uri 'none'; object-src 'none'; report-uri /api/csp-report
+  Content-Security-Policy: script-src 'self' 'sha256-7fFJleZc815CALN3PfPMsYa6Qz0a0rce/C4FxOk3/zU=' 'sha256-JCWAMn2pbmcJ89ksB/yW3efkkVZYIE7LtjDSTPgDF20=' 'sha256-sTYgfQK0g22fa73j8zdiZu5nPo2iXzr+QXxAF+ctaBs='; connect-src 'self' https://tinymoq.com https://*.moqcdn.net:* wss://*.moqcdn.net:*; frame-ancestors 'none'; base-uri 'none'; object-src 'none'; report-uri /api/csp-report
   # END generated policy
   X-Content-Type-Options: nosniff
   Referrer-Policy: no-referrer

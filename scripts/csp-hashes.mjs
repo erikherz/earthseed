@@ -23,7 +23,18 @@ const PAGES = ["simple/index.html", "simple/broadcast.html", "simple/watch.html"
 
 // Everything the client talks to at runtime. WebTransport is governed by connect-src too, so
 // the relay fleet has to be here as well as the broker.
-const CONNECT = ["'self'", "https://tinymoq.com", "https://*.moqcdn.net:*"];
+//
+// wss: is listed SEPARATELY and is not redundant. @moq/net falls back to a WebSocket when
+// WebTransport does not come up — the common case being a network that blocks UDP — and Chrome
+// will not match a wss: URL against an https: source expression. Omitting it enforced cleanly
+// in every run where WebTransport happened to succeed, and would have broken precisely the
+// users who depend on the fallback. Caught only by enforcing it locally first.
+const CONNECT = [
+  "'self'",
+  "https://tinymoq.com",
+  "https://*.moqcdn.net:*",
+  "wss://*.moqcdn.net:*",
+];
 
 const sha256 = (s) => "'sha256-" + createHash("sha256").update(s, "utf8").digest("base64") + "'";
 
@@ -39,11 +50,16 @@ for (const rel of PAGES) {
   }
 }
 
-// Flip to true once the full policy has been observed clean on real Safari/iOS as well as
-// Chrome. Until then the strict policy ships as Report-Only, so a directive we got wrong shows
-// up as a report instead of a broken broadcast, and only the long-standing safe subset is
-// enforced. This is the single switch: nothing else changes.
-const ENFORCE = false;
+// ENFORCED since 12 Aug 2026. Held at Report-Only until the policy had been observed clean on
+// WebKit as well as Chromium, because the risk was never Chrome — it was Safari disagreeing
+// about hashed inline import maps or the worklet, which would have broken broadcasting on iOS
+// with no console to look at. Verified on WebKit 18.2 (the Safari 18 engine): inline blocks
+// execute under their hashes, the worklet loads from a real file, no violations.
+//
+// Set back to false to return to reporting-without-blocking; that is the rollback if a browser
+// we could not test turns out to disagree. `report-uri` stays on the enforced policy, so
+// breakage still announces itself at /api/csp-report rather than only failing silently.
+const ENFORCE = true;
 
 // The subset that touches no script loading or connections, enforced since 11 Aug 2026.
 const BASELINE = ["frame-ancestors 'none'", "base-uri 'none'", "object-src 'none'"];

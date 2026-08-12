@@ -62,9 +62,10 @@ node scripts/csp-hashes.mjs --write   # regenerate
 node scripts/csp-hashes.mjs           # check; non-zero exit if _headers has drifted
 ```
 
-The strict policy currently ships as `Content-Security-Policy-Report-Only` while the enforced
-header stays on the subset that can't break anything; violations POST to `/api/csp-report`. Flip
-`ENFORCE` in that script once real devices are quiet.
+The policy is **enforced** as of 12 Aug 2026 — a bad hash now blocks the script rather than merely
+reporting it, which is why the drift check matters. `report-uri` is kept on the enforced policy, so
+anything blocked still shows up at `/api/csp-report` (`npx wrangler tail`). To roll back, set
+`ENFORCE = false` in that script, re-run with `--write`, and deploy.
 
 There used to be an "open-relay" mode that skipped the broker and used any public MoQ endpoint.
 It was removed: with no broker there is nothing to authorize a publisher, so anyone could publish
