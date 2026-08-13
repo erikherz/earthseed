@@ -1,36 +1,139 @@
 /* Default look for broadcast.html and watch.html.
  *
  * This file belongs to the project: it changes when the client changes, and re-downloading a
- * release overwrites it. If you are hosting your own copy and want a different look, put your
- * rules in custom.css instead — it loads after this file, ships empty, and is never modified
- * upstream, so updating your copy will not undo your work.
+ * release overwrites it. Do not edit it to restyle your own copy — put your rules in custom.css,
+ * which loads after this file, ships empty, and is never modified upstream.
  *
- * Both pages share almost everything; the handful of rules that differ are scoped by the body
+ * Everything visual is expressed as a custom property on :root below, and the rules underneath
+ * only ever read those properties. That is deliberate: it means a self-hoster can retheme the
+ * whole client by redefining a dozen variables in custom.css, without having to out-specify any
+ * selector or copy rules out of this file. If you add a rule here, take its colours and sizes
+ * from a variable rather than hard-coding them, or you quietly remove that ability.
+ *
+ * Both pages share almost everything; the few rules that genuinely differ are scoped by the body
  * class (.page-broadcast / .page-watch). */
 
-body { margin: 0; background: #fff; color: #000; font-family: system-ui, -apple-system, Arial, sans-serif; }
-.wrap { max-width: 720px; margin: 0 auto; padding: 24px 16px; }
-h1 { font-size: 1.3rem; font-weight: 700; margin: 0 0 16px; }
+:root {
+  /* ── Colour ─────────────────────────────────────────────────────────────── */
+  --es-bg: #fff;                 /* page background */
+  --es-fg: #000;                 /* main text */
+  --es-muted: #444;              /* status line */
+  --es-hint: #777;               /* explanatory small print */
+  --es-link: #555;               /* the "← earthseed" link */
+  --es-link-hover: #000;
+  /* Text inputs. These match what a browser draws by default, and are set explicitly so a dark
+     theme can reach them — otherwise the fields stay white however the rest is themed. */
+  --es-field-bg: #fff;
+  --es-field-fg: #000;
+  --es-field-border: #999;
+  --es-media-bg: #000;           /* behind the video/canvas, seen while letterboxed */
+  --es-media-border: #ccc;
+
+  /* Buttons. --es-button-border doubles as the accent colour; setting just this one and
+     --es-button-bg is usually enough to make the client look like somewhere else. */
+  --es-button-bg: #fff;
+  --es-button-fg: #000;
+  --es-button-border: #000;
+  --es-button-disabled-opacity: 0.4;
+
+  /* ── Type ───────────────────────────────────────────────────────────────── */
+  --es-font: system-ui, -apple-system, Arial, sans-serif;
+  --es-font-mono: ui-monospace, monospace;   /* the passcode */
+  --es-font-size-h1: 1.3rem;
+  --es-font-size-small: 0.85rem;             /* hints and the home link */
+  --es-font-size-status: 0.9rem;
+
+  /* ── Layout ─────────────────────────────────────────────────────────────── */
+  --es-content-width: 720px;     /* column width */
+  --es-page-padding: 24px 16px;
+  --es-row-gap: 8px;             /* between controls on a row */
+  --es-control-padding: 9px 10px;
+  --es-button-padding: 9px 16px;
+  --es-radius: 0;                /* corner rounding on inputs, buttons and media */
+  --es-media-max-height: 72vh;
+}
+
+body {
+  margin: 0;
+  background: var(--es-bg);
+  color: var(--es-fg);
+  font-family: var(--es-font);
+}
+
+.wrap {
+  max-width: var(--es-content-width);
+  margin: 0 auto;
+  padding: var(--es-page-padding);
+}
+
+h1 { font-size: var(--es-font-size-h1); font-weight: 700; margin: 0 0 16px; }
 
 /* The broadcaster previews a live <video>; the viewer paints decoded frames into a <canvas>. */
-video, canvas { display: block; margin: 0 auto; max-width: 100%; max-height: 72vh; background: #000; border: 1px solid #ccc; }
+video,
+canvas {
+  display: block;
+  margin: 0 auto;
+  max-width: 100%;
+  max-height: var(--es-media-max-height);
+  background: var(--es-media-bg);
+  border: 1px solid var(--es-media-border);
+  border-radius: var(--es-radius);
+}
 video { min-height: 240px; }
 
-.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 12px 0; }
-input { flex: 1; min-width: 180px; padding: 9px 10px; border: 1px solid #999; font: inherit; }
-button { padding: 9px 16px; border: 1px solid #000; background: #fff; color: #000; font: inherit; cursor: pointer; }
-button:disabled { opacity: 0.4; cursor: not-allowed; }
+.row { display: flex; gap: var(--es-row-gap); flex-wrap: wrap; align-items: center; margin: 12px 0; }
+
+input {
+  flex: 1;
+  min-width: 180px;
+  padding: var(--es-control-padding);
+  border: 1px solid var(--es-field-border);
+  border-radius: var(--es-radius);
+  font: inherit;
+}
+
+/* Fill and text colour go to text fields only. Applying them to `input` as a whole also repaints
+   the "require a passcode" checkbox, which the browser draws itself and which is transparent by
+   default — it turns into a white square. */
+input:not([type="checkbox"]) {
+  background: var(--es-field-bg);
+  color: var(--es-field-fg);
+}
+
+button {
+  padding: var(--es-button-padding);
+  border: 1px solid var(--es-button-border);
+  border-radius: var(--es-radius);
+  background: var(--es-button-bg);
+  color: var(--es-button-fg);
+  font: inherit;
+  cursor: pointer;
+}
+button:disabled { opacity: var(--es-button-disabled-opacity); cursor: not-allowed; }
 
 label.check { display: flex; align-items: center; gap: 7px; cursor: pointer; font-size: 0.95rem; }
 input[type="checkbox"] { flex: 0 0 auto; min-width: 0; margin: 0; }
-#passcode { font-family: ui-monospace, monospace; font-size: 1.05rem; letter-spacing: 0.06em; }
 
-.home { display: inline-block; margin-bottom: 12px; color: #555; font-size: 0.85rem; text-decoration: none; }
-.home:hover { color: #000; }
+#passcode {
+  font-family: var(--es-font-mono);
+  font-size: 1.05rem;
+  letter-spacing: 0.06em;
+}
 
-#status { color: #444; font-size: 0.9rem; margin-top: 4px; }
+.home {
+  display: inline-block;
+  margin-bottom: 12px;
+  color: var(--es-link);
+  font-size: var(--es-font-size-small);
+  text-decoration: none;
+}
+.home:hover { color: var(--es-link-hover); }
+
+/* The status line is how a broadcaster knows the stream is actually live, and the hints are where
+   the passcode guidance lives. Restyle them, but keep them legible. */
+#status { color: var(--es-muted); font-size: var(--es-font-size-status); margin-top: 4px; }
 .page-watch #status { margin-top: 8px; }
 
-.hint { color: #777; font-size: 0.85rem; }
+.hint { color: var(--es-hint); font-size: var(--es-font-size-small); }
 .page-broadcast .hint { margin: -6px 0 4px; }
 .page-watch .hint { margin-top: 4px; }

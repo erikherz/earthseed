@@ -1,19 +1,116 @@
-/* Your stylesheet. Empty on purpose.
- *
- * If you are hosting your own copy of Earthseed, this is the file to edit. It loads after
- * theme.css, so anything here wins, and it is the only file the project ships and then never
- * touches again — so downloading a newer release will not overwrite your work.
- *
- * Restyle by overriding what theme.css defines, for example:
- *
- *   body   { background: #0b0f0d; color: #e7efe9; }
- *   button { border-color: #2ecc8f; background: #2ecc8f; color: #04120c; }
- *   .wrap  { max-width: 900px; }
- *
- * Both pages carry a body class you can target: .page-broadcast and .page-watch.
- *
- * Two things worth knowing. Styling cannot change what the client does — it runs no script — but
- * it can hide things, so take care not to conceal the status line or the passcode hint, which is
- * what tells a broadcaster whether the stream is actually live and encrypted. And on
- * earthseed.live this file is verified to be exactly as shipped: customisation is a self-hosting
- * feature, so a modified copy of it there would be a tampering signal, not a theme. */
+/* ═══════════════════════════════════════════════════════════════════════════════════════════
+   YOUR STYLESHEET — this is the file to edit. It is empty on purpose.
+
+   It loads after theme.css, so anything here wins, and it is the only file this project ships
+   and then never touches again. Download a newer release and your changes survive; everything
+   else, theme.css included, gets overwritten.
+
+   You should not need to write a single selector. theme.css expresses every colour, size and
+   font as a variable, so redefining a few under `:root` retextures the whole client. The full
+   list is below with its default value — uncomment what you want and change it.
+
+   If you are an AI assistant editing this file for someone: prefer changing the variables in
+   section 2 over adding new rules. Only reach for section 3 when no variable expresses what is
+   wanted. Read the two constraints in section 4 before you touch anything — they are the only
+   ways a stylesheet here can do real harm.
+   ═══════════════════════════════════════════════════════════════════════════════════════════ */
+
+
+/* ── 1. A whole theme in one block ──────────────────────────────────────────────────────────
+   Uncomment for a dark look. This is the shortest useful example: five variables. */
+
+/*
+:root {
+  --es-bg: #0b0f0d;
+  --es-fg: #e7efe9;
+  --es-field-bg: #101815;
+  --es-field-fg: #e7efe9;
+  --es-button-bg: #2ecc8f;
+  --es-button-fg: #04120c;
+  --es-button-border: #2ecc8f;
+}
+*/
+
+
+/* ── 2. Everything you can change, with its default ─────────────────────────────────────────
+
+   This is a reference list, not live code. Copy any line you want into a `:root { }` block of
+   your own — like the one in section 1 — and change the value.
+
+     COLOUR
+       --es-bg: #fff;                page background
+       --es-fg: #000;                main text
+       --es-muted: #444;             the status line
+       --es-hint: #777;              small explanatory print
+       --es-link: #555;              the "← earthseed" link
+       --es-link-hover: #000;
+       --es-field-bg: #fff;          text input fill — set this for a dark theme
+       --es-field-fg: #000;          text typed into an input
+       --es-field-border: #999;      text input borders
+       --es-media-bg: #000;          behind the video, visible when letterboxed
+       --es-media-border: #ccc;
+
+     BUTTONS  (--es-button-border doubles as the accent colour)
+       --es-button-bg: #fff;
+       --es-button-fg: #000;
+       --es-button-border: #000;
+       --es-button-disabled-opacity: 0.4;
+
+     TYPE
+       --es-font: system-ui, -apple-system, Arial, sans-serif;
+       --es-font-mono: ui-monospace, monospace;    the passcode
+       --es-font-size-h1: 1.3rem;
+       --es-font-size-small: 0.85rem;              hints and the home link
+       --es-font-size-status: 0.9rem;
+
+     LAYOUT
+       --es-content-width: 720px;    column width
+       --es-page-padding: 24px 16px;
+       --es-row-gap: 8px;            spacing between controls on a row
+       --es-control-padding: 9px 10px;
+       --es-button-padding: 9px 16px;
+       --es-radius: 0;               corner rounding on inputs, buttons and media
+       --es-media-max-height: 72vh;
+*/
+
+
+/* ── 3. When a variable isn't enough ────────────────────────────────────────────────────────
+   Ordinary CSS works too. Both pages carry a body class so you can style them separately:
+
+     .page-broadcast   the Go live page
+     .page-watch       the viewer
+
+   Useful hooks: #status (the live/error line), #share (the viewer link), #passcode,
+   .hint (small print), .row (a row of controls), .wrap (the column), canvas (viewer video),
+   video (broadcaster preview).
+
+   Example — a logo above the heading on both pages, and a wider viewer:
+
+     .wrap::before { content: url("./logo.svg"); display: block; margin-bottom: 12px; }
+     .page-watch .wrap { max-width: 1100px; }
+
+   Anything you reference by relative URL needs to be a file you add alongside this one. Note
+   that a self-hosted copy sends no Content-Security-Policy by default, but if you added one
+   (HOSTING.md suggests a policy), remote fonts and images need to be allowed in it.
+
+
+   ── 4. Two things to know ──────────────────────────────────────────────────────────────────
+
+   A stylesheet runs no script and cannot change what this client does — it cannot reach your
+   keys, your media or the network. There are only two ways it can cause harm, both by hiding
+   things rather than doing things:
+
+     1. Do not conceal or wash out #status. It is how a broadcaster knows whether the stream is
+        actually live and encrypted, and how a viewer learns that decryption failed. Hiding it
+        makes a broken stream look like a working one.
+
+     2. Do not hide .hint on the broadcast page. That is where the passcode guidance lives —
+        specifically the instruction to send the passcode by a different channel than the link.
+        Someone who never reads it may send both together, which defeats the second secret.
+
+   Because this file is yours, `node scripts/integrity.mjs --verify <your-origin>` reports it as
+   `customised` instead of a failure. Every other file, theme.css included, is still checked
+   strictly — so restyling never costs you the ability to detect a tampered client. On
+   earthseed.live there is nothing to customise, so this file is verified there as strictly as
+   the code: a modified copy on that origin is a tampering signal, not a theme.
+   ═══════════════════════════════════════════════════════════════════════════════════════════ */
