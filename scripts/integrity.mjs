@@ -28,22 +28,13 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
+import { FILES, urlFor } from "./client-files.mjs";
+
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = join(ROOT, "INTEGRITY.md");
 const ORIGIN = "https://earthseed.live";
 
-// Every file a browser executes or renders. Order is stable so the file diffs cleanly.
-const FILES = [
-  "simple/index.html",
-  "simple/broadcast.html",
-  "simple/watch.html",
-  "simple/earthseed.js",
-  "simple/audio-capture-worklet.js",
-  "simple/vendor/moq-net-0.1.5.mjs",
-];
-
 const sha256 = (buf) => createHash("sha256").update(buf).digest("hex");
-const urlFor = (rel) => rel.replace(/^simple/, "");
 
 function render() {
   const rows = FILES.map((rel) => `| \`${urlFor(rel)}\` | \`${sha256(readFileSync(join(ROOT, rel)))}\` |`);

@@ -8,6 +8,7 @@
     "check": "node scripts/csp-hashes.mjs && node scripts/integrity.mjs --check",
     "csp": "node scripts/csp-hashes.mjs --write",
     "integrity": "node scripts/integrity.mjs --write",
+    "bundle": "npm run check && node scripts/bundle.mjs",
     "verify": "node scripts/integrity.mjs --verify",
     "keygen": "node scripts/moq-keygen.mjs",
     "cf-typegen": "wrangler types"
