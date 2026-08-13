@@ -91,9 +91,9 @@ The design makes every party in the middle either content-blind or removable.
 | **Someone with the link** | your video &amp; audio — the link carries `#k=`, so anyone with it can watch (share it carefully) | can't publish as you or rotate your key |
 | **Someone without the link** | at most encrypted, unreadable frames — plus the cleartext catalog (codec/resolution) and traffic size/timing | your video, audio, or key — nothing decryptable |
 
-## Small enough to read
+## What runs in your browser
 
-Each page loads exactly two pieces of JavaScript, on purpose:
+Our client is one file. The transport is a library we didn't write and didn't change.
 
 - **Our whole client** — [`simple/earthseed.js`](simple/earthseed.js): one unminified, documented ES
   module that runs in the browser **as-is (no build step)**. It does capture, encode, **encrypt**,
