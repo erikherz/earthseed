@@ -28,8 +28,10 @@ the answer for anyone who cannot accept that; the client is static and the repos
 | File | SHA-256 |
 |---|---|
 | `/index.html` | `769874665e3db5c69d651de922b88371515b64ed288b89b8e1ceef1c71ef9dba` |
-| `/broadcast.html` | `dae09c8215e53d9f1ca858123110d379f03c804d53aa9e42575273046888242b` |
-| `/watch.html` | `87bbff7e39c77af68717d610a21810e9bb3dd343ab3d98665dca7ac8409db456` |
+| `/broadcast.html` | `7c38e729a1f5077ec7c5bd93db0a855b99e6ebb2c4e048ce93255b6f100307f9` |
+| `/watch.html` | `e3ce5f193a668c05e5e13604f119fd16885a1f076e9f9a91663586258d56bf1b` |
+| `/theme.css` | `99727026a8fe5a1925fb630e32f94cba207a1f82ed5fdfd0f47a56ef72b519ea` |
+| `/custom.css` | `3cab0a1101ea2dcc4eaea4d857766d5d399c622ac0b628f233861a7c8f2c19d7` |
 | `/earthseed.js` | `2416e9ab0344d3e45cc579cbdc901a273b33fab4814dbef9594456c268dc4d7a` |
 | `/audio-capture-worklet.js` | `07ab2a238f16a842bb04d31cd54e015991f9c23493763df3fe6f32ca6372c50b` |
 | `/vendor/moq-net-0.1.5.mjs` | `d38b3f603d6b8491184a56115ebbb76ebe4c374e3abec5431686c3aa427dd5ff` |

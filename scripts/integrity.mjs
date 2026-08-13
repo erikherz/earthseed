@@ -28,7 +28,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-import { FILES, urlFor } from "./client-files.mjs";
+import { FILES, CUSTOMIZABLE, urlFor } from "./client-files.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = join(ROOT, "INTEGRITY.md");
@@ -74,7 +74,13 @@ _Regenerate with \`npm run integrity\`; \`npm run check\` fails if this file is 
 }
 
 async function verify(origin) {
+  // Styling is a self-hosting feature: earthseed.live offers none, so against the canonical origin
+  // every file including custom.css must match exactly. Against any other origin a differing
+  // custom.css is the expected result of someone restyling their own copy, and calling that FAIL
+  // would train self-hosters to ignore the one check they have.
+  const canonical = origin.replace(/\/+$/, "") === ORIGIN;
   let bad = 0;
+  let customised = 0;
   for (const rel of FILES) {
     const want = sha256(readFileSync(join(ROOT, rel)));
     const url = origin + urlFor(rel);
@@ -85,12 +91,23 @@ async function verify(origin) {
     } catch (e) {
       got = "fetch failed: " + e.message;
     }
-    const ok = got === want;
-    if (!ok) bad++;
-    console.log(`${ok ? "ok  " : "FAIL"}  ${urlFor(rel)}`);
-    if (!ok) console.log(`        published ${want}\n        served    ${got}`);
+    const matches = got === want;
+    // Only a reachable, genuinely different file counts as customisation; an unreachable or
+    // errored one is still a failure, or a self-host could hide a missing file behind this.
+    const reachable = /^[0-9a-f]{64}$/.test(got);
+    const tolerated = !matches && reachable && !canonical && CUSTOMIZABLE.has(rel);
+    if (tolerated) customised++;
+    else if (!matches) bad++;
+    console.log(`${matches ? "ok  " : tolerated ? "cust" : "FAIL"}  ${urlFor(rel)}${tolerated ? "   (customised — yours to edit)" : ""}`);
+    if (!matches && !tolerated) console.log(`        published ${want}\n        served    ${got}`);
   }
-  console.log(bad ? `\n${bad} of ${FILES.length} differ from INTEGRITY.md` : `\nall ${FILES.length} match INTEGRITY.md`);
+  const note = customised ? `, ${customised} customised` : "";
+  console.log(
+    bad
+      ? `\n${bad} of ${FILES.length} differ from INTEGRITY.md${note}`
+      : `\nall ${FILES.length} match INTEGRITY.md${note}`
+  );
+  if (customised && !bad) console.log(`Customised files are expected on a self-host; every file that carries code matched.`);
   return bad === 0;
 }
 

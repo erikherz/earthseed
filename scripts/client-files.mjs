@@ -10,10 +10,19 @@ export const FILES = [
   "simple/index.html",
   "simple/broadcast.html",
   "simple/watch.html",
+  "simple/theme.css",
+  "simple/custom.css",
   "simple/earthseed.js",
   "simple/audio-capture-worklet.js",
   "simple/vendor/moq-net-0.1.5.mjs",
 ];
+
+// custom.css is the one file a self-hoster is invited to change, so it is the one file whose
+// hash is expected to differ on someone else's deployment. It is still listed above, and still
+// verified strictly against earthseed.live: this site offers no styling of its own, so a
+// custom.css there that differs from the shipped bytes is a tampering signal rather than a theme.
+// On any other origin, `--verify` reports a difference here as customisation instead of failure.
+export const CUSTOMIZABLE = new Set(["simple/custom.css"]);
 
 /** The path a browser requests, i.e. with the simple/ prefix stripped. */
 export const urlFor = (rel) => rel.replace(/^simple/, "");

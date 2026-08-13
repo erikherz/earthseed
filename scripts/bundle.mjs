@@ -87,6 +87,26 @@ Or, from a checkout of the repository, point the verifier at your own host:
 Your viewers can run that too. It is worth telling them so: when you self-host, they load the
 watch page from *you*, and this is how they check you are serving the published client.
 
+## Make it yours
+
+Edit **\`custom.css\`**. It ships empty, loads after \`theme.css\` so your rules win, and is the one
+file this project will never change — so downloading a newer release will not undo your work.
+Everything else, \`theme.css\` included, is overwritten on update.
+
+    body   { background: #0b0f0d; color: #e7efe9; }
+    button { border-color: #2ecc8f; background: #2ecc8f; color: #04120c; }
+    .wrap  { max-width: 900px; }
+
+Both pages carry a body class to target: \`.page-broadcast\` and \`.page-watch\`.
+
+Styling cannot change what the client does — a stylesheet runs no script — but it can hide things.
+Take care not to conceal the status line or the passcode hint: those are what tell a broadcaster
+whether the stream is actually live and encrypted.
+
+Because \`custom.css\` is yours, the verifier below expects it to differ and reports it as
+\`customised\` rather than a failure. Every other file, including \`theme.css\`, is still checked
+strictly — so restyling never costs you the ability to detect a tampered client.
+
 ## Security headers
 
 earthseed.live sets a Content-Security-Policy that your server will not set for you. The client

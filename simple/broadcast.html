@@ -19,25 +19,12 @@
     <script type="importmap">
       { "imports": { "@moq/net": "./vendor/moq-net-0.1.5.mjs" } }
     </script>
-    <style>
-      body { margin: 0; background: #fff; color: #000; font-family: system-ui, -apple-system, Arial, sans-serif; }
-      .wrap { max-width: 720px; margin: 0 auto; padding: 24px 16px; }
-      h1 { font-size: 1.3rem; font-weight: 700; margin: 0 0 16px; }
-      video { display: block; margin: 0 auto; max-width: 100%; max-height: 72vh; min-height: 240px; background: #000; border: 1px solid #ccc; }
-      .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 12px 0; }
-      input { flex: 1; min-width: 180px; padding: 9px 10px; border: 1px solid #999; font: inherit; }
-      button { padding: 9px 16px; border: 1px solid #000; background: #fff; color: #000; font: inherit; cursor: pointer; }
-      button:disabled { opacity: 0.4; cursor: not-allowed; }
-      #status { color: #444; font-size: 0.9rem; margin-top: 4px; }
-      .home { display: inline-block; margin-bottom: 12px; color: #555; font-size: 0.85rem; text-decoration: none; }
-      .home:hover { color: #000; }
-      .hint { color: #777; font-size: 0.85rem; margin: -6px 0 4px; }
-      label.check { display: flex; align-items: center; gap: 7px; cursor: pointer; font-size: 0.95rem; }
-      input[type="checkbox"] { flex: 0 0 auto; min-width: 0; margin: 0; }
-      #passcode { font-family: ui-monospace, monospace; font-size: 1.05rem; letter-spacing: 0.06em; }
-    </style>
+    <!-- theme.css is the project default; custom.css ships empty and is yours to edit
+         if you self-host. It loads last, so your rules win. -->
+    <link rel="stylesheet" href="./theme.css" />
+    <link rel="stylesheet" href="./custom.css" />
   </head>
-  <body>
+  <body class="page-broadcast">
     <div class="wrap">
       <a class="home" href="/">← earthseed</a>
       <h1>Broadcast</h1>

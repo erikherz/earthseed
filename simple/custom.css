@@ -1,0 +1,19 @@
+/* Your stylesheet. Empty on purpose.
+ *
+ * If you are hosting your own copy of Earthseed, this is the file to edit. It loads after
+ * theme.css, so anything here wins, and it is the only file the project ships and then never
+ * touches again — so downloading a newer release will not overwrite your work.
+ *
+ * Restyle by overriding what theme.css defines, for example:
+ *
+ *   body   { background: #0b0f0d; color: #e7efe9; }
+ *   button { border-color: #2ecc8f; background: #2ecc8f; color: #04120c; }
+ *   .wrap  { max-width: 900px; }
+ *
+ * Both pages carry a body class you can target: .page-broadcast and .page-watch.
+ *
+ * Two things worth knowing. Styling cannot change what the client does — it runs no script — but
+ * it can hide things, so take care not to conceal the status line or the passcode hint, which is
+ * what tells a broadcaster whether the stream is actually live and encrypted. And on
+ * earthseed.live this file is verified to be exactly as shipped: customisation is a self-hosting
+ * feature, so a modified copy of it there would be a tampering signal, not a theme. */
