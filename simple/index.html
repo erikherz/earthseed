@@ -334,29 +334,12 @@
       </div>
 
       <div class="feature" style="margin-top: 14px;">
-        <h3>Or don't trust us to serve it at all</h3>
+        <h3>Host your own client code</h3>
         <p>
-          Everything above is about who serves the code. You can take us out of that question
-          entirely:
-          <a href="https://github.com/erikherz/earthseed/releases/latest" target="_blank" rel="noopener">download a copy</a>
-          and host it on your own domain. It's the same six files this site serves, with no build
-          step and nothing to install — unzip it into any directory your web server offers over
-          HTTPS and it works. From then on it talks to the relays directly and never contacts this
-          site again.
-        </p>
-        <p style="margin-top: 10px;">
-          Two honest caveats. <b>The relay fleet still places your broadcast</b>, so it learns which
-          broadcast went live and when — hosting the files yourself doesn't change that, and nothing
-          in this design hides it. And <b>your copy stops updating</b>: it won't pick up security
-          fixes on its own, so re-download when the repository moves. A copy that has drifted behind
-          is the likeliest way this ends up being the weak part.
-        </p>
-        <p style="margin-top: 10px;">
-          <code>HOSTING.md</code> in the download covers both, along with the one command that
-          checks what you're running against
-          <a href="https://github.com/erikherz/earthseed/blob/main/INTEGRITY.md" target="_blank" rel="noopener">the published hashes</a> —
-          worth passing to your viewers too, since when you host it they're trusting your server
-          rather than ours.
+          Six files, no build step.
+          <a href="https://github.com/erikherz/earthseed/releases/latest" target="_blank" rel="noopener">Download a copy</a>
+          and serve it from your own domain. <code>HOSTING.md</code> covers verifying it, and what
+          it doesn't change.
         </p>
       </div>
     </section>

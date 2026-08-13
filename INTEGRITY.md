@@ -27,7 +27,7 @@ the answer for anyone who cannot accept that; the client is static and the repos
 
 | File | SHA-256 |
 |---|---|
-| `/index.html` | `49a86babc4fc1edcfe89a67c9e9f8125f614093bc2ab706bb296c434385e4e23` |
+| `/index.html` | `769874665e3db5c69d651de922b88371515b64ed288b89b8e1ceef1c71ef9dba` |
 | `/broadcast.html` | `dae09c8215e53d9f1ca858123110d379f03c804d53aa9e42575273046888242b` |
 | `/watch.html` | `87bbff7e39c77af68717d610a21810e9bb3dd343ab3d98665dca7ac8409db456` |
 | `/earthseed.js` | `2416e9ab0344d3e45cc579cbdc901a273b33fab4814dbef9594456c268dc4d7a` |
