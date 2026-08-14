@@ -41,7 +41,7 @@ flowchart TB
   O["📡 Origin relay<br/>encrypted — can't decode"]
   E["📡 Edge relay<br/>encrypted — can't decode"]
 
-  BC -. "④ assign publish (pk_) · PUT salt<br/>← origin EID + publish JWT" .-> BR
+  BC -. "④ assign publish (publish key) · PUT salt<br/>← origin EID + publish JWT" .-> BR
   BR -. "⑧⑨ get salt · assign watch<br/>← edge relay + subscribe JWT" .-> VW
   BC == "③ share link: node + origin + #35;k=" ==> VW
   BC == "⑥ WebTransport ?jwt · encrypted video" ==> O
@@ -72,7 +72,8 @@ Everything in the path is one of these. Only one of them is a secret.
 
 | Value | Secret? | What it is |
 |---|---|---|
-| `pk_…` | No | **Publishable key.** Identifies a tenant for quota/limits; can mint relay tokens but **can't decrypt**. Ships in the page. |
+| `publish key` | Sort of | **Admits you to broadcast.** A capability carrying its own expiry under a MAC only our Worker can produce. Never stored, so it links you to nothing. **Can't decrypt.** |
+| `route tag` | No | **Proof you hold the link.** `HKDF(#k=)` under a different salt *and* a different info string than the content key, so it is cryptographically independent of it. A viewer presents it to be placed. **Decrypts nothing.** |
 | `node id` | No | An **Ed25519 public key** (base32). The stream's identity and the relay track name. |
 | `origin EID` | No | Which relay holds the origin, so a viewer's edge knows where to pull from. Routing only. |
 | `salts` + `epoch` | No | Public **HKDF inputs** (a global kill-switch salt ‖ a per-stream salt). Rotating one re-keys the stream. |
@@ -86,7 +87,8 @@ The design makes every party in the middle either content-blind or removable.
 
 | Party | Can see | Never sees |
 |---|---|---|
-| **Broker** (tinymoq.com) | node id, tenant `pk_`, public salts, coarse geo; mints tokens | your `#k=`, the key `CK`, your video &amp; audio |
+| **Broker** (tinymoq.com) | node id, public salts, coarse geo; places you and mints the relay token | your `#k=`, the key `CK`, your video &amp; audio |
+| **Our Worker** | that a broadcast started and ended, its name, its route tag | your `#k=`, the key `CK`, your video &amp; audio, who you are |
 | **Relay fleet** | a connection token, encrypted (unreadable) frames, the catalog (codec/resolution) | your `#k=`, the key `CK`, your video &amp; audio |
 | **Someone with the link** | your video &amp; audio — the link carries `#k=`, so anyone with it can watch (share it carefully) | can't publish as you or rotate your key |
 | **Someone without the link** | at most encrypted, unreadable frames — plus the cleartext catalog (codec/resolution) and traffic size/timing | your video, audio, or key — nothing decryptable |
@@ -112,9 +114,11 @@ origin at runtime.
 
 ## Use it
 
-1. Open **`broadcast.html`**, allow the camera + mic, press **Go live**.
-2. Press **Copy viewer link** and send it to whoever should watch.
-3. They open it in **`watch.html`** — no account, no password.
+1. [**Request a publish key**](https://earthseed.live/request) — free, about a minute, and it asks
+   you for nothing. Broadcasting needs one; watching never does.
+2. Open **`broadcast.html`**, allow the camera + mic, press **Go live**.
+3. Press **Copy viewer link** and send it to whoever should watch.
+4. They open it in **`watch.html`** — no account, no password.
 
 The share link is `watch.html?node=<id>&o=<origin>#k=<key>`. The part after `#` is the content key;
 browsers never send a URL fragment to a server, so **only someone with the whole link can decrypt**.
@@ -122,18 +126,41 @@ browsers never send a URL fragment to a server, so **only someone with the whole
 Works on recent **Chrome/Edge** and **Safari on iOS 18+ / macOS** (needs WebTransport + WebCodecs).
 Audio starts muted — tap to unmute.
 
+## Moderation, and what it costs
+
+We can't see what anyone broadcasts, so we can't police content — and don't pretend to review it.
+What we can do is **stop** a stream. Any viewer can report one from the watch page, sending the
+stream's name and nothing about themselves; an operator reads the queue and decides. Nothing is
+automatic, because "enough reports" would be a weapon aimed at exactly the people this exists to
+protect.
+
+Terminating means no further relay placement and no further token for that name. Browsers running
+our client stop within about five seconds. A session already open ends when its relay token expires
+and is not reissued — currently up to 24 hours, because the broker signs that token and chooses its
+lifetime; see the `TOKEN_SOURCE` note in `wrangler.jsonc` for what would shorten it. We still cannot
+say what a terminated stream contained.
+
 ## Host it yourself
 
-It's static — put `simple/earthseed.js` + `broadcast.html` + `watch.html` on any HTTPS host. Set
-your own public key with `<meta name="earthseed-key" content="pk_…">` (it's public — safe to ship).
-The broker supplies a gated relay, a short-lived per-broadcast token and the public salts; it never
-sees your content.
+The client is static — put `simple/earthseed.js` + `broadcast.html` + `watch.html` on any HTTPS
+host — but since August 2026 it asks **its own origin** for relay placement rather than the broker
+directly, so a full self-host means running the Worker in `src/worker/` too.
 
-Every broadcast goes through the broker, deliberately — it is what verifies that a publisher owns
-the broadcast name it is claiming. An earlier no-broker "open-relay" mode was removed for exactly
-that reason: with nothing to authorize a publisher, anyone could publish to anyone's stream.
+That was a deliberate trade and it is worth being straight about. The client used to carry a public
+publishable key and talk to the broker itself, which needed no server at all — and meant there was
+no moment at which anyone could decline. A stream could be seen to exist and could not be stopped.
+Publisher admission and a working kill switch cannot exist without someone in a position to say no.
 
-Typecheck the client (no build needed): `npx tsc --noEmit -p simple/tsconfig.json`.
+None of it weakens the encryption: the Worker sees names, tags and capabilities, never media, and
+the `#k=` fragment still never reaches any server.
+
+Every broadcast still goes through the broker, deliberately — it is what verifies that a publisher
+owns the broadcast name it is claiming. An earlier no-broker "open-relay" mode was removed for
+exactly that reason: with nothing to authorize a publisher, anyone could publish to anyone's stream.
+
+Typecheck everything (no build needed): `npm run typecheck`.
+Check a deployment behaves: `npm run e2e`, plus `npm run e2e:media -- --admin <password>` for a real
+broadcast watched end to end with the pixels sampled.
 
 ## Privacy, honestly
 
@@ -145,6 +172,9 @@ doesn't pretend the limits away:
 - A share link is only as private as **how you share it** — the `#…` key never reaches a server, but
   whoever you send it to (and your browser history) has it.
 - **Not DRM:** an authorized viewer can still capture decoded frames.
+- We now know **that** a broadcast happened, when, and its name — that is the price of being able to
+  stop one. We still don't know who you are: there is no account, and the publish key that admitted
+  you is never written down.
 - "Read exactly what runs" is a goal, not a proof — the client is unminified and unbundled so it's
   readable, but verifying the *hosted* bytes is on you (or self-host).
 

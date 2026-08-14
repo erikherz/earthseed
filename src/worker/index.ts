@@ -555,11 +555,25 @@ const brokerBase = (env: Env): string => {
 /**
  * The credential we present to the broker.
  *
- * CDN_API_TOKEN is a secret and is what this should be in production. PUBLIC_KEY is the `pk_` that
- * used to ship in the page: still accepted so a deployment without the secret keeps working, but it
- * authorizes anyone who has read the HTML, so it is a fallback and not a mode.
+ * PUBLIC_KEY (the `pk_` publishable key) first, and that ordering is measured rather than assumed.
+ * Against tinymoq on 14 Aug 2026, the two credentials get materially different answers from
+ * /cdn/assign for role=publish:
+ *
+ *   Bearer pk_…    → {relay, box, origin_endpoint_id, jwt}   ← complete; publishing works
+ *   Bearer cdn_…   → {relay, box}                            ← no origin id, no token
+ *
+ * Without origin_endpoint_id a viewer's edge has nothing to pull from, so the cdn_ customer token
+ * cannot carry this path today whatever we would prefer about its secrecy.
+ *
+ * Be clear about what that costs, because it is the one claim this file must not overstate: the
+ * publishable key is PUBLIC and always was. Moving assignment behind this Worker therefore does
+ * NOT make the broker unreachable to someone who reads it out of the repository. What it does buy
+ * is that every request arriving through earthseed.live is admitted, name-checked, tag-checked and
+ * kill-checked first — and that is what binds our client and our origin, which is where essentially
+ * everyone is. Closing the remaining gap needs a broker-side credential that is genuinely secret;
+ * that is a tinymoq change, not one this repository can make.
  */
-const brokerCredential = (env: Env): string | null => env.CDN_API_TOKEN ?? env.PUBLIC_KEY ?? null;
+const brokerCredential = (env: Env): string | null => env.PUBLIC_KEY ?? env.CDN_API_TOKEN ?? null;
 
 /** "worker" (we mint, we choose the TTL) or "broker" (pass its token through). Default: broker. */
 function tokenSource(env: Env): "worker" | "broker" {
@@ -667,7 +681,14 @@ async function handlePlacementRoutes(request: Request, env: Env, url: URL): Prom
     });
     if (assigned.error) return Response.json({ error: String(assigned.error) }, { status: 502 });
     if (!assigned.relay || !assigned.origin_endpoint_id) {
-      return Response.json({ error: "origin assign incomplete" }, { status: 502 });
+      // Name what was missing. An assign failure is otherwise completely opaque from the browser,
+      // and "incomplete" without the field names sent an hour down the wrong path once already.
+      // Keys only — the response can carry a token.
+      console.error("assign incomplete; broker returned keys:", Object.keys(assigned).join(","));
+      return Response.json(
+        { error: `origin assign incomplete (broker sent: ${Object.keys(assigned).join(", ") || "nothing"})` },
+        { status: 502 }
+      );
     }
 
     // One live row per session. Close any earlier one for this name first: a broadcaster who

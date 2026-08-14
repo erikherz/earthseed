@@ -17,7 +17,8 @@ limits. The interactive version of this map is on the home page (https://earthse
 
 | Value | Secret? | What it is |
 |---|---|---|
-| `pk_…` | No | Publishable key. Identifies a tenant for quota/limits; can mint relay tokens, **can't decrypt**. Ships in the page. |
+| `publish key` | Sort of | Admits a broadcaster. A capability carrying its own `nbf`/`exp`/batch under a MAC only our Worker can produce, so the expiry can ride inside the credential instead of in a table — and nothing about who requested it is written down. **Can't decrypt.** |
+| `route tag` | No | Proof a viewer holds the link: `HKDF(#k=, salt="es-route\|<id>", info="earthseed-route-auth-v1")`. A *different* salt **and** a different info string than `CK`, so the two are cryptographically independent — every tag ever registered decrypts nothing. Registered by the broadcaster at go-live, presented by each viewer to be placed. |
 | `node id` | No | An Ed25519 public key (base32). The stream identity and the relay track name. |
 | `origin EID` | No | Which relay holds the origin, so a viewer's edge can pull from it. Routing only. |
 | `salts` + `epoch` | No | Public HKDF inputs: a global (operator kill-switch) salt ‖ a per-stream salt. Rotating one re-keys the stream. |
@@ -111,9 +112,15 @@ why the watch page discovers it by trying rather than by asking.
 
 ## Who can see what
 
-- **Broker** sees: `node id`, tenant `pk_`, public `salts`, coarse geo (from the request); it
-  mints tokens. It **never** sees `#k=`, `CK`, your `passcode`, or your media — nor whether a
-  broadcast has a passcode at all.
+- **Our Worker** sees: that a broadcast started and ended, its `node id`, and its `route tag`. It
+  holds the broker credential, checks the publish key, verifies the name is yours, and is the thing
+  that can refuse. It **never** sees `#k=`, `CK`, your `passcode`, your media, or anything that
+  identifies you — there is no account, and the publish key that admitted you is not stored.
+  This is new as of August 2026 and it is a real cost: we now know *that* you broadcast. It is the
+  price of being able to stop a stream at all, and it buys nothing toward decrypting one.
+- **Broker** sees: `node id`, public `salts`, coarse geo (from the request); it places you on a
+  relay and mints the connection token. It **never** sees `#k=`, `CK`, your `passcode`, or your
+  media — nor whether a broadcast has a passcode at all.
   **A viewer contacts it exactly once**, to be placed on a relay. After that a viewer talks only to
   the relay, and the relay only ever carries ciphertext. So the broker sees that someone joined,
   not how long they stayed — it holds a connection record, not an attendance record.

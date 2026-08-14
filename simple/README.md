@@ -40,10 +40,17 @@ Works on recent **Chrome/Edge** and **Safari on iOS 18+ / macOS**. Audio starts 
 
 ## Host it yourself
 
-It's static — put `earthseed.js`, `audio-capture-worklet.js`, `vendor/` and the two HTML files on
-any HTTPS host. Set your own publishable key via `<meta name="earthseed-key" content="pk_…">`
-(it's public — safe to ship). The broker handles relay assignment, per-broadcast tokens and public
-salts; it never sees your content.
+It's static — put `earthseed.js`, `audio-capture-worklet.js`, `vendor/` and the HTML files on any
+HTTPS host — but since August 2026 this client asks **its own origin** for relay placement
+(`POST /api/broadcast/start`, `POST /api/watch/start`) rather than reaching the broker directly. A
+full self-host therefore also means running the Worker in `../src/worker/`, which holds the broker
+credential, checks the publish key, verifies the broadcast name is yours and enforces the kill
+switch.
+
+It used to need no server at all, and that is exactly what made a stream impossible to stop:
+with the credential printed in the page there was no moment at which anyone could decline. The
+encryption is untouched by the change — the Worker only ever sees names, tags and capabilities, and
+the `#k=` fragment still never reaches any server.
 
 Note that self-hosting the client doesn't come with the security headers this repo ships in
 `_headers` — that file is a Cloudflare asset-server mechanism and is inert elsewhere. Copy the

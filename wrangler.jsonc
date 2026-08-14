@@ -29,7 +29,24 @@
     // Who mints the relay token. "worker" = we sign it with MOQ_AUTH_PRIVATE_JWK and therefore
     // choose its lifetime, which is what makes a kill bind a client that ignores the stop signal.
     // "broker" = pass the broker's token through, and the expiry guarantee is whatever it chose.
-    // Flip to "worker" only after confirming the fleet validates our verify_jwk (see /api/pubkey).
+    //
+    // TRIED AND REVERTED, 14 Aug 2026 — do not flip this back without doing the fleet work first.
+    // Measured: with the publishable key the broker mints a usable token signed with ITS kid
+    // (iZ-AkZzB…), valid for 24 hours. Minting here instead, with our own kid (X3KzNJpR…, the one
+    // GET /api/pubkey publishes), produced a token the box REFUSED — the WebTransport connect to
+    // dal.moqcdn.net:8007 failed with QUIC_IETF_GQUIC_ERROR_MISSING and the WebSocket fallback
+    // timed out. So our verify_jwk is registered with the broker but is not what the relay boxes
+    // check, at least not these ones.
+    //
+    // This matters, and it is the one place where Earthseed is weaker than Wallflower today:
+    // 24 hours is how long a terminated stream stays watchable by a client that ignores the stop
+    // signal, and VIEWER_TOKEN_TTL below cannot shorten a token we did not sign. Cooperating
+    // clients still stop in ~5 seconds, and nobody new is placed at all.
+    //
+    // TO FIX: register kid X3KzNJpRvVarbKBM2mk_M5JGt0dDYu85ZA5z2nLb1Qk as a verify_jwk on the
+    // relay boxes themselves (relay.toml [auth]), then set this to "worker", drop
+    // VIEWER_TOKEN_TTL to ~120, and re-run scripts/e2e/broadcast-watch.mjs — it fails loudly if
+    // the token is refused, which is how this was caught.
     "TOKEN_SOURCE": "broker",
     // Relay token lifetimes, seconds. The viewer figure is the ceiling on how long a terminated
     // stream can still be watched by a client that ignores the stop signal; lower is stricter and
