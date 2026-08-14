@@ -32,7 +32,7 @@
 # keeps the no-sinks property enforced rather than merely observed.
 /*
   # BEGIN generated policy
-  Content-Security-Policy: script-src 'self' 'sha256-7fFJleZc815CALN3PfPMsYa6Qz0a0rce/C4FxOk3/zU=' 'sha256-JCWAMn2pbmcJ89ksB/yW3efkkVZYIE7LtjDSTPgDF20=' 'sha256-sTYgfQK0g22fa73j8zdiZu5nPo2iXzr+QXxAF+ctaBs=' 'sha256-krqDlEnSdcLBnzFf7TsheImLZszyK/vZsqy44KMSelA=' 'sha256-2NCGmuIoDuwm1ymyrz9aZQPQLyOuKpzUeHaX4HOwpYE='; connect-src 'self' https: wss:; require-trusted-types-for 'script'; trusted-types 'none'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'; report-uri /api/csp-report
+  Content-Security-Policy: script-src 'self' 'sha256-7fFJleZc815CALN3PfPMsYa6Qz0a0rce/C4FxOk3/zU=' 'sha256-/6+IyRllCt1Y75MNVZxrbWl18DUUChxSYKPODBQ2Vhs=' 'sha256-JCWAMn2pbmcJ89ksB/yW3efkkVZYIE7LtjDSTPgDF20=' 'sha256-sTYgfQK0g22fa73j8zdiZu5nPo2iXzr+QXxAF+ctaBs=' 'sha256-krqDlEnSdcLBnzFf7TsheImLZszyK/vZsqy44KMSelA=' 'sha256-2NCGmuIoDuwm1ymyrz9aZQPQLyOuKpzUeHaX4HOwpYE='; connect-src 'self' https: wss:; require-trusted-types-for 'script'; trusted-types 'none'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'; report-uri /api/csp-report
   # END generated policy
   X-Content-Type-Options: nosniff
   Referrer-Policy: no-referrer

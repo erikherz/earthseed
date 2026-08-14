@@ -1300,16 +1300,243 @@ async function startWatch(opts) {
   };
 }
 
-/* ═══════════════════════════════ 5. PAGE CONTROLLERS ═══════════════════════════════ */
-// One path: node identity → broker-gated relay + token (proving the name is ours) → per-stream
-// salt → content key. See §1 for why the unauthorized second path was removed.
+/* ═══════════════════════════════ 5. PAGE CHROME ═══════════════════════════════ */
+// The parts of both pages that are not the stream: the theme toggle and the three footer panels.
+// Every node here is built with createElement/textContent — never innerHTML. That is not a style
+// preference: the CSP sets `require-trusted-types-for 'script'`, so an innerHTML assignment THROWS
+// on Chromium, and the "no injection sinks in this client" property is what makes an open
+// connect-src safe (see scripts/csp-hashes.mjs).
 
 /** @param {string} id */
 const $ = (id) => /** @type {any} */ (document.getElementById(id));
 
+/** @param {string} tag @param {Record<string, any>} props */
+const el = (tag, props = {}) => Object.assign(document.createElement(tag), props);
+/** @param {HTMLElement} n */
+const clearNode = (n) => {
+  while (n.firstChild) n.removeChild(n.firstChild);
+};
+
+// Which relay we are actually on, for the footer's "Relay status" panel. Held here rather than
+// asked for at render time because there is nobody to ask: the relay is assigned once, and a
+// panel that invented a hostname before connecting would be worse than one that says so.
+/** @type {{host:string, role:string, transport:string}|null} */ let connectedRelay = null;
+
+const THEME_KEY = "es:theme";
+
+/** Wire the light/dark toggle. The initial class is set by a tiny inline block in the page head,
+ * before the stylesheet, so neither theme flashes the other on load. */
+function wireTheme() {
+  $("theme-toggle")?.addEventListener("click", () => {
+    const light = document.documentElement.classList.toggle("light");
+    try {
+      localStorage.setItem(THEME_KEY, light ? "light" : "dark");
+    } catch {
+      /* private mode — the choice just won't persist */
+    }
+  });
+}
+
+/**
+ * What this browser can and cannot do, checked by ASKING it rather than by sniffing the user
+ * agent. Useful before you stream, which is why it sits in the footer of both pages: someone whose
+ * browser cannot encode should find that out here and not after granting camera access.
+ */
+async function browserSupportPanel() {
+  const has = (name) => name in globalThis;
+  const rows = [
+    ["WebTransport", has("WebTransport")],
+    ["WebCodecs — encode", typeof VideoEncoder !== "undefined"],
+    ["WebCodecs — decode", typeof VideoDecoder !== "undefined"],
+    ["Camera and microphone", !!navigator.mediaDevices?.getUserMedia],
+    ["Web Crypto (AES-GCM, HKDF)", !!crypto.subtle],
+    ["Ed25519 identities", false], // replaced below; generateKey is the only honest test
+  ];
+  try {
+    await crypto.subtle.generateKey(ED25519, false, ["sign", "verify"]);
+    rows[5][1] = true;
+  } catch {
+    /* left false */
+  }
+
+  const frag = document.createDocumentFragment();
+  const table = el("table");
+  for (const [label, ok] of rows) {
+    const tr = el("tr");
+    tr.appendChild(el("td", { textContent: String(label) }));
+    const td = el("td");
+    td.appendChild(el("span", { className: ok ? "dot-ok" : "dot-no" }));
+    td.appendChild(document.createTextNode(ok ? "Yes" : "No"));
+    tr.appendChild(td);
+    table.appendChild(tr);
+  }
+  frag.appendChild(table);
+  frag.appendChild(
+    el("p", {
+      className: "hint",
+      textContent:
+        "Broadcasting needs encode; watching needs decode. We ship no WASM or WebSocket fallback — " +
+        "that is what keeps the code small enough to read. Recent Chrome or Edge, or Safari on " +
+        "iOS 18+ / macOS.",
+    })
+  );
+  return frag;
+}
+
+/** Where the media is actually going, and what it is not. */
+function relayStatusPanel() {
+  const frag = document.createDocumentFragment();
+  const table = el("table");
+  const row = (k, v) => {
+    const tr = el("tr");
+    tr.appendChild(el("td", { textContent: k }));
+    tr.appendChild(el("td", { textContent: v }));
+    table.appendChild(tr);
+  };
+  if (connectedRelay) {
+    row("Relay", connectedRelay.host);
+    row("Role", connectedRelay.role);
+    row("Transport", connectedRelay.transport);
+  } else {
+    // Naming a plausible host before connecting is how a status panel starts lying.
+    row("Relay", "(not connected)");
+  }
+  frag.appendChild(table);
+  frag.appendChild(
+    el("p", {
+      className: "hint",
+      textContent:
+        "A relay is assigned per broadcast and carries only ciphertext. It never holds the content " +
+        "key, so it cannot decode what it is moving — and one relay carries exactly one broadcast.",
+    })
+  );
+  return frag;
+}
+
+/** The honest short version of the whole design, in the footer of the pages it describes. */
+function howItWorksPanel() {
+  const frag = document.createDocumentFragment();
+  for (const [lead, rest] of [
+    [
+      "It all happens in this page.",
+      " Your browser captures the camera, encodes it with native WebCodecs, encrypts every frame " +
+        "— video and audio — with AES-256-GCM, and only then hands the bytes to the transport. A " +
+        "relay forwards ciphertext it cannot read; the codec and resolution are the only things in " +
+        "the clear.",
+    ],
+    [
+      "The key never reaches us.",
+      " It is derived in your browser from 32 random bytes that live only in the part of the share " +
+        "link after the #, and browsers never send that part to a server. So the link is what tunes " +
+        "a viewer in and it is also the only thing that can decrypt the stream: we could not watch " +
+        "your broadcast if we were asked to. Add a passcode, sent separately, and the link alone " +
+        "stops being enough.",
+    ],
+    [
+      "What we can do is stop it.",
+      " Broadcasting needs a publish key, and being placed on a relay needs proof you hold the " +
+        "link — knowing a stream's name is not enough, because the name travels in every link. A " +
+        "viewer can report a stream, and an operator can terminate it. That is the whole of what " +
+        "moderation can be when nobody in the middle can see anything.",
+    ],
+  ]) {
+    const p = el("p");
+    p.appendChild(el("strong", { textContent: lead }));
+    p.appendChild(document.createTextNode(rest));
+    frag.appendChild(p);
+  }
+  const more = el("p", { className: "hint" });
+  more.appendChild(document.createTextNode("The full version, limits included: "));
+  more.appendChild(el("a", { href: "/trust", textContent: "How you're protected" }));
+  more.appendChild(document.createTextNode("."));
+  frag.appendChild(more);
+  return frag;
+}
+
+/**
+ * Footer links that reveal a panel in place rather than navigating away.
+ *
+ * In place, specifically, because these sit on a page that may be mid-broadcast: a link that
+ * navigated would end the stream to answer a question about it. Content is rendered on first open
+ * so a page that is never asked pays nothing, and the relay panel is re-rendered every time
+ * because what it reports changes when you go live.
+ */
+function wireFooterPanels() {
+  /** @param {string} linkId @param {string} panelId @param {() => Node|Promise<Node>} render @param {boolean} always */
+  const wire = (linkId, panelId, render, always) => {
+    const link = $(linkId);
+    const panel = $(panelId);
+    if (!link || !panel) return;
+    let rendered = false;
+    link.addEventListener("click", async (/** @type {Event} */ e) => {
+      e.preventDefault();
+      const opening = panel.classList.contains("hidden");
+      // One at a time: three stacked panels push the video off a phone screen.
+      for (const p of document.querySelectorAll(".panel")) p.classList.add("hidden");
+      if (!opening) return;
+      if (!rendered || always) {
+        clearNode(panel);
+        panel.appendChild(await render());
+        rendered = true;
+      }
+      panel.classList.remove("hidden");
+    });
+  };
+  wire("howitworks-link", "howitworks-panel", howItWorksPanel, false);
+  wire("support-link", "support-panel", browserSupportPanel, false);
+  wire("server-link", "server-panel", relayStatusPanel, true);
+}
+
+/** Everything both pages share. Safe to call before the media path starts. */
+function mountChrome() {
+  wireTheme();
+  wireFooterPanels();
+}
+
+/**
+ * Copy `value()` to the clipboard and say so.
+ *
+ * Two shapes of button use this: one with a text label, and one that is only an icon. Swapping
+ * textContent on the icon button would delete its SVG and leave a blank square, so a button with
+ * no text label reports through its title and a brief accent class instead.
+ * @param {string} btnId @param {() => string} value @param {string} [label]
+ */
+function wireCopy(btnId, value, label) {
+  const btn = $(btnId);
+  if (!btn) return;
+  const original = btn.getAttribute("title") ?? "";
+  btn.addEventListener("click", async () => {
+    const text = value();
+    if (!text) return;
+    let ok = false;
+    try {
+      await navigator.clipboard.writeText(text);
+      ok = true;
+    } catch {
+      // Headless Chrome and some locked-down contexts refuse writeText outright. The value is
+      // visible and selectable in the field either way, so this is a downgrade, not a failure.
+    }
+    if (!ok) return;
+    if (label) {
+      btn.textContent = "Copied!";
+      setTimeout(() => (btn.textContent = label), 1500);
+    } else {
+      btn.setAttribute("title", "Copied!");
+      setTimeout(() => btn.setAttribute("title", original), 1500);
+    }
+  });
+}
+
+/* ═══════════════════════════════ 6. PAGE CONTROLLERS ═══════════════════════════════ */
+// One path: node identity → admitted + name-checked → relay + token → per-stream salt → content
+// key. See §1 for why the unauthorized second path was removed.
+
 /** Wire the broadcast page (#preview #go #share #copy #status + the passcode controls). */
 export async function runBroadcast() {
   const set = (m) => ($("status").textContent = m);
+  // Chrome first, so the theme toggle and the browser-support panel work even on a browser this
+  // page is about to tell you it cannot stream from — that is exactly when support matters.
+  mountChrome();
   const reason = unsupportedReason(true);
   if (reason) return set(reason);
 
@@ -1417,6 +1644,12 @@ export async function runBroadcast() {
     bc?.stop();
     bc = null;
     goBtn.textContent = "Go live";
+    goBtn.classList.remove("is-live");
+    // The live pill and the relay panel go back to the truth. Leaving either showing would mean
+    // a stopped broadcast still reading as live, which is the one thing a status light must
+    // never do.
+    $("live-pill")?.classList.remove("on");
+    connectedRelay = null;
     if (pcToggle) pcToggle.disabled = false;
     if (regenBtn) regenBtn.disabled = false;
     if (newLinkBtn) newLinkBtn.disabled = false;
@@ -1486,6 +1719,14 @@ export async function runBroadcast() {
       link.hash = `k=${fragmentKey}`;
       $("share").value = link.toString();
       goBtn.textContent = "Stop";
+      goBtn.classList.add("is-live");
+      // Name, copy affordance and live pill all become true at the same moment — when there is
+      // actually something to copy and something to watch.
+      const idEl = $("stream-id");
+      if (idEl) idEl.textContent = node.id;
+      $("copy")?.classList.remove("hidden");
+      $("live-pill")?.classList.add("on");
+      connectedRelay = { host: new URL(pub.relay_url).host, role: "publishing (origin)", transport: "WebTransport / QUIC" };
       if (keyRow) keyRow.hidden = true;
       if (keyHint) keyHint.hidden = true;
       // Locked while live: the key is fixed for this broadcast, so none of these can take effect now.
@@ -1508,18 +1749,7 @@ export async function runBroadcast() {
     }
   });
 
-  /** @param {string} btnId @param {() => string} value @param {string} label */
-  const wireCopy = (btnId, value, label) =>
-    $(btnId)?.addEventListener("click", async () => {
-      try {
-        await navigator.clipboard.writeText(value());
-        $(btnId).textContent = "Copied!";
-        setTimeout(() => ($(btnId).textContent = label), 1500);
-      } catch {
-        /* clipboard blocked — the value is visible in the field */
-      }
-    });
-  wireCopy("copy", () => $("share").value, "Copy viewer link");
+  wireCopy("copy", () => $("share").value); // icon button: reports through its title
   wireCopy("copypc", () => $("passcode").value, "Copy");
 
   try {
@@ -1620,10 +1850,8 @@ function wirePasscodePrompt(p) {
  * @param {string} nodeId
  */
 function mountReportControl(nodeId) {
-  const wrap = document.querySelector(".wrap");
+  const wrap = $("report-mount") ?? document.querySelector(".wrap");
   if (!wrap) return;
-
-  const el = (tag, props = {}) => Object.assign(document.createElement(tag), props);
 
   const open = el("button", { textContent: "Report this stream", className: "linkish", type: "button" });
   const row = el("div", { className: "row report-open" });
@@ -1715,6 +1943,7 @@ export async function runWatch() {
   const set = (m) => {
     if (!statusLocked) setForced(m);
   };
+  mountChrome();
   const reason = unsupportedReason(false);
   if (reason) return set(reason);
 
@@ -1763,6 +1992,7 @@ export async function runWatch() {
   }
   if (edge.error) return set("stream is not live");
   const relay = connectUrl(edge.relay_url, edge.jwt);
+  connectedRelay = { host: new URL(edge.relay_url).host, role: "watching (edge)", transport: "WebTransport / QUIC" };
 
   // Reporting is offered only to someone who actually got placed, because only they can have seen
   // anything. Mounted before playback starts so it is there the moment it might be wanted.

@@ -15,6 +15,7 @@
     "cf-typegen": "wrangler types",
     "//e2e": "These run against a DEPLOYED origin, not a local build — there is no local build. Pass --admin <password> where a suite mints its own publish key.",
     "e2e": "node scripts/e2e/control-plane.mjs && node scripts/e2e/no-key-no-publish.mjs",
+    "e2e:ui": "node scripts/e2e/ui-chrome.mjs",
     "e2e:media": "node scripts/e2e/broadcast-watch.mjs"
   },
   "devDependencies": {

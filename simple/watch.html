@@ -13,6 +13,11 @@
     <script type="importmap">
       { "imports": { "@moq/net": "./vendor/moq-net-0.1.5.mjs" } }
     </script>
+    <!-- Dark is the default. Applied before the stylesheet so a light-mode visitor never sees a
+         dark flash, and vice versa; this block is tiny for the same reason. -->
+    <script>
+      if (localStorage.getItem("es:theme") === "light") document.documentElement.classList.add("light");
+    </script>
     <!-- theme.css is the project default; custom.css ships empty and is yours to edit
          if you self-host. It loads last, so your rules win. -->
     <link rel="stylesheet" href="./theme.css" />
@@ -20,21 +25,56 @@
   </head>
   <body class="page-watch">
     <div class="wrap">
-      <a class="brand" href="/">
-        <img class="brand-mark" src="./favicon.svg" alt="" width="30" height="30" />
-        <span class="brand-name">earthseed<span class="dot">.</span>live</span>
-      </a>
-      <h1>Watch</h1>
-      <canvas id="video"></canvas>
-      <div id="status">Loading…</div>
-      <!-- Shown only if frames fail to decrypt, which is how this page learns a passcode is needed:
-           nothing is asked of any server, the AES-GCM tag simply doesn't validate. -->
-      <div class="row" id="pcrow" hidden>
-        <input id="passcode" type="text" placeholder="passcode from the broadcaster"
-               autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" aria-label="Passcode" />
-        <button id="pcgo">Unlock</button>
+      <header class="site-header">
+        <a class="brand" href="/">
+          <img class="brand-mark" src="./favicon.svg" alt="" width="38" height="38" />
+          <span class="brand-name">earthseed<span class="dot">.</span>live</span>
+        </a>
+        <span class="tagline">only your link can decrypt this</span>
+        <div class="header-right">
+          <a class="btn" href="/trust">How you're protected</a>
+          <button id="theme-toggle" class="theme-toggle" type="button" title="Toggle light and dark">
+            <svg class="moon-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+            </svg>
+            <svg class="sun-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="5" />
+              <line x1="12" y1="1" x2="12" y2="3" /><line x1="12" y1="21" x2="12" y2="23" />
+              <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" /><line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+              <line x1="1" y1="12" x2="3" y2="12" /><line x1="21" y1="12" x2="23" y2="12" />
+              <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" /><line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <div class="stage">
+        <canvas id="video"></canvas>
+        <div id="status">Loading…</div>
+        <!-- Shown only if frames fail to decrypt, which is how this page learns a passcode is
+             needed: nothing is asked of any server, the AES-GCM tag simply doesn't validate. -->
+        <div class="row" id="pcrow" hidden>
+          <input id="passcode" type="text" placeholder="passcode from the broadcaster"
+                 autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" aria-label="Passcode" />
+          <button id="pcgo" type="button">Unlock</button>
+        </div>
+        <div class="hint">Tap the video to unmute.</div>
       </div>
-      <div class="hint">Tap the video to unmute.</div>
+
+      <footer class="site-footer">
+        <p>
+          <a href="https://moq.dev/" target="_blank" rel="noopener">MoQ</a> |
+          <a href="#" id="howitworks-link">How it works</a> |
+          <a href="#" id="support-link">Browser support</a> |
+          <a href="#" id="server-link">Relay status</a>
+        </p>
+        <div id="howitworks-panel" class="panel hidden"></div>
+        <div id="support-panel" class="panel hidden"></div>
+        <div id="server-panel" class="panel hidden"></div>
+        <!-- The report control is appended here by earthseed.js, and only once a viewer has
+             actually been placed — someone who could not watch has nothing to report. -->
+        <div id="report-mount"></div>
+      </footer>
     </div>
     <!-- Our whole client — readable, unminified, open source:
          https://github.com/erikherz/earthseed/blob/main/simple/earthseed.js -->
