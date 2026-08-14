@@ -1,0 +1,293 @@
+<!doctype html>
+<!--
+  Public trust page. Written for a broadcaster deciding whether to use this, not for an engineer —
+  but it must never buy reassurance with a claim that is not true. Every "cannot" here is a
+  structural property, and the limits section exists because a page that only lists strengths is
+  not trustworthy.
+
+  Kept deliberately in sync with simple/TRUST.md, which is the longer engineering version. If they
+  disagree, TRUST.md is the one that was written against the code and this is wrong.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>How you're protected · Earthseed</title>
+<link rel="icon" href="/favicon.svg" />
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0a0e16;
+    --card: #141a24;
+    --border: #222b38;
+    --text: #e0e0e0;
+    --muted: #8a93a3;
+    --green: #34d399;
+    --grad: linear-gradient(135deg, #60a5fa 0%, #34d399 50%, #a78bfa 100%);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 5vh 20px 12vh; background: var(--bg); color: var(--text);
+    font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    display: flex; justify-content: center;
+  }
+  main { width: 100%; max-width: 40em; }
+  .brand { display: inline-flex; align-items: center; gap: 9px; margin-bottom: 22px; text-decoration: none; }
+  .brand img { width: 30px; height: 30px; display: block; }
+  .brand span {
+    font-size: 1.05rem; font-weight: 600; letter-spacing: -0.02em;
+    background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  h1 { font-size: 1.75rem; margin: 0 0 0.3em; font-weight: 650; letter-spacing: -0.01em; }
+  .lede { color: var(--muted); font-size: 1.05rem; margin: 0 0 2.2em; }
+  h2 { font-size: 1.1rem; margin: 2.4em 0 0.6em; font-weight: 600; color: var(--text); }
+  h3 { font-size: 0.95rem; margin: 1.6em 0 0.3em; font-weight: 600; color: #c6ccd6; }
+  p { margin: 0 0 1em; color: var(--muted); }
+  a { color: var(--green); }
+  strong { color: var(--text); font-weight: 600; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em;
+         background: #0d1119; border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px; }
+  .key { border-left: 2px solid var(--green); background: #10241c; padding: 14px 18px; margin: 0 0 1.6em; }
+  .key p:last-child { margin-bottom: 0; }
+  .limit { border-left: 2px solid #8a6a2a; background: #1a1710; padding: 14px 18px; margin: 0 0 1.2em; }
+  .limit p:last-child { margin-bottom: 0; }
+  table { width: 100%; border-collapse: collapse; margin: 0.6em 0 1.6em; font-size: 0.92rem; }
+  th { text-align: left; padding: 8px 10px; background: var(--card); color: var(--text); font-weight: 600;
+       border-bottom: 1px solid var(--border); }
+  td { padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; color: var(--muted); }
+  td:first-child { color: var(--text); white-space: nowrap; }
+  ul { margin: 0 0 1.2em; padding-left: 1.2em; color: var(--muted); }
+  li { margin-bottom: 0.4em; }
+  .foot { margin-top: 3em; padding-top: 1em; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+
+  <a class="brand" href="/">
+    <img src="/favicon.svg" alt="" width="30" height="30" />
+    <span>earthseed.live</span>
+  </a>
+
+  <h1>How you're protected</h1>
+  <p class="lede">
+    What Earthseed can and cannot see when you broadcast — and the parts we can't protect you
+    from, stated as plainly as the parts we can.
+  </p>
+
+  <div class="key">
+    <p>
+      <strong>We cannot watch your broadcast.</strong> Not as a policy we promise to keep, but
+      because the key doesn't exist on our side. Your browser encrypts every frame — video
+      <em>and</em> audio — before it leaves, using a key derived from a secret that lives only in
+      the part of your share link after the <code>#</code>. Browsers never send that part to a
+      server.
+    </p>
+    <p>
+      So it never reaches our servers, our database, our logs, the broker that places you, or the
+      relay that carries your video. If we were asked for your stream, by anyone, we would have
+      nothing to give.
+    </p>
+  </div>
+
+  <h2>What each party sees</h2>
+
+  <table>
+    <tr><th>Who</th><th>Sees</th><th>Cannot see</th></tr>
+    <tr>
+      <td>Us</td>
+      <td>That a broadcast happened, when, and how long</td>
+      <td>Your video, your audio, your location</td>
+    </tr>
+    <tr>
+      <td>The broker</td>
+      <td>The stream's name, that it was placed, your IP address, coarse geography</td>
+      <td>Your key, and anything inside the bytes</td>
+    </tr>
+    <tr>
+      <td>The relay</td>
+      <td>Encrypted bytes, your IP address, timing, the codec and resolution</td>
+      <td>Anything inside those bytes</td>
+    </tr>
+    <tr>
+      <td>Your viewers</td>
+      <td>The stream, if you gave them the link &mdash; and the passcode, if you set one</td>
+      <td>Anything else; they cannot publish as you</td>
+    </tr>
+    <tr>
+      <td>Everyone else</td>
+      <td>Nothing at all</td>
+      <td>Even encrypted bytes are out of reach without the link</td>
+    </tr>
+  </table>
+
+  <h2>You are not an account</h2>
+
+  <p>
+    There is no sign-up, no email address, no password, and no profile. Broadcasting needs a
+    <strong>publish key</strong>, which you can <a href="/request">request in about a minute</a>
+    without telling us anything about yourself. We don't store the key, so there is no record
+    connecting you to anything you broadcast — nothing for us to look up, and nothing for anyone
+    to compel from us.
+  </p>
+  <p>
+    Each broadcast also identifies itself with a cryptographic key created in your browser, whose
+    private half is <strong>not extractable</strong> — script on the page can ask it to sign, but
+    cannot read it out. So nobody can publish under your stream's name from somewhere else, and
+    "New ID" discards that identity permanently.
+  </p>
+
+  <h2>We collect no location data</h2>
+
+  <p>
+    None — not country, not city, not coordinates, for broadcasters or viewers. Earlier versions of
+    this site did record broadcaster location, in a database table belonging to a client that has
+    since been deleted. That table, and a column that had held content keys, were dropped in August
+    2026 rather than left sitting behind an app nobody runs.
+  </p>
+
+  <h2>Controlling who watches</h2>
+
+  <h3>The link is the key</h3>
+  <p>
+    Anyone holding your complete share link can watch. Anyone without it cannot — not even someone
+    who knows your stream's name, and not us. Treat the link the way you'd treat a door key, and
+    send it through a channel you trust.
+  </p>
+  <p>
+    Knowing the name is genuinely not enough, and that is enforced rather than assumed: a viewer
+    has to present a tag derived from the link before a relay will be assigned to them. The tag is
+    derived so that it proves possession of the link and reveals nothing that helps decrypt it.
+  </p>
+
+  <h3>Add a passcode for a second lock</h3>
+  <p>
+    Turn on a passcode and the link alone stops being enough. The passcode is deliberately not part
+    of the link, so send it separately — a different app, or out loud. It is never stored on, sent
+    to, or checked by any server: it is mixed into the content key, so a wrong one simply fails to
+    decrypt in the viewer's own browser. Regenerating it locks out everyone holding the old one
+    without changing your link.
+  </p>
+
+  <h3>Two ways to revoke</h3>
+  <p>
+    <strong>New link</strong> mints a fresh key, so links you have already sent stop decrypting —
+    though they still name you, and whoever holds one can still tell <em>when</em> you are live.
+    <strong>New ID</strong> goes further: a new identity, so old links point at nobody. It cannot
+    be undone.
+  </p>
+
+  <h2>The relays are unikernels, not containers</h2>
+
+  <p>
+    A relay never holds a key, so this is not what protects your video — the encryption is. It
+    decides something else: how much an attacker gets if a relay falls. Each relay is a single
+    program in a single address space under a hardware-virtualisation boundary, with
+    <strong>no shell to reach</strong> — not disabled, absent — no package manager, no filesystem
+    and no persistent disk. One relay carries exactly one broadcast, so a compromised relay is
+    confined by a machine boundary rather than by a setting. The fleet holds only the
+    <em>public</em> half of our signing key: it can check a token, it cannot forge one.
+  </p>
+
+  <h2>Moderation, and what it costs</h2>
+
+  <p>
+    Because we can't see what anyone broadcasts, we can't police content. What we can do is
+    <strong>stop</strong> a stream: a viewer can report one, and an operator can terminate it.
+    Terminating means no further relay placement and no further token for that name; browsers
+    running our client stop within seconds, and a session already open ends when its relay token
+    expires and is not reissued.
+  </p>
+  <p>
+    We still cannot say what a terminated stream contained, produce a recording of it, or tell a
+    complainant what they were shown. Stopping is the whole of what we can do — and a report tells
+    us a stream's name, never who reported it.
+  </p>
+
+  <h2>The limits</h2>
+
+  <p>These are real. A page that only listed strengths wouldn't be worth reading.</p>
+
+  <div class="limit">
+    <p>
+      <strong>A link can't be recalled.</strong> Once you've sent it, anyone who receives it — or
+      is forwarded it — can watch. We can't revoke it for one person, because we can't decrypt it
+      either. A passcode, or a new link, is how you cut someone off.
+    </p>
+  </div>
+
+  <div class="limit">
+    <p>
+      <strong>Anyone watching can record.</strong> A viewer's own device necessarily decodes your
+      video to display it, so it can also save it. No system that shows people video can prevent
+      this, and we don't claim to. This is not DRM.
+    </p>
+  </div>
+
+  <div class="limit">
+    <p>
+      <strong>Your IP address is visible to the network.</strong> The relay that carries your
+      stream sees the address you connect from, and so do the broker and Cloudflare, which serves
+      this site. We don't store it — but we can't hide it from them. <strong>If being located
+      matters to you, use a VPN or Tor.</strong> That's the one protection we can't provide for
+      you, and the encryption is unchanged by it.
+    </p>
+  </div>
+
+  <div class="limit">
+    <p>
+      <strong>We can see that you broadcast, even if not what.</strong> Times, durations and how
+      much data moved are visible to us, to the broker and to the relay. Encryption hides content,
+      not the fact that something happened.
+    </p>
+  </div>
+
+  <div class="limit">
+    <p>
+      <strong>"Read exactly what runs" is a goal, not a proof.</strong> Our client is one
+      unminified file with no build step, so it is readable — but verifying the bytes this site
+      actually served you is on you.
+      <a href="https://github.com/erikherz/earthseed/blob/main/INTEGRITY.md">INTEGRITY.md</a>
+      publishes their hashes in a different place, under a different party, so substitution
+      becomes detectable rather than impossible. Self-hosting is the answer for anyone who cannot
+      accept that.
+    </p>
+  </div>
+
+  <h2>How to know this is true</h2>
+
+  <p>
+    Our whole client is one file you can read:
+    <a href="https://github.com/erikherz/earthseed/blob/main/simple/earthseed.js"><code>earthseed.js</code></a>.
+    The transport underneath it is
+    <a href="https://www.npmjs.com/package/@moq/net/v/0.1.5"><code>@moq/net</code></a>, which we did
+    not write and did not change — we serve our own copy of it so nobody else can push code onto
+    the page that holds your content key, and
+    <a href="https://github.com/erikherz/earthseed/blob/main/simple/vendor/README.md">the build is
+    reproducible</a> so you can confirm that.
+  </p>
+  <p>
+    The claims above that can be checked mechanically are, and the ones that matter most are the
+    negative ones — checks that try to break a promise and must fail:
+  </p>
+  <ul>
+    <li>Open a live stream without the <code>#</code> part of the link — the position we're in — and nothing decodes.</li>
+    <li>Ask for a relay placement knowing only the stream's name, and be refused.</li>
+    <li>Terminate a stream while someone is watching, and confirm it stops.</li>
+    <li>Read the database directly after a report is filed, and confirm no key is in it.</li>
+  </ul>
+  <p>
+    The longer engineering version, including the comparison against ordinary container hosting and
+    every known weakness, is in
+    <a href="https://github.com/erikherz/earthseed/blob/main/simple/TRUST.md">TRUST.md</a>.
+  </p>
+
+  <p class="foot">
+    This describes Earthseed as it runs today; it will be rewritten when that changes rather than
+    quietly left standing.
+    Questions: <a href="mailto:erik@vivoh.com">erik@vivoh.com</a>
+  </p>
+
+</main>
+</body>
+</html>

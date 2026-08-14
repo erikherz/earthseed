@@ -19,7 +19,17 @@ import { dirname, join } from "node:path";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const HEADERS = join(ROOT, "simple/_headers");
-const PAGES = ["simple/index.html", "simple/broadcast.html", "simple/watch.html"];
+// Every page the enforced policy applies to. simple/_headers matches /*, so a page left off this
+// list still gets the policy and simply has no hash for its inline script — which fails silently,
+// exactly the way this whole file exists to prevent. Add new pages here when you add them.
+const PAGES = [
+  "simple/index.html",
+  "simple/broadcast.html",
+  "simple/watch.html",
+  "simple/request.html",
+  "simple/reports.html",
+  "simple/trust.html",
+];
 
 // Network destinations are deliberately UNRESTRICTED, so that anyone can run a fleet on their own
 // domain. An earlier version named the broker and *.moqcdn.net explicitly, which quietly encoded

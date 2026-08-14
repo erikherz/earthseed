@@ -1,0 +1,257 @@
+<!doctype html>
+<!--
+  Request a publish key.
+
+  Deliberately standalone: no transport library, no crypto module, no media code. Someone who has
+  not yet been admitted to broadcast should not be loading any of that.
+
+  What this page does NOT do, and must never start doing: ask for a name, an email, a phone number,
+  or anything else that identifies the requester. There is no field to fill in because there is
+  nothing we want to know. The key that comes back carries its own expiry under a MAC and is not
+  written down anywhere on our side, so there is no row linking a person to a broadcast — not for
+  us to consult, and not for anyone to compel from us.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex" />
+<title>Request a publish key · Earthseed</title>
+<link rel="icon" href="/favicon.svg" />
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0a0e16;
+    --card: #141a24;
+    --border: #222b38;
+    --text: #e0e0e0;
+    --muted: #8a93a3;
+    --green: #34d399;
+    --grad: linear-gradient(135deg, #60a5fa 0%, #34d399 50%, #a78bfa 100%);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 5vh 20px 10vh;
+    background: var(--bg); color: var(--text);
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    display: flex; justify-content: center;
+  }
+  main { width: 100%; max-width: 34em; }
+  .brand { display: inline-flex; align-items: center; gap: 9px; margin-bottom: 22px; text-decoration: none; }
+  .brand img { width: 30px; height: 30px; display: block; }
+  .brand span {
+    font-size: 1.05rem; font-weight: 600; letter-spacing: -0.02em;
+    background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  h1 { font-size: 1.5rem; margin: 0 0 0.6em; font-weight: 600; }
+  h2 { font-size: 1rem; margin: 2em 0 0.5em; font-weight: 600; color: var(--text); }
+  p { margin: 0 0 1em; color: var(--muted); }
+  a { color: var(--green); }
+  code, .code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: #0d1119; border: 1px solid var(--border); border-radius: 4px;
+  }
+  code { padding: 1px 5px; font-size: 0.9em; }
+  button {
+    padding: 11px 22px; border: 0; border-radius: 6px; background: var(--green);
+    color: #06231a; font: inherit; font-weight: 600; cursor: pointer;
+  }
+  button:disabled { background: #1f3a33; color: #6a7a76; cursor: default; }
+  .muted { color: var(--muted); font-size: 0.875rem; }
+  .panel { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 18px; }
+  #progress { margin: 1.2em 0 0; height: 4px; background: #0d1119; border-radius: 2px; overflow: hidden; display: none; }
+  #bar { height: 100%; width: 0; background: var(--green); transition: width 0.2s; }
+  #result { display: none; }
+  .code-out { display: block; padding: 14px; margin: 0 0 12px; word-break: break-all; font-size: 0.95rem; color: var(--text); }
+  .warn { border-left: 2px solid #d4a04a; padding-left: 12px; color: #c0a070; }
+  #error { color: #f87171; display: none; }
+</style>
+</head>
+<body>
+<main>
+  <a class="brand" href="/">
+    <img src="/favicon.svg" alt="" width="30" height="30" />
+    <span>earthseed.live</span>
+  </a>
+
+  <h1>Request a publish key</h1>
+
+  <p>
+    A key lets you broadcast on Earthseed. It is not an account: there is no name, no email and no
+    password, and nothing you do here is recorded against you.
+  </p>
+
+  <div class="panel">
+    <p style="margin:0 0 14px;color:#e0e0e0;">
+      Your browser will spend a few seconds on a small puzzle first. That is only there to stop
+      scripts requesting thousands of keys — it is not a test of anything about you.
+    </p>
+    <button id="go">Request a key</button>
+    <div id="progress"><div id="bar"></div></div>
+    <p id="status" class="muted" style="margin:0.8em 0 0;display:none;"></p>
+    <p id="error" class="muted" style="margin:0.8em 0 0;"></p>
+  </div>
+
+  <div id="result" class="panel" style="margin-top:18px;">
+    <p style="margin:0 0 10px;color:#e0e0e0;">Your publish key:</p>
+    <div class="code code-out" id="code"></div>
+    <button id="copy">Copy</button>
+    <a id="open" href="#" style="margin-left:12px;">Open the broadcast page with it</a>
+    <p id="timing" class="muted" style="margin:14px 0 0;"></p>
+    <p class="muted" style="margin:10px 0 0;">
+      Save it somewhere. We cannot look it up or send it again — we did not keep a copy.
+    </p>
+  </div>
+
+  <h2>What we know about you</h2>
+  <p>
+    Nothing that we chose to learn. We do not store your key, so there is no record connecting you
+    to anything you broadcast. Cloudflare, which serves this page, does see the IP address you
+    connect from — here and again when you broadcast. If that matters to you, use a VPN or Tor for
+    both. We would rather tell you that than imply a protection we cannot provide.
+  </p>
+
+  <h2>What a key does and does not do</h2>
+  <p>
+    It admits you to broadcast. It does not decrypt anything: your stream is encrypted in your own
+    browser with a key that lives only in the link you share, which never reaches us. A publish key
+    being shared, stolen or expired changes nothing about who can watch your stream.
+  </p>
+  <p class="muted">
+    Keys expire and are simply requested again. If a stream is reported and we act on it, we can
+    stop that broadcast — we still cannot watch it or say what it contained.
+    <a href="/trust">How you're protected</a>.
+  </p>
+</main>
+
+<script>
+(function () {
+  var goBtn = document.getElementById("go");
+  var bar = document.getElementById("bar");
+  var progress = document.getElementById("progress");
+  var statusEl = document.getElementById("status");
+  var errorEl = document.getElementById("error");
+  var resultEl = document.getElementById("result");
+
+  function fail(msg) {
+    errorEl.textContent = msg;
+    errorEl.style.display = "block";
+    progress.style.display = "none";
+    statusEl.style.display = "none";
+    goBtn.disabled = false;
+    goBtn.textContent = "Try again";
+  }
+
+  var enc = new TextEncoder();
+
+  // Does SHA-256(challenge|nonce) start with `bits` zero bits? Mirrors powIsValid() in the Worker;
+  // if you change one, change both or every request will be rejected.
+  async function meets(challenge, nonce, bits) {
+    var buf = await crypto.subtle.digest("SHA-256", enc.encode(challenge + "|" + nonce));
+    var b = new Uint8Array(buf);
+    var seen = 0;
+    for (var i = 0; i < b.length; i++) {
+      if (b[i] === 0) { seen += 8; continue; }
+      seen += Math.clz32(b[i]) - 24;
+      break;
+    }
+    return seen >= bits;
+  }
+
+  // Yield to the event loop periodically. Without this the tab freezes for the whole search and
+  // the progress bar never paints, which reads as a hung page rather than a busy one.
+  async function solve(challenge, bits) {
+    var expected = Math.pow(2, bits); // mean attempts; only used to draw a plausible bar
+    for (var i = 0; ; i++) {
+      if (await meets(challenge, String(i), bits)) return String(i);
+      if ((i & 1023) === 0) {
+        bar.style.width = Math.min(97, (i / expected) * 100).toFixed(1) + "%";
+        await new Promise(function (r) { setTimeout(r, 0); });
+      }
+    }
+  }
+
+  goBtn.addEventListener("click", async function () {
+    goBtn.disabled = true;
+    errorEl.style.display = "none";
+    progress.style.display = "block";
+    statusEl.style.display = "block";
+    statusEl.textContent = "Working…";
+
+    var chal;
+    try {
+      var r = await fetch("/api/publish-code/challenge");
+      if (!r.ok) {
+        fail(r.status === 503
+          ? "Key requests are not enabled on this deployment."
+          : "Could not reach the server. Try again in a moment.");
+        return;
+      }
+      chal = await r.json();
+    } catch (e) {
+      fail("Could not reach the server. Try again in a moment.");
+      return;
+    }
+
+    var nonce;
+    try {
+      nonce = await solve(chal.challenge, chal.bits);
+    } catch (e) {
+      fail("Your browser could not complete the puzzle.");
+      return;
+    }
+    bar.style.width = "100%";
+    statusEl.textContent = "Requesting…";
+
+    var out;
+    try {
+      var r2 = await fetch("/api/publish-code/request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ challenge: chal.challenge, nonce: nonce }),
+      });
+      out = await r2.json();
+      if (!r2.ok) { fail(out.error || "The request was declined."); return; }
+    } catch (e) {
+      fail("Could not reach the server. Try again in a moment.");
+      return;
+    }
+
+    progress.style.display = "none";
+    statusEl.style.display = "none";
+    goBtn.textContent = "Request another";
+    goBtn.disabled = false;
+
+    document.getElementById("code").textContent = out.code;
+    var openLink = document.getElementById("open");
+    openLink.href = "/broadcast.html?code=" + encodeURIComponent(out.code);
+
+    var timing = document.getElementById("timing");
+    if (out.active_immediately) {
+      timing.textContent = "Usable now. Expires " + new Date(out.expires_at).toLocaleString() + ".";
+      timing.className = "muted";
+    } else {
+      // Say this plainly rather than letting someone discover it by being refused at go-live.
+      timing.textContent =
+        "This key becomes usable at " + new Date(out.active_at).toLocaleString() +
+        " and expires " + new Date(out.expires_at).toLocaleString() + ". " +
+        "The wait is the same for everyone and is not about you.";
+      timing.className = "muted warn";
+      openLink.style.display = "none";
+    }
+    resultEl.style.display = "block";
+    resultEl.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  });
+
+  document.getElementById("copy").addEventListener("click", function () {
+    var text = document.getElementById("code").textContent;
+    navigator.clipboard.writeText(text).then(function () {
+      var b = document.getElementById("copy");
+      b.textContent = "Copied";
+      setTimeout(function () { b.textContent = "Copy"; }, 1500);
+    });
+  });
+})();
+</script>
+</body>
+</html>

@@ -3,8 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Watch</title>
-    <meta name="earthseed-key" content="pk_Am-UpPEuGCt5dsnR8xqzOFX2mEYDSCeMGrDWxXli4LU" />
+    <title>Watch · Earthseed</title>
+    <link rel="icon" href="./favicon.svg" />
+    <!-- No publishable key here either: a viewer proves they hold the link instead (see
+         deriveRouteTag in earthseed.js), which is something a broadcast name alone cannot fake. -->
     <!-- @moq/net, VENDORED from its published package — served by us, from this origin, so no
          third-party host can execute code on the page that holds your content key. Built once
          from exact npm versions; reproduce and verify the hash: simple/vendor/README.md -->
@@ -18,7 +20,10 @@
   </head>
   <body class="page-watch">
     <div class="wrap">
-      <a class="home" href="/">← earthseed</a>
+      <a class="brand" href="/">
+        <img class="brand-mark" src="./favicon.svg" alt="" width="30" height="30" />
+        <span class="brand-name">earthseed<span class="dot">.</span>live</span>
+      </a>
       <h1>Watch</h1>
       <canvas id="video"></canvas>
       <div id="status">Loading…</div>

@@ -43,6 +43,14 @@
   --es-font-size-small: 0.85rem;             /* hints and the home link */
   --es-font-size-status: 0.9rem;
 
+  /* Brand. The gradient is the vivoh.earth wordmark treatment (blue → green → violet), reused
+     here so the client and the marketing site read as one product. It is a variable like
+     everything else, so a self-hoster replaces the branding by redefining these two rather than
+     by deleting rules — the point of this file is that someone else's copy can look like theirs. */
+  --es-brand-grad: linear-gradient(135deg, #60a5fa 0%, #34d399 50%, #a78bfa 100%);
+  --es-brand-dot: linear-gradient(135deg, #f97316 0%, #ef4444 100%);
+  --es-brand-mark-size: 30px;
+
   /* ── Layout ─────────────────────────────────────────────────────────────── */
   --es-content-width: 720px;     /* column width */
   --es-page-padding: 24px 16px;
@@ -137,3 +145,64 @@ input[type="checkbox"] { flex: 0 0 auto; min-width: 0; margin: 0; }
 .hint { color: var(--es-hint); font-size: var(--es-font-size-small); }
 .page-broadcast .hint { margin: -6px 0 4px; }
 .page-watch .hint { margin-top: 4px; }
+
+/* ── Brand ─────────────────────────────────────────────────────────────────
+   Replaces the plain "← earthseed" text link. Still a link home, still one line, but it now
+   carries the mark and wordmark so the two pages a viewer actually lands on are recognisably
+   the same product as the site that sent them there. */
+.brand { display: inline-flex; align-items: center; gap: 9px; margin-bottom: 14px; text-decoration: none; }
+.brand-mark { width: var(--es-brand-mark-size); height: var(--es-brand-mark-size); display: block; }
+.brand-name {
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  background: var(--es-brand-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.brand-name .dot {
+  background: var(--es-brand-dot);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.brand:hover .brand-name { text-decoration: underline; text-decoration-color: currentColor; }
+
+/* ── The report control (watch page) ───────────────────────────────────────
+   Built in earthseed.js rather than in watch.html, so these are the only rules describing it.
+   Understated on purpose: it should be findable by someone who needs it and not compete with
+   the video for attention. */
+.linkish {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--es-link);
+  font-size: var(--es-font-size-small);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.linkish:hover { color: var(--es-link-hover); }
+.report-panel {
+  border: 1px solid var(--es-field-border);
+  border-radius: var(--es-radius);
+  padding: 12px 14px;
+  margin-top: 12px;
+}
+.report-title { font-weight: 600; margin-bottom: 6px; }
+.report-panel select,
+.report-panel textarea {
+  flex: 1;
+  min-width: 180px;
+  padding: var(--es-control-padding);
+  border: 1px solid var(--es-field-border);
+  border-radius: var(--es-radius);
+  background: var(--es-field-bg);
+  color: var(--es-field-fg);
+  font: inherit;
+}
+.report-panel textarea { resize: vertical; }
+
+/* The publish key row on the broadcast page. Hidden until the go-live path finds no key, so a
+   broadcaster who already has one never meets it. */
+#keyrow input { font-family: var(--es-font-mono); font-size: 0.9rem; }

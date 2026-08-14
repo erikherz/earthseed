@@ -8,6 +8,7 @@
       name="description"
       content="Live streaming that runs in your browser — no app. Your video is encrypted on your device, so the relay that carries it can't decode it and the broker that connects you never touches it."
     />
+    <link rel="icon" href="./favicon.svg" />
     <style>
       :root {
         --bg: #0a0e16;
@@ -22,6 +23,14 @@
         --btn-grad: linear-gradient(135deg, #2fb88a 0%, #149a6b 100%);
       }
       * { box-sizing: border-box; }
+      /* The vivoh.earth wordmark treatment: globe mark, gradient name, warm dot. */
+      .brand { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; margin-bottom: 26px; }
+      .brand img { width: 34px; height: 34px; display: block; }
+      .brand-name { font-size: 1.2rem; font-weight: 600; letter-spacing: -0.02em; background: var(--grad);
+        -webkit-background-clip: text; background-clip: text; color: transparent; }
+      .brand-dot { background: linear-gradient(135deg, #f97316 0%, #ef4444 100%);
+        -webkit-background-clip: text; background-clip: text; color: transparent; }
+      .brand:hover { text-decoration: none; }
       body {
         margin: 0;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -91,6 +100,10 @@
   </head>
   <body>
     <div class="hero wrap">
+      <a class="brand" href="/">
+        <img src="./favicon.svg" alt="" width="34" height="34" />
+        <span class="brand-name">earthseed<span class="brand-dot">.</span>live</span>
+      </a>
       <span class="eyebrow">End-to-end encrypted</span>
       <h1>Secure live streaming,<br /><span class="grad">with maximum privacy protection</span></h1>
       <p class="sub">
@@ -104,8 +117,13 @@
       </div>
       <div class="cta">
         <a class="btn primary" href="./broadcast.html">Broadcast</a>
+        <a class="btn" href="/request">Get a publish key</a>
         <a class="btn" href="https://github.com/erikherz/earthseed" target="_blank" rel="noopener">Read the code</a>
       </div>
+      <p class="note">
+        Broadcasting needs a publish key — free, about a minute, and it asks you for nothing.
+        Watching needs only a link. <a href="/trust">How you're protected →</a>
+      </p>
     </div>
 
     <section class="wrap">
@@ -168,7 +186,7 @@
           <!-- CONTROL PLANE (dashed blue) — to/from broker -->
           <line x1="230" y1="250" x2="372" y2="88" stroke="#60a5fa" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#ab)" />
           <text x="250" y="150" text-anchor="middle" fill="#60a5fa" font-size="9">④ assign publish</text>
-          <text x="252" y="163" text-anchor="middle" fill="#8a93a3" font-size="8.5">(Bearer pk_) · PUT salt</text>
+          <text x="252" y="163" text-anchor="middle" fill="#8a93a3" font-size="8.5">(publish key) · PUT salt</text>
           <text x="250" y="223" text-anchor="middle" fill="#8a93a3" font-size="8.5">← origin EID + publish JWT</text>
 
           <line x1="588" y1="88" x2="730" y2="250" stroke="#60a5fa" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#ab)" />
@@ -203,7 +221,8 @@
       <h2>The values being exchanged</h2>
       <p class="lead">Everything in the path is one of these. Only one of them is a secret.</p>
       <div class="grid">
-        <div class="kv"><code>pk_…</code><p>Public publishable key. Identifies a tenant for quotas/limits; can mint relay tokens but <b>can't decrypt</b>. Ships in the page.</p></div>
+        <div class="kv"><code>publish key</code><p>Admits you to <em>broadcast</em>. Carries its own expiry under a signature we can't forge and isn't stored anywhere, so it links you to nothing. It <b>can't decrypt</b>. <a href="/request">Request one</a>.</p></div>
+        <div class="kv"><code>route tag</code><p>Proof you were given the link, derived from <code>#k=</code> with different inputs than the content key. It's what a viewer shows to be placed on a relay. <b>Decrypts nothing.</b></p></div>
         <div class="kv"><code>node id</code><p>An Ed25519 public key (base32). The stream's identity and the relay track name. Public.</p></div>
         <div class="kv"><code>origin EID</code><p>Which relay holds the origin, so a viewer's edge knows where to pull from. Routing only; public.</p></div>
         <div class="kv"><code>salts + epoch</code><p>Public HKDF inputs (a global kill-switch salt ‖ a per-stream salt). Rotating one re-keys the stream.</p></div>
@@ -219,7 +238,7 @@
         <table>
           <thead><tr><th>Party</th><th>Can see</th><th>Never sees</th></tr></thead>
           <tbody>
-            <tr><td>Broker (tinymoq.com)</td><td class="see">node id, tenant pk_, public salts, coarse geo; mints tokens</td><td class="no">your <code>#k=</code>, the key CK, your video &amp; audio</td></tr>
+            <tr><td>Broker (tinymoq.com)</td><td class="see">node id, public salts, coarse geo; places you on a relay</td><td class="no">your <code>#k=</code>, the key CK, your video &amp; audio</td></tr>
             <tr><td>Relay fleet</td><td class="see">a connection token, encrypted (unreadable) frames, the catalog (codec/resolution)</td><td class="no">your <code>#k=</code>, the key CK, your video &amp; audio</td></tr>
             <tr><td>Someone with the link</td><td class="see">your video &amp; audio — the link carries <code>#k=</code>, so anyone with it can watch (share it carefully)</td><td class="no">can't publish as you or rotate your key</td></tr>
             <tr><td>Someone without the link</td><td class="see">at most encrypted, unreadable frames — plus the cleartext catalog (codec/resolution) and traffic size/timing</td><td class="no">your video, audio, or key — nothing decryptable</td></tr>
@@ -344,7 +363,48 @@
       </div>
     </section>
 
+    <section class="wrap">
+      <h2>What happens when something goes wrong</h2>
+      <p class="lead">
+        Encryption this strong has a cost, and it is worth stating rather than discovering.
+      </p>
+      <div class="cards2">
+        <div class="feature">
+          <h3>We can stop a stream. We cannot watch one.</h3>
+          <p>
+            Because nothing in the middle can decrypt anything, we can't police content — so we
+            don't pretend to review it. What we can do is <b>stop</b> a broadcast: any viewer can
+            report one from the watch page, and an operator decides. Nothing is automatic; "enough
+            reports" would be a weapon aimed at exactly the people this exists to protect.
+          </p>
+          <p style="margin-top:10px;">
+            Terminating means no further relay placement and no further token for that name.
+            Browsers running our client stop within seconds; a session already open ends when its
+            relay token expires and is not reissued. We still can't say what it contained.
+          </p>
+        </div>
+        <div class="feature">
+          <h3>How you're protected</h3>
+          <p>
+            The short version: your video is encrypted on your device with a key that lives only in
+            the <code>#</code> part of your link, which browsers never send to a server. There is no
+            account, no email and no password. A publish key admits you to broadcast and is never
+            stored, so nothing connects you to what you broadcast. A viewer must prove they hold
+            your link before a relay will even be assigned to them — knowing your stream's name is
+            not enough.
+          </p>
+          <p style="margin-top:10px;">
+            And the limits, in the same place as the promises: a link can't be recalled, a viewer
+            can always record, and your IP is visible to the network.
+            <a href="/trust">Read the whole thing →</a>
+          </p>
+        </div>
+      </div>
+    </section>
+
     <footer class="wrap">
+      <a href="/trust">How you're protected</a> ·
+      <a href="/request">Get a publish key</a> ·
       Open source · <a href="https://github.com/erikherz/earthseed" target="_blank" rel="noopener">github.com/erikherz/earthseed</a>
       · <a href="https://www.linkedin.com/in/erikherz/" target="_blank" rel="noopener">erik@vivoh.com</a>
     </footer>

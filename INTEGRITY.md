@@ -27,12 +27,15 @@ the answer for anyone who cannot accept that; the client is static and the repos
 
 | File | SHA-256 |
 |---|---|
-| `/index.html` | `9967e750fd1cc55529e0b1df006e97755ac11b5982aca68a68e86e1247532303` |
-| `/broadcast.html` | `7c38e729a1f5077ec7c5bd93db0a855b99e6ebb2c4e048ce93255b6f100307f9` |
-| `/watch.html` | `e3ce5f193a668c05e5e13604f119fd16885a1f076e9f9a91663586258d56bf1b` |
-| `/theme.css` | `e2a2aa07262e98c82e4ecfe59387f9860ed0de9b56dae1e1763953de18f6cbf6` |
+| `/index.html` | `3ca3d3672c022393ef1b3520744ce25860afdfb8f7ae6477acb1a18b65478cf8` |
+| `/broadcast.html` | `a5054d96f40598f9096325acf11d81480f58a4d4b4f88dd5eea3d770e0be4e6e` |
+| `/watch.html` | `413bd286c5b237de49ed34ad081d393459177a997066b6ef42919cb927f38cd8` |
+| `/request.html` | `45dcb5f7658babd584450570a445e37148488f5545bc3e70c27132a186201796` |
+| `/trust.html` | `a4ba2ddec362338408854b8ed8a76bfbba298105d15dca1eb3635b8cb1a5abb0` |
+| `/theme.css` | `416a7ae26fe6df2342165bac5e44e45b50c78853c75aaf55ab4702dbc7b343e7` |
 | `/custom.css` | `06ad2a5d03f2ddd43f0a742503c3f323f11445d5531664aa044e1d5eaa7b2efd` |
-| `/earthseed.js` | `2416e9ab0344d3e45cc579cbdc901a273b33fab4814dbef9594456c268dc4d7a` |
+| `/favicon.svg` | `adc7808e817a00c804778b8e962ba3e7f6c601fcc98be0937a053b1a19beb721` |
+| `/earthseed.js` | `8e0db10a3cc3585e69fb75415ee5e80f1d778e0651380132e4987f5334104d12` |
 | `/audio-capture-worklet.js` | `07ab2a238f16a842bb04d31cd54e015991f9c23493763df3fe6f32ca6372c50b` |
 | `/vendor/moq-net-0.1.5.mjs` | `d38b3f603d6b8491184a56115ebbb76ebe4c374e3abec5431686c3aa427dd5ff` |
 

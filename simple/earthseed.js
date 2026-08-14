@@ -590,51 +590,91 @@ async function stretchPasscode(passcode, streamId) {
   return new Uint8Array(bits);
 }
 
-/* ═══════════════════════════════ 3. BROKER CLIENT ═══════════════════════════════ */
-// The only network call besides the media relay. It gates the *connection* (a short-lived,
-// per-broadcast token) and serves the public *salts*; it never sees the content key, so it is
-// content-blind. The publishable key (pk_) is PUBLIC by design — it identifies a tenant for
-// quota/rate-limit/revoke, can mint tokens, but can never decode media.
+/* ═══════════════════════════════ 3. CONTROL PLANE CLIENT ═══════════════════════════════ */
+// Everything that is not media. Placement on a relay, the short-lived token that authorizes one
+// connection, and the public salts. None of it ever sees the content key, so all of it is
+// content-blind — that is unchanged and is the property the whole design rests on.
+//
+// WHAT CHANGED, and why. This used to call the broker (tinymoq.com) directly, carrying a `pk_`
+// publishable key that shipped in the page. That worked, and it made moderation impossible: with
+// the credential printed in the HTML and no server of ours in the path, there was no moment at
+// which anyone could decline. A stream could be seen to exist and could not be stopped.
+//
+// So placement now goes through this site's own Worker, which holds a real secret, checks a
+// publish code, checks the broadcast name is yours, and refuses outright for a terminated stream.
+// The cost is honest and worth naming: a self-hosted copy of these files reaches its OWN origin,
+// so self-hosting now means running the Worker too.
+//
+// Salts still go straight to the broker. They are public HKDF inputs and the rotate secret is the
+// broadcaster's own; putting our Worker in that path would add a hop and protect nothing.
 
 const BROKER = "https://tinymoq.com";
+/** Same-origin by construction: whoever served this file is who we ask. */
+const api = (path) => new URL(path, location.href).toString();
 
-function pubKey() {
-  const fromUrl = new URLSearchParams(location.search).get("key");
-  if (fromUrl && fromUrl.startsWith("pk_")) return fromUrl.trim();
-  const meta = document.querySelector('meta[name="earthseed-key"]')?.getAttribute("content")?.trim();
-  return meta && meta.startsWith("pk_") ? meta : "pk_Am-UpPEuGCt5dsnR8xqzOFX2mEYDSCeMGrDWxXli4LU";
-}
-/** @param {Record<string, unknown>} body */
-async function brokerAssign(body) {
+/** @param {string} path @param {Record<string, unknown>} body */
+async function postJson(path, body) {
   try {
-    const r = await fetch(`${BROKER}/cdn/assign`, {
+    const r = await fetch(api(path), {
       method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${pubKey()}` },
+      headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     });
     const d = await r.json().catch(() => null);
-    if (!r.ok || !d || d.error) return { error: (d && (d.error || d.reason)) || `HTTP ${r.status}` };
+    if (!r.ok || !d || d.error) {
+      return { error: (d && (d.error || d.reason)) || `HTTP ${r.status}`, status: r.status, need_code: !!d?.need_code };
+    }
     return d;
   } catch (e) {
     return { error: String(e) };
   }
 }
-// ── proving the broadcast name is ours. The publishable key above is PUBLIC, so on
-// its own it would let anyone ask the broker for a publish token on anyone's
-// broadcast — the name travels in every share link. The name is also an Ed25519
-// public key (§2), so we settle it with the private half: the broker hands out a
-// short-lived challenge and we sign it. Nothing is registered anywhere; only the
-// holder of the key that MADE the name can ever produce this signature.
+
+// ── the publish code. A capability, not an account: it carries its own expiry under a MAC only
+// the Worker can produce, so nothing about the person who requested it is written down anywhere.
+// Kept per-device in localStorage; ?code= lets one be moved to a phone by QR without typing it.
+const CODE_STORAGE_KEY = "es:code";
+
+function getPublishCode() {
+  const fromUrl = new URLSearchParams(location.search).get("code");
+  if (fromUrl) {
+    setPublishCode(fromUrl.trim());
+    return fromUrl.trim();
+  }
+  try {
+    return localStorage.getItem(CODE_STORAGE_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+/** @param {string} code */
+function setPublishCode(code) {
+  try {
+    if (code) localStorage.setItem(CODE_STORAGE_KEY, code);
+    else localStorage.removeItem(CODE_STORAGE_KEY);
+  } catch {
+    /* private mode — this session only */
+  }
+}
+
+// ── proving the broadcast name is ours. The name travels in every share link, so knowing one is
+// evidence of nothing. The name is also an Ed25519 public key (§2), so we settle it with the
+// private half: a short-lived challenge comes back and we sign it. Nothing is registered
+// anywhere; only the holder of the key that MADE the name can ever produce this signature.
 const CLAIM_CONTEXT = "earthseed-claim-v1";
 
 /** @param {string} nodeId */
 async function fetchChallenge(nodeId) {
-  const r = await fetch(`${BROKER}/cdn/challenge?broadcast=${encodeURIComponent(nodeId)}`);
-  if (!r.ok) return null;
-  const d = await r.json().catch(() => null);
-  return d && typeof d.challenge === "string" ? d.challenge : null;
+  try {
+    const r = await fetch(api(`/api/broadcast/challenge?broadcast=${encodeURIComponent(nodeId)}`));
+    if (!r.ok) return null;
+    const d = await r.json().catch(() => null);
+    return d && typeof d.challenge === "string" ? d.challenge : null;
+  } catch {
+    return null;
+  }
 }
-/** Sign the broker's challenge with the node's private key. @param {{id:string, keyPair:CryptoKeyPair}} node @param {string} challenge */
+/** Sign the claim challenge with the node's private key. @param {{id:string, keyPair:CryptoKeyPair}} node @param {string} challenge */
 async function signClaim(node, challenge) {
   const msg = new TextEncoder().encode(`${CLAIM_CONTEXT}|${node.id}|${challenge}`);
   const sig = new Uint8Array(await crypto.subtle.sign(ED25519, node.keyPair.privateKey, bs(msg)));
@@ -643,22 +683,99 @@ async function signClaim(node, challenge) {
   return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-/** Assign an origin relay + publish token for this broadcaster. @param {{id:string, keyPair:CryptoKeyPair}} node */
-async function assignPublish(node) {
-  const challenge = await fetchChallenge(node.id);
-  if (!challenge) return { error: "could not get a claim challenge from the broker" };
-  const sig = await signClaim(node, challenge);
-  const d = await brokerAssign({ broadcast: node.id, role: "publish", challenge, sig });
-  if (d.error) return d;
-  if (!d.relay || !d.origin_endpoint_id) return { error: "origin assign incomplete" };
-  return { relay_url: `https://${d.relay}/`, origin_endpoint_id: d.origin_endpoint_id, jwt: d.jwt ?? null };
+/**
+ * PROOF OF LINK. A tag derived from the fragment key, registered by the broadcaster at go-live and
+ * presented by every viewer who wants to be placed.
+ *
+ * Before this, anyone who knew a broadcast name could get a relay assignment for it. The name is
+ * public — it is in every share link and is the moq track name — so that check was never a check.
+ *
+ * Derived with a DIFFERENT salt and a DIFFERENT info string than the content key, which makes the
+ * two cryptographically independent: the server may hold every tag ever registered and still
+ * decrypt nothing. The tag proves exactly one thing, that its holder was given a link.
+ * @param {string} fragmentKeyB64 @param {string} nodeId
+ */
+async function deriveRouteTag(fragmentKeyB64, nodeId) {
+  const ikm = await crypto.subtle.importKey("raw", bs(b64urlToBytes(fragmentKeyB64)), "HKDF", false, ["deriveBits"]);
+  const enc = new TextEncoder();
+  const bits = await crypto.subtle.deriveBits(
+    { name: "HKDF", hash: "SHA-256", salt: bs(enc.encode(`es-route|${nodeId}`)), info: bs(enc.encode("earthseed-route-auth-v1")) },
+    ikm,
+    256
+  );
+  let bin = "";
+  for (const b of new Uint8Array(bits)) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
-/** Place a viewer edge that pulls from the given origin; mint the subscribe token. @param {string} nodeId @param {string} originEid */
-async function assignWatch(nodeId, originEid) {
-  const d = await brokerAssign({ broadcast: nodeId, role: "watch", origin: originEid, xport: "iroh" });
+
+/** Assign an origin relay + publish token. @param {{id:string, keyPair:CryptoKeyPair}} node @param {string} tag @param {string} code */
+async function assignPublish(node, tag, code) {
+  const challenge = await fetchChallenge(node.id);
+  if (!challenge) return { error: "could not get a claim challenge" };
+  const sig = await signClaim(node, challenge);
+  const d = await postJson("/api/broadcast/start", { broadcast: node.id, challenge, sig, tag, code });
   if (d.error) return d;
-  if (!d.relay) return { error: "edge assign incomplete" };
-  return { relay_url: `https://${d.relay}/`, jwt: d.jwt ?? null };
+  if (!d.relay_url || !d.origin_endpoint_id) return { error: "origin assign incomplete" };
+  return { relay_url: d.relay_url, origin_endpoint_id: d.origin_endpoint_id, jwt: d.jwt ?? null };
+}
+/** Place a viewer edge that pulls from the given origin; get the subscribe token.
+ * @param {string} nodeId @param {string} originEid @param {string} tag */
+async function assignWatch(nodeId, originEid, tag) {
+  const d = await postJson("/api/watch/start", { broadcast: nodeId, origin: originEid, tag });
+  if (d.error) return d;
+  if (!d.relay_url) return { error: "edge assign incomplete" };
+  return { relay_url: d.relay_url, jwt: d.jwt ?? null, ttl: d.ttl ?? null };
+}
+/** Tell the control plane this broadcast is over. Best-effort; nothing depends on it arriving. */
+async function endBroadcast(nodeId) {
+  try {
+    await fetch(api("/api/broadcast/end"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ broadcast: nodeId }),
+      keepalive: true,
+    });
+  } catch {
+    /* the row is superseded at the next go-live anyway */
+  }
+}
+
+/**
+ * Poll "should I still be showing this?" and stop when the answer is no.
+ *
+ * This is the COOPERATING half of termination and it is the fast one — a few seconds. It is also,
+ * by construction, only as good as the client running it: a browser pointed at a patched copy of
+ * this file would simply not call it. That case is covered elsewhere and differently, by the relay
+ * token expiring and not being reissued, which binds whatever software the viewer is running.
+ * Both halves are real; neither is sufficient alone.
+ * @param {string} nodeId @param {string} tag @param {() => void} onKilled
+ */
+const KILL_POLL_MS = 5000;
+
+function watchKill(nodeId, tag, onKilled) {
+  let stopped = false;
+  const tick = async () => {
+    if (stopped) return;
+    try {
+      const r = await fetch(api(`/api/stream/${encodeURIComponent(nodeId)}/status?tag=${encodeURIComponent(tag)}`));
+      // A network blip must not stop a broadcast — only an explicit "killed" does. 404 is left
+      // alone for the same reason: it is also what a viewer sees before the broadcaster registers.
+      if (!r.ok) return;
+      const d = await r.json().catch(() => null);
+      if (d?.killed) {
+        stopped = true;
+        onKilled();
+      }
+    } catch {
+      /* offline: try again next tick */
+    }
+  };
+  const timer = setInterval(tick, KILL_POLL_MS);
+  tick();
+  return () => {
+    stopped = true;
+    clearInterval(timer);
+  };
 }
 // No getSalt(): viewers no longer read salts from the broker at all — the broadcaster publishes
 // them on the catalog track. Only the broadcaster still calls putSalt, once per go-live, and it is
@@ -1272,20 +1389,57 @@ export async function runBroadcast() {
     set("new passcode — it takes effect the next time you go live");
   });
 
+  // ── the publish key. Broadcasting needs one; watching never does. It is a capability with an
+  // expiry baked in under a MAC, not an account — nothing about who asked for it is recorded, here
+  // or on the server. The row stays hidden until it is actually needed, so a broadcaster who
+  // already has one never sees it.
+  const keyRow = $("keyrow"), keyField = $("pubkey"), keySave = $("keysave"), keyHint = $("keyhint");
+  const showKeyPrompt = (message) => {
+    if (keyRow) keyRow.hidden = false;
+    if (keyHint) keyHint.hidden = false;
+    if (keyField) {
+      keyField.value = getPublishCode();
+      keyField.focus();
+    }
+    set(message);
+  };
+  keySave?.addEventListener("click", () => {
+    const typed = keyField?.value.trim() ?? "";
+    if (!typed) return;
+    setPublishCode(typed);
+    set("publish key saved — press “Go live”");
+  });
+
+  /** @type {(() => void)|null} */ let stopKillWatch = null;
+  const teardown = (message) => {
+    stopKillWatch?.();
+    stopKillWatch = null;
+    bc?.stop();
+    bc = null;
+    goBtn.textContent = "Go live";
+    if (pcToggle) pcToggle.disabled = false;
+    if (regenBtn) regenBtn.disabled = false;
+    if (newLinkBtn) newLinkBtn.disabled = false;
+    if (newIdBtn) newIdBtn.disabled = false;
+    set(message);
+  };
+
   goBtn.addEventListener("click", async () => {
     if (bc) {
-      bc.stop();
-      bc = null;
-      goBtn.textContent = "Go live";
-      if (pcToggle) pcToggle.disabled = false;
-      if (regenBtn) regenBtn.disabled = false;
-      if (newLinkBtn) newLinkBtn.disabled = false;
-      if (newIdBtn) newIdBtn.disabled = false;
-      set("stopped");
+      const id = nodeId;
+      teardown("stopped");
+      if (id) void endBroadcast(id);
       return;
     }
     goBtn.disabled = true;
     try {
+      const code = getPublishCode();
+      if (!code) {
+        // Asked for before the camera, not after. Prompting once the preview is already running
+        // would leave someone looking at their own face believing they were live.
+        return showKeyPrompt("A publish key is required to broadcast — paste one below, or request one.");
+      }
+
       const node = await getOrCreateNode();
       nodeId = node.id;
       const fragmentKey = getOrCreateFragmentKey(node.id);
@@ -1301,8 +1455,16 @@ export async function runBroadcast() {
       armKey();
 
       set("assigning a relay…");
-      const pub = await assignPublish(node); // signs a broker challenge to prove the name is ours
-      if (pub.error) return set(`broker error: ${pub.error}`);
+      // The tag is registered here so every viewer can be checked against it. Derived from the
+      // fragment key, which never leaves this browser — the tag does, and cannot be walked back.
+      const routeTag = await deriveRouteTag(fragmentKey, node.id);
+      const pub = await assignPublish(node, routeTag, code); // signs a challenge to prove the name is ours
+      if (pub.error) {
+        // A refused key is not an error to shrug at — it is the one failure the broadcaster can
+        // actually fix, so it gets the prompt rather than a status line they cannot act on.
+        if (pub.need_code) return showKeyPrompt(pub.error);
+        return set(`could not go live: ${pub.error}`);
+      }
       const salt = await putSalt(node.id, newStreamSalt(), getOrCreateRotateSecret(node.id));
       if (!salt?.stream) return set("could not set the stream salt");
       await deriveMediaKey({ fragmentKeyB64: fragmentKey, globalSaltB64: salt.global, streamSaltB64: salt.stream, streamId: node.id, epoch: salt.epoch, pw });
@@ -1324,11 +1486,21 @@ export async function runBroadcast() {
       link.hash = `k=${fragmentKey}`;
       $("share").value = link.toString();
       goBtn.textContent = "Stop";
+      if (keyRow) keyRow.hidden = true;
+      if (keyHint) keyHint.hidden = true;
       // Locked while live: the key is fixed for this broadcast, so none of these can take effect now.
       if (pcToggle) pcToggle.disabled = true;
       if (regenBtn) regenBtn.disabled = true;
       if (newLinkBtn) newLinkBtn.disabled = true;
       if (newIdBtn) newIdBtn.disabled = true;
+
+      // The broadcaster is told too, rather than left transmitting into a relay that has stopped
+      // accepting viewers. Being cut off silently is worse than being cut off.
+      stopKillWatch = watchKill(node.id, routeTag, () => {
+        const id = nodeId;
+        teardown("This broadcast was terminated by the operator.");
+        if (id) void endBroadcast(id);
+      });
     } catch (e) {
       set(`error: ${e instanceof Error ? e.message : e}`);
     } finally {
@@ -1434,6 +1606,105 @@ function wirePasscodePrompt(p) {
   };
 }
 
+/**
+ * The report control, built here rather than in watch.html.
+ *
+ * Every node is created and filled with textContent — no innerHTML anywhere. That is not style:
+ * the CSP sets `require-trusted-types-for 'script'`, so an innerHTML assignment THROWS on Chromium
+ * rather than degrading, and the property that makes an open connect-src safe (no injection sinks
+ * in this client) is one this code has to keep true.
+ *
+ * What is sent: the stream id and a category. Not the link, not the key, not who is reporting.
+ * The id alone is enough for the only action available to an operator, which is to stop the
+ * stream — they still cannot watch it, and filing this does not let them.
+ * @param {string} nodeId
+ */
+function mountReportControl(nodeId) {
+  const wrap = document.querySelector(".wrap");
+  if (!wrap) return;
+
+  const el = (tag, props = {}) => Object.assign(document.createElement(tag), props);
+
+  const open = el("button", { textContent: "Report this stream", className: "linkish", type: "button" });
+  const row = el("div", { className: "row report-open" });
+  row.appendChild(open);
+  wrap.appendChild(row);
+
+  const panel = el("div", { className: "report-panel", hidden: true });
+  panel.appendChild(el("div", { className: "report-title", textContent: "Report this stream" }));
+  panel.appendChild(
+    el("div", {
+      className: "hint",
+      textContent:
+        "This goes to the operator, who can stop the stream. They cannot see it — nobody can " +
+        "decrypt an Earthseed stream without the link you were given, and the passcode if there is one.",
+    })
+  );
+
+  const select = el("select", { id: "reportcat" });
+  for (const [value, label] of [
+    ["sexual-content-involving-minors", "Sexual content involving a minor"],
+    ["violence-or-threats", "Violence or threats"],
+    ["non-consensual-content", "Non-consensual content"],
+    ["harassment", "Harassment"],
+    ["other", "Something else"],
+  ]) {
+    select.appendChild(el("option", { value, textContent: label }));
+  }
+  panel.appendChild(el("div", { className: "row" })).appendChild(select);
+
+  const note = el("textarea", {
+    id: "reportnote",
+    rows: 3,
+    maxLength: 500,
+    placeholder: "Anything else the operator should know (optional)",
+  });
+  panel.appendChild(el("div", { className: "row" })).appendChild(note);
+
+  const send = el("button", { textContent: "Send report", type: "button" });
+  const cancel = el("button", { textContent: "Cancel", type: "button", className: "linkish" });
+  const actions = el("div", { className: "row" });
+  actions.append(send, cancel);
+  panel.appendChild(actions);
+
+  const result = el("div", { className: "hint" });
+  panel.appendChild(result);
+  wrap.appendChild(panel);
+
+  open.addEventListener("click", () => {
+    panel.hidden = false;
+    row.hidden = true;
+  });
+  cancel.addEventListener("click", () => {
+    panel.hidden = true;
+    row.hidden = false;
+  });
+  send.addEventListener("click", async () => {
+    send.disabled = true;
+    result.textContent = "sending…";
+    try {
+      const r = await fetch(api("/api/report"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ stream_id: nodeId, category: select.value, note: note.value.slice(0, 500) }),
+      });
+      // 202 means "recorded elsewhere or rate-limited" and is deliberately indistinguishable to
+      // the reporter: telling someone their report was throttled invites them to work around it.
+      result.textContent = r.ok
+        ? "Thank you — this has been sent to the operator."
+        : "That did not send. Please try again.";
+      if (r.ok) {
+        send.hidden = true;
+        cancel.textContent = "Close";
+      }
+    } catch {
+      result.textContent = "That did not send. Please try again.";
+    } finally {
+      send.disabled = false;
+    }
+  });
+}
+
 /** Wire the watch page (#video #status + the passcode prompt). */
 export async function runWatch() {
   // The status line has two writers — this controller and the media loop, which reports every
@@ -1482,13 +1753,37 @@ export async function runWatch() {
   // Retried rather than failed, because a viewer who opens the link early is the normal case: the
   // broker cannot place an edge for a broadcast that has not started.
   set("waiting for broadcaster…");
-  let edge = await assignWatch(node, originEid || "");
+  // Proof of link. Derived from the #k= fragment we were given, so it can only be produced by
+  // someone holding the whole link — which is the point: the broadcast name alone is public.
+  const routeTag = await deriveRouteTag(fragmentKey, node);
+  let edge = await assignWatch(node, originEid || "", routeTag);
   for (let i = 0; i < 20 && edge.error; i++) {
     await new Promise((r) => setTimeout(r, 3000));
-    edge = await assignWatch(node, originEid || "");
+    edge = await assignWatch(node, originEid || "", routeTag);
   }
   if (edge.error) return set("stream is not live");
   const relay = connectUrl(edge.relay_url, edge.jwt);
+
+  // Reporting is offered only to someone who actually got placed, because only they can have seen
+  // anything. Mounted before playback starts so it is there the moment it might be wanted.
+  mountReportControl(node);
+
+  /** @type {{stop():void}|null} */ let player = null;
+  const stopKillWatch = watchKill(node, routeTag, () => {
+    try {
+      player?.stop();
+    } catch {
+      /* already gone */
+    }
+    statusLocked = true;
+    setForced("This stream was terminated by the operator.");
+    const canvas = $("video");
+    // Blank the canvas. The last painted frame would otherwise sit there indefinitely, which
+    // reads as "still watching" for precisely the content someone asked to have stopped.
+    const c = canvas?.getContext?.("2d");
+    if (c && canvas) c.clearRect(0, 0, canvas.width, canvas.height);
+  });
+  addEventListener("pagehide", () => stopKillWatch(), { once: true });
 
   wirePasscodePrompt({
     node,
@@ -1508,7 +1803,7 @@ export async function runWatch() {
 
   set("connecting…");
   try {
-    await startWatch({ relayUrl: relay, broadcastName: node, canvas: $("video"), onStatus: set, onSalts });
+    player = await startWatch({ relayUrl: relay, broadcastName: node, canvas: $("video"), onStatus: set, onSalts });
   } catch (e) {
     set(`watch error: ${e instanceof Error ? e.message : e}`);
   }

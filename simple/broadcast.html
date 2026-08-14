@@ -3,13 +3,13 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Broadcast</title>
+    <title>Broadcast · Earthseed</title>
     <meta name="robots" content="noindex" />
-    <!-- PUBLIC publishable key (safe to expose; it ships in the page). Identifies the tenant to the
-         broker, which mints short-lived per-broadcast relay tokens. On its own it authorizes
-         nothing: publishing also requires signing the broker's challenge with this stream's node
-         key, so this key cannot claim a broadcast name. It never decodes media. -->
-    <meta name="earthseed-key" content="pk_Am-UpPEuGCt5dsnR8xqzOFX2mEYDSCeMGrDWxXli4LU" />
+    <link rel="icon" href="./favicon.svg" />
+    <!-- No publishable key in this page any more. It used to carry one, and a credential printed
+         in the HTML is a credential nobody can decline — which is why there was no way to stop a
+         stream. Relay placement now goes through this site's Worker, which holds a real secret and
+         checks a publish code first. See §3 of earthseed.js. -->
     <!-- Two includes, on purpose:
          (1) @moq/net — Luke Curley's Media-over-QUIC transport. VENDORED: built once from the
              published package at exact versions and served from THIS origin, so no third-party
@@ -26,11 +26,26 @@
   </head>
   <body class="page-broadcast">
     <div class="wrap">
-      <a class="home" href="/">← earthseed</a>
+      <a class="brand" href="/">
+        <img class="brand-mark" src="./favicon.svg" alt="" width="30" height="30" />
+        <span class="brand-name">earthseed<span class="dot">.</span>live</span>
+      </a>
       <h1>Broadcast</h1>
       <video id="preview" muted autoplay playsinline></video>
       <div class="row">
         <button id="go">Go live</button>
+      </div>
+      <!-- Revealed only when going live finds no publish key, or when one is refused. A key is a
+           capability with its own expiry, not an account: requesting one tells us nothing about
+           you, and we store nothing that could connect you to what you broadcast. -->
+      <div class="row" id="keyrow" hidden>
+        <input id="pubkey" type="text" placeholder="publish key (es1.…)" autocomplete="off"
+               autocapitalize="none" autocorrect="off" spellcheck="false" aria-label="Publish key" />
+        <button id="keysave">Save key</button>
+      </div>
+      <div class="hint" id="keyhint" hidden>
+        Don't have one? <a href="/request">Request a publish key</a> — it takes about a minute and
+        asks you for nothing. Watching never needs one; only broadcasting does.
       </div>
       <div class="row">
         <input id="share" type="text" readonly placeholder="viewer link appears here when you go live" />

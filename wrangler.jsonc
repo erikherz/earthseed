@@ -3,31 +3,52 @@
   "name": "earthseed",
   "compatibility_date": "2025-01-01",
   "main": "src/worker/index.ts",
-  // BROKERED (tinymoq CDN) — STAGED, NOT YET DEPLOYED. We route the normal broadcast/watch
-  // flow through the tinymoq CDN operator's broker, which ASN-steers our traffic back to
-  // Luke as a dedicated enterprise edge. The operator and every box stay relay-blind: only
-  // our public verify_jwk (kid X3KzNJpRvVarbKBM2mk_M5JGt0dDYu85ZA5z2nLb1Qk) ever leaves
-  // Earthseed; per-broadcast tokens are still signed with MOQ_AUTH_PRIVATE_JWK and validate
-  // at both Luke and the tinymoq fleet. Relay-blind media (payload) encryption is unchanged.
+  // STREAMING FLEET: the tinymoq broker (cdnadmin) and our own relay boxes. Deliberately NOT
+  // moq.pro — this deployment runs on Erik's fleet, and the broker ASN-steers traffic to it.
   //
-  // CUTOVER (do these together, only after Erik provides the customer token):
-  //   1. wrangler secret put CDN_API_TOKEN   (the cdn_… customer token from tinymoq/cdnadmin)
-  //   2. wrangler deploy
-  // Brokered mode REQUIRES CDN_API_TOKEN; deploying without it breaks assign. Ensure the box
-  // bearer TINYMOQ_PROVISION_KEY is NOT set on this deployment (brokered must not hold it).
+  // The Worker now sits in front of the broker: it POSTs {broadcast, role, …} to
+  // <BROKER_BASE>/cdn/assign with the CDN_API_TOKEN secret. That token replaced the public `pk_`
+  // that used to ship in the page, which is the change that makes admission and the kill switch
+  // mean anything — a credential everyone can read cannot be declined.
   //
-  // ROLLBACK (one line): set FLEET_MODE "static" + FLEET_ENDPOINT "https://luke.moqcdn.net"
-  // (the prior luke-relay direct config) and redeploy — talks to Luke directly again.
+  // Media always goes browser <-> relay box. Neither the broker nor this Worker ever carries it,
+  // and neither can decrypt it.
+  //
+  // ROLLBACK if the Worker path misbehaves: there is no one-line var for it. The client reaches
+  // /api/broadcast/start and /api/watch/start on its own origin; going back to direct-to-broker
+  // means reverting simple/earthseed.js. That is intentional — a config flag that silently
+  // bypassed admission would be a hole with a switch on it.
   "vars": {
+    "BROKER_BASE": "https://tinymoq.com",
+    // Kept so a rollback to the pre-Worker arrangement needs no code change; BROKER_BASE wins.
     "FLEET_MODE": "brokered",
     "FLEET_ENDPOINT": "https://tinymoq.com/cdn/assign",
-    // Mode C (Enterprise) — EARTHSEED-DRIVEN steering. Steer viewers to erik.moqcdn.net as a
-    // dedicated edge. crosspull: erik pulls the broadcast from the publisher's origin relay
-    // (earthseed passes the real cdn host:dynamic-port + a BYOK pull token); the browser
-    // couriers its watch token to erik's /assign (?jwt=, C1 box-side validates vs verify_jwk).
-    // ENTERPRISE_ASNS is unset => ALL viewers steered (set a comma list to gate by ASN).
-    "ENTERPRISE_EDGE_HOST": "erik.moqcdn.net",
-    "ENTERPRISE_MODE": "crosspull"
+    // The publishable key the client used to carry. Read ONLY as a fallback when CDN_API_TOKEN is
+    // unset, so a misconfigured deploy degrades to the old behaviour instead of refusing everyone.
+    "PUBLIC_KEY": "pk_Am-UpPEuGCt5dsnR8xqzOFX2mEYDSCeMGrDWxXli4LU",
+    // Who mints the relay token. "worker" = we sign it with MOQ_AUTH_PRIVATE_JWK and therefore
+    // choose its lifetime, which is what makes a kill bind a client that ignores the stop signal.
+    // "broker" = pass the broker's token through, and the expiry guarantee is whatever it chose.
+    // Flip to "worker" only after confirming the fleet validates our verify_jwk (see /api/pubkey).
+    "TOKEN_SOURCE": "broker",
+    // Relay token lifetimes, seconds. The viewer figure is the ceiling on how long a terminated
+    // stream can still be watched by a client that ignores the stop signal; lower is stricter and
+    // costs a reconnect that often. 3600 while TOKEN_SOURCE is "broker" (where it does nothing).
+    "PUBLISHER_TOKEN_TTL": "43200",
+    "VIEWER_TOKEN_TTL": "3600",
+    // Publish codes. Config, not code — tuning any of these is a `wrangler deploy`, not an edit.
+    //   PUBLISH_CODE_DELAY_HOURS is the one that matters. At 0 a code works the moment it is
+    //   issued, which is the least friction for a first-time broadcaster. Raise it (24 is the
+    //   natural value) to break the killed -> request another -> back up in ninety seconds loop
+    //   if abuse ever actually shows up. It is deliberately off by default because this app
+    //   supplies no audience — a viewer cannot find a stream without a share link — so the payoff
+    //   for abusing it is low, and the friction would fall entirely on legitimate users.
+    //   PUBLISH_CODE_BATCH stamps an issuance cohort into new codes so /api/admin/revoke-batch can
+    //   cut off everything minted before a bump. Bump it, don't reuse it.
+    "PUBLISH_CODE_BATCH": "1",
+    "PUBLISH_CODE_TTL_DAYS": "30",
+    "PUBLISH_CODE_DELAY_HOURS": "0",
+    "PUBLISH_CODE_POW_BITS": "18"
   },
   "assets": {
     "directory": "./simple",
