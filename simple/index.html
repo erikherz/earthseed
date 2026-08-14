@@ -23,8 +23,12 @@
         --btn-grad: linear-gradient(135deg, #2fb88a 0%, #149a6b 100%);
       }
       * { box-sizing: border-box; }
-      /* The vivoh.earth wordmark treatment: globe mark, gradient name, warm dot. */
-      .brand { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; margin-bottom: 26px; }
+      /* The vivoh.earth wordmark treatment: globe mark, gradient name, warm dot.
+         `flex`, not `inline-flex`: as an inline element it shared a line with the eyebrow pill
+         that follows it, which put "END-TO-END ENCRYPTED" beside the wordmark instead of under
+         it. A block-level flex row takes the full width, so the pill drops to its own line and
+         the hero stacks mark → claim → headline. */
+      .brand { display: flex; justify-content: center; align-items: center; gap: 10px; text-decoration: none; margin-bottom: 18px; }
       .brand img { width: 34px; height: 34px; display: block; }
       .brand-name { font-size: 1.2rem; font-weight: 600; letter-spacing: -0.02em; background: var(--grad);
         -webkit-background-clip: text; background-clip: text; color: transparent; }

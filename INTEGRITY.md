@@ -27,7 +27,7 @@ the answer for anyone who cannot accept that; the client is static and the repos
 
 | File | SHA-256 |
 |---|---|
-| `/index.html` | `3ca3d3672c022393ef1b3520744ce25860afdfb8f7ae6477acb1a18b65478cf8` |
+| `/index.html` | `766b23ad13d16bfb6a5f3316d10a3cc6cff16875addf86fb0186ca962b9913ee` |
 | `/broadcast.html` | `16b414a4073d0d2bd68289a5d5b4e02f8ce344a20a47c92f08c975e5fa8f537c` |
 | `/watch.html` | `b9058fe6f2ec76e0e8fe814ebb909818f7e8db11d29edd5199ee154704cf4424` |
 | `/request.html` | `45dcb5f7658babd584450570a445e37148488f5545bc3e70c27132a186201796` |
