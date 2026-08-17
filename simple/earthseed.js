@@ -1265,7 +1265,34 @@ async function startWatch(opts) {
       numberOfChannels: catalog.audio.numberOfChannels,
     });
     // Autoplay policy: an AudioContext often starts suspended until a user gesture.
-    document.addEventListener("click", (/** @type {Event} */ _e) => void audioCtx?.resume(), { once: true });
+    //
+    // Deliberately NOT `{ once: true }`. A one-shot handler is spent on the first click
+    // whatever happened — including a click where resume() was refused, or one that landed
+    // before the context existed — and there is then nothing left to recover with, so the
+    // viewer watches the rest of the broadcast in silence with no way to fix it. Keep
+    // listening until the context is genuinely running, then stop.
+    //
+    // (Wallflower and Vivoh.Earth have a different shape of the same problem: they swap the
+    // whole player on token renewal, which strands audio in a suspended context that a later
+    // tap cannot revive. Earthseed owns its own AudioContext and never swaps, so this is the
+    // only exposure here — but it is the same underlying rule about user activation.)
+    const resumeAudio = () => {
+      const ctx = audioCtx;
+      if (!ctx) return; // no audio track on this broadcast yet; keep waiting
+      if (ctx.state === "running") {
+        document.removeEventListener("click", resumeAudio);
+        return;
+      }
+      void ctx.resume().then(
+        () => {
+          if (ctx.state === "running") document.removeEventListener("click", resumeAudio);
+        },
+        () => {
+          /* refused — leave the handler attached so the next tap can try again */
+        }
+      );
+    };
+    document.addEventListener("click", resumeAudio);
 
     const audioTrack = broadcast.subscribe("audio", 3);
     (async () => {

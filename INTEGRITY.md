@@ -35,7 +35,7 @@ the answer for anyone who cannot accept that; the client is static and the repos
 | `/theme.css` | `2f9a85583e33835aea0210fb77c7262757d0adf413a170e6d2b8c51cbf765cc2` |
 | `/custom.css` | `06ad2a5d03f2ddd43f0a742503c3f323f11445d5531664aa044e1d5eaa7b2efd` |
 | `/favicon.svg` | `adc7808e817a00c804778b8e962ba3e7f6c601fcc98be0937a053b1a19beb721` |
-| `/earthseed.js` | `e38ad4691c8bcf52f13c15f35a13a19e80c15266203e5f471e131375841cc0d2` |
+| `/earthseed.js` | `0f97dace4e94cade2c2a6bb645b46ba06c45d9cfdc49bacb89659e98077535a1` |
 | `/audio-capture-worklet.js` | `07ab2a238f16a842bb04d31cd54e015991f9c23493763df3fe6f32ca6372c50b` |
 | `/vendor/moq-net-0.1.5.mjs` | `d38b3f603d6b8491184a56115ebbb76ebe4c374e3abec5431686c3aa427dd5ff` |
 
