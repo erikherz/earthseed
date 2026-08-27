@@ -412,5 +412,14 @@
       Open source · <a href="https://github.com/erikherz/earthseed" target="_blank" rel="noopener">github.com/erikherz/earthseed</a>
       · <a href="https://www.linkedin.com/in/erikherz/" target="_blank" rel="noopener">erik@vivoh.com</a>
     </footer>
+    <!-- TEMPORARY, while the relay fleet is not running: turns the Broadcast button into an
+         explanation instead of a dead end. Does nothing at all when /api/config reports the
+         service is open, which is the normal state — so this can stay put between outages.
+         The landing page otherwise loads no client code, and this deliberately keeps it that
+         way: the module is a few dozen lines and does not pull in the broadcaster. -->
+    <script type="module">
+      import { installOfflineNotice } from "./offline-notice.js";
+      installOfflineNotice();
+    </script>
   </body>
 </html>

@@ -19,6 +19,20 @@
   // means reverting simple/earthseed.js. That is intentional — a config flag that silently
   // bypassed admission would be a hole with a switch on it.
   "vars": {
+    // ── THE BROADCAST SHUTTER ────────────────────────────────────────────────────────────────
+    // "1" while the relay fleet is shut down: /api/broadcast/{start,challenge} answer 503 and the
+    // client shows a modal instead of walking someone into a broker that is not there.
+    //
+    // TO REOPEN: set this to "0" and `npm run deploy`. That is the whole procedure — the client
+    // reads it from /api/config and needs no edit. Bring the relays up FIRST; this var only
+    // controls what we say, not whether anything is actually listening.
+    //
+    // Only "1" and "true" close it. Anything else, including unset, is open — a fat-fingered var
+    // must not take broadcasting down, and "0"/"false" are the values someone reaches for to turn
+    // it off (both of which are truthy strings, which is the bug this avoids).
+    "BROADCAST_OFFLINE": "1",
+    "OFFLINE_MESSAGE": "Temporarily offline. Please contact erik@vivoh.com for a demo.",
+
     "BROKER_BASE": "https://tinymoq.com",
     // Kept so a rollback to the pre-Worker arrangement needs no code change; BROKER_BASE wins.
     "FLEET_MODE": "brokered",

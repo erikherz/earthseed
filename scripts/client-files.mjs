@@ -16,6 +16,9 @@ export const FILES = [
   "simple/custom.css",
   "simple/favicon.svg",
   "simple/earthseed.js",
+  // TEMPORARY, alongside the relay shutdown. Loaded by index.html and broadcast.html; inert
+  // unless /api/config says broadcasting is closed. Delete this line with the file.
+  "simple/offline-notice.js",
   "simple/audio-capture-worklet.js",
   "simple/vendor/moq-net-0.1.5.mjs",
 ];

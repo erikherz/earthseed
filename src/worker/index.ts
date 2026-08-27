@@ -68,6 +68,15 @@ export interface Env {
   PUBLISH_CODE_DELAY_HOURS?: string;
   PUBLISH_CODE_POW_BITS?: string;
   VIEWER_TOKEN_TTL?: string;
+
+  // ── Temporary broadcast shutter. "1" or "true" ⇒ nobody may go live and the client says so.
+  // Anything else, including unset, means normal operation: the relays being reachable is the
+  // usual state, so an absent or fat-fingered var must not silently take broadcasting down. That
+  // is the opposite default from the retention vars above, and deliberately — this one is a
+  // notice, not a safety control, and the CDN is the thing that actually enforces its absence.
+  BROADCAST_OFFLINE?: string;
+  /** Overrides the notice text. Unset ⇒ OFFLINE_DEFAULT_MESSAGE. */
+  OFFLINE_MESSAGE?: string;
   PUBLISHER_TOKEN_TTL?: string;
 
   DB: D1Database;
@@ -118,6 +127,31 @@ function withSecurityHeaders(res: Response): Response {
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers: h });
 }
 
+/* ═════════════════════════ The broadcast shutter ═════════════════════════ */
+// A temporary "we are not carrying broadcasts right now" state, for periods when the relay fleet
+// is deliberately not running. It is a VAR rather than a secret so that the live answer is visible
+// in git and cannot drift: flipping it is an edit here plus `npm run deploy`, and the file always
+// says what production is doing.
+//
+// Two layers, and only one of them is load-bearing. The Worker refuses to place a broadcast, which
+// binds every client including a patched one; the modal in the browser exists so that a person
+// gets a sentence instead of a 502 from a broker that is not there. If the two ever disagree, the
+// Worker is right.
+//
+// Watching is deliberately NOT gated. A viewer holding a link for a stream that is not live
+// already gets "offline", and shuttering the watch path would break playback the moment the
+// relays come back but before this var is flipped.
+const OFFLINE_DEFAULT_MESSAGE = "Temporarily offline. Please contact erik@vivoh.com for a demo.";
+
+/** The notice to show, or null when broadcasting is open. */
+function broadcastShutter(env: Env): string | null {
+  const raw = (env.BROADCAST_OFFLINE ?? "").trim().toLowerCase();
+  // Strict allow-list rather than truthiness: "0" and "false" are the values someone reaches for
+  // to turn this OFF, and both are truthy strings in JavaScript.
+  if (raw !== "1" && raw !== "true") return null;
+  return (env.OFFLINE_MESSAGE ?? "").trim() || OFFLINE_DEFAULT_MESSAGE;
+}
+
 async function handleApiRoutes(
   request: Request,
   env: Env,
@@ -138,6 +172,20 @@ async function handleApiRoutes(
         console.error("/api/pubkey:", e);
         return new Response("invalid signing key", { status: 500 });
       }
+    }
+
+    // GET /api/config — the handful of facts the client needs before it offers to do anything.
+    // Public and unauthenticated: it says only whether this deployment is currently carrying
+    // broadcasts, which is what a visitor is about to find out anyway by clicking the button.
+    //
+    // Not cached. The whole point is that flipping the var is visible on the next page load, and
+    // a cached "we're open" would send someone through a camera prompt to a dead end.
+    if (request.method === "GET" && url.pathname === "/api/config") {
+      const shutter = broadcastShutter(env);
+      return Response.json(
+        { broadcast_offline: shutter !== null, offline_message: shutter },
+        { headers: { "Cache-Control": "no-store" } }
+      );
     }
 
     // POST /api/csp-report — where Content-Security-Policy violations are sent. `npx wrangler tail`
@@ -629,6 +677,22 @@ async function mintRelayToken(
 }
 
 async function handlePlacementRoutes(request: Request, env: Env, url: URL): Promise<Response> {
+  // The shutter, before anything else on the publish side. Placed here rather than inside each
+  // handler so that a route added later cannot quietly miss it — /api/broadcast/challenge already
+  // reaches out to the broker, and with the fleet down that is a hung fetch and a 502 rather than
+  // an answer anyone can act on.
+  //
+  // 503 with Retry-After is the honest status: the service exists and is expected back, which is
+  // exactly what the notice says. `offline: true` is what the client keys off; the message is sent
+  // so the wording lives in ONE place (the var) instead of being duplicated in the client.
+  const shutter = broadcastShutter(env);
+  if (shutter && (url.pathname === "/api/broadcast/start" || url.pathname === "/api/broadcast/challenge")) {
+    return Response.json(
+      { error: shutter, offline: true },
+      { status: 503, headers: { "Retry-After": "3600", "Cache-Control": "no-store" } }
+    );
+  }
+
   // GET /api/broadcast/challenge?broadcast=… — the broker's claim challenge, relayed. The
   // broadcaster signs it with the private half of the key its name is made of.
   if (request.method === "GET" && url.pathname === "/api/broadcast/challenge") {

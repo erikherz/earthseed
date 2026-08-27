@@ -27,8 +27,8 @@ the answer for anyone who cannot accept that; the client is static and the repos
 
 | File | SHA-256 |
 |---|---|
-| `/index.html` | `766b23ad13d16bfb6a5f3316d10a3cc6cff16875addf86fb0186ca962b9913ee` |
-| `/broadcast.html` | `16b414a4073d0d2bd68289a5d5b4e02f8ce344a20a47c92f08c975e5fa8f537c` |
+| `/index.html` | `973a64ad9e2a98505f68ca27af4a133a7584b85e2a2a76d394abca15f82574a4` |
+| `/broadcast.html` | `d40af7e48dce85a775393074c3fc1c2a2d7398ebf75661f7018a5f4f6789b988` |
 | `/watch.html` | `b9058fe6f2ec76e0e8fe814ebb909818f7e8db11d29edd5199ee154704cf4424` |
 | `/request.html` | `45dcb5f7658babd584450570a445e37148488f5545bc3e70c27132a186201796` |
 | `/trust.html` | `a4ba2ddec362338408854b8ed8a76bfbba298105d15dca1eb3635b8cb1a5abb0` |
@@ -36,6 +36,7 @@ the answer for anyone who cannot accept that; the client is static and the repos
 | `/custom.css` | `06ad2a5d03f2ddd43f0a742503c3f323f11445d5531664aa044e1d5eaa7b2efd` |
 | `/favicon.svg` | `adc7808e817a00c804778b8e962ba3e7f6c601fcc98be0937a053b1a19beb721` |
 | `/earthseed.js` | `0f97dace4e94cade2c2a6bb645b46ba06c45d9cfdc49bacb89659e98077535a1` |
+| `/offline-notice.js` | `2feb7125de2d2b8c98abd26c704da241a55f04f9ec3b78772d3adf19fa7fb62e` |
 | `/audio-capture-worklet.js` | `07ab2a238f16a842bb04d31cd54e015991f9c23493763df3fe6f32ca6372c50b` |
 | `/vendor/moq-net-0.1.5.mjs` | `d38b3f603d6b8491184a56115ebbb76ebe4c374e3abec5431686c3aa427dd5ff` |
 
