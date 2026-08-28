@@ -390,6 +390,21 @@ video { min-height: 240px; }
 .hint a { color: var(--es-link-hover); }
 .stage .hint, .page-watch .hint { margin-top: 10px; }
 
+/* The capture notice: what happened to the camera, in the broadcaster's own words rather than
+   the browser's. Literal amber because this palette has no warning token, and a translucent tint
+   over the tokenised background reads in both the dark and light themes. */
+.capture-notice {
+  margin: 0 0 12px;
+  padding: 9px 13px;
+  border: 1px solid #b8860b;
+  border-radius: 8px;
+  background: rgba(184, 134, 11, 0.12);
+  color: var(--es-fg);
+  font-size: var(--es-font-size-small);
+  line-height: 1.45;
+}
+.capture-notice[hidden] { display: none; }
+
 /* ── Footer ─────────────────────────────────────────────────────────────────
    Links that reveal a panel in place rather than navigating away, so nothing here can interrupt
    a live broadcast. */

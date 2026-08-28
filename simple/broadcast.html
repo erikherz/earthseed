@@ -111,6 +111,11 @@
           <button id="go" type="button">Go live</button>
           <div id="status">Loading…</div>
         </div>
+        <!-- Why capture stopped, when nobody asked it to. Above the picture rather than over it:
+             a broadcaster whose camera just died is looking at a black rectangle, and covering
+             that with the explanation would be its own small joke. Kept apart from #status so a
+             warning never overwrites "● live", or the other way round. -->
+        <div id="capture-notice" class="capture-notice" role="status" hidden></div>
         <video id="preview" muted autoplay playsinline></video>
         <!-- Revealed only when going live finds no publish key, or when one is refused. A key is a
              capability with its own expiry, not an account: requesting one tells us nothing about

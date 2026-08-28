@@ -28,14 +28,14 @@ the answer for anyone who cannot accept that; the client is static and the repos
 | File | SHA-256 |
 |---|---|
 | `/index.html` | `973a64ad9e2a98505f68ca27af4a133a7584b85e2a2a76d394abca15f82574a4` |
-| `/broadcast.html` | `d40af7e48dce85a775393074c3fc1c2a2d7398ebf75661f7018a5f4f6789b988` |
+| `/broadcast.html` | `127b3ffcbe709364b4f94b33f4892e0e3b06f53239f1f23c974193dbc42b5263` |
 | `/watch.html` | `b9058fe6f2ec76e0e8fe814ebb909818f7e8db11d29edd5199ee154704cf4424` |
 | `/request.html` | `45dcb5f7658babd584450570a445e37148488f5545bc3e70c27132a186201796` |
 | `/trust.html` | `a4ba2ddec362338408854b8ed8a76bfbba298105d15dca1eb3635b8cb1a5abb0` |
-| `/theme.css` | `2f9a85583e33835aea0210fb77c7262757d0adf413a170e6d2b8c51cbf765cc2` |
+| `/theme.css` | `72eacf3b320b9ce6644fc0ff9de541da3037db5163cf3b9e435585ad8a2ff634` |
 | `/custom.css` | `06ad2a5d03f2ddd43f0a742503c3f323f11445d5531664aa044e1d5eaa7b2efd` |
 | `/favicon.svg` | `adc7808e817a00c804778b8e962ba3e7f6c601fcc98be0937a053b1a19beb721` |
-| `/earthseed.js` | `0f97dace4e94cade2c2a6bb645b46ba06c45d9cfdc49bacb89659e98077535a1` |
+| `/earthseed.js` | `4a36aa7ef1d3bb35852dd1e34527dda799dc22816acf72b83c01ccf0f303bd22` |
 | `/offline-notice.js` | `2feb7125de2d2b8c98abd26c704da241a55f04f9ec3b78772d3adf19fa7fb62e` |
 | `/audio-capture-worklet.js` | `07ab2a238f16a842bb04d31cd54e015991f9c23493763df3fe6f32ca6372c50b` |
 | `/vendor/moq-net-0.1.5.mjs` | `d38b3f603d6b8491184a56115ebbb76ebe4c374e3abec5431686c3aa427dd5ff` |

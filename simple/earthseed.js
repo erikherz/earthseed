@@ -1558,6 +1558,38 @@ function wireCopy(btnId, value, label) {
 // One path: node identity → admitted + name-checked → relay + token → per-stream salt → content
 // key. See §1 for why the unauthorized second path was removed.
 
+/**
+ * What to tell a broadcaster when the camera would not start.
+ *
+ * getUserMedia reports failures as DOMException *names*, and the name is the only part that is
+ * stable across engines — the messages differ ("Could not start video source" on Chromium, "The
+ * request is not allowed by the user agent" on WebKit) — so match on the name and write the
+ * sentence here. Windows lets a single application hold the camera, which is why NotReadableError
+ * happens there and essentially nowhere else; and NotFoundError needs its own words, because
+ * telling someone to close Teams is useless advice for a desktop with no webcam in it.
+ * @param {unknown} e
+ */
+function captureFailureText(e) {
+  const name = e instanceof Error ? e.name : "";
+  const detail = e instanceof Error && e.message ? ` (${e.message})` : "";
+  switch (name) {
+    case "NotAllowedError":
+    case "SecurityError":
+      return "The browser did not allow the camera or microphone. If you dismissed the prompt, " +
+        "reload and allow it; if you blocked it, clear this site's camera permission first.";
+    case "NotReadableError":
+    case "AbortError":
+      return "The camera could not be started — on Windows only one app can use it at a time. " +
+        "Close anything else that has it open (Teams, Zoom, the Camera app) and try again." + detail;
+    case "NotFoundError":
+    case "OverconstrainedError":
+      return "No camera or microphone was found. Check that one is connected, and that this " +
+        "browser is allowed to use it in the system's privacy settings.";
+    default:
+      return `The camera could not be started${detail || "."}`;
+  }
+}
+
 /** Wire the broadcast page (#preview #go #share #copy #status + the passcode controls). */
 export async function runBroadcast() {
   const set = (m) => ($("status").textContent = m);
@@ -1570,6 +1602,21 @@ export async function runBroadcast() {
   const preview = $("preview");
   const goBtn = $("go");
   /** @type {{stop():void}|null} */ let bc = null;
+  // Held so teardown can give the camera back. Nothing else in this file stopped these tracks,
+  // which left the camera light on after "Stop" — and would have made the retry this change
+  // invites fail on Windows against our own still-open capture.
+  /** @type {MediaStream|null} */ let camStream = null;
+
+  // A line for things that happen TO the capture rather than because someone clicked, kept apart
+  // from #status so a warning never overwrites "● live" (or the other way round). Everything here
+  // used to be a terse `error:` line or nothing at all: reported from Edge on Windows as "the
+  // camera does not stay open — I see it for a second and then it goes away".
+  const noticeEl = $("capture-notice");
+  const say = (m) => {
+    if (!noticeEl) return;
+    noticeEl.textContent = m ?? "";
+    noticeEl.hidden = !m;
+  };
 
   // ── passcode controls.
   const pcToggle = $("usepc"), pcRow = $("pcrow"), pcField = $("passcode"),
@@ -1670,6 +1717,11 @@ export async function runBroadcast() {
     stopKillWatch = null;
     bc?.stop();
     bc = null;
+    // bc.stop() closes the encoders and the connection but never held the camera; the preview
+    // does. Both have to let go or the device stays lit with nothing being broadcast.
+    camStream?.getTracks().forEach((t) => t.stop());
+    camStream = null;
+    if (preview) preview.srcObject = null;
     goBtn.textContent = "Go live";
     goBtn.classList.remove("is-live");
     // The live pill and the relay panel go back to the truth. Leaving either showing would mean
@@ -1732,10 +1784,49 @@ export async function runBroadcast() {
       const originEid = pub.origin_endpoint_id;
 
       set("starting camera…");
+      say(null); // a fresh attempt clears whatever the last one failed with
       // `ideal` (not exact) lets a phone hand us its natural orientation (portrait or landscape)
       // instead of being forced into a landscape 1280×720 buffer.
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 } }, audio: true });
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 } }, audio: true });
+      } catch (e) {
+        // Caught here rather than by the outer handler below, which covers the whole of going
+        // live: a relay that refused us must not be described as a camera that would not open.
+        say(captureFailureText(e));
+        return set("could not start the camera");
+      }
+      camStream = stream;
       preview.srcObject = stream;
+
+      // Watched from the moment of capture, not from the moment we go live: the relay handshake
+      // below takes a second or two, and a camera that dies during it is the same camera.
+      //
+      // Windows hands the device to one application at a time, so Teams waking up or a driver
+      // reset ends the track under us and nothing downstream notices. The encoder simply stops
+      // being fed, viewers freeze on the last frame, and #status still reads "● live" — which is
+      // the one thing a status light must never do. There is no second video source to fall back
+      // to here, so this ends the broadcast and says why.
+      const cam = stream.getVideoTracks()[0];
+      cam?.addEventListener("ended", () => {
+        const id = nodeId;
+        teardown("the camera stopped");
+        say(
+          "The camera stopped and the broadcast ended. Another app or the system took it — " +
+          "close whatever else is using it, then press Go live again."
+        );
+        if (id) void endBroadcast(id);
+      });
+      // The milder half of the same behaviour: frames stop arriving from a track that is still
+      // live. Viewers freeze, but the source may come back on its own, so this warns rather than
+      // tearing anything down.
+      cam?.addEventListener("mute", () =>
+        say(
+          "The camera has stopped sending frames — it is probably in use by another app. " +
+          "Anyone watching is seeing a frozen picture."
+        )
+      );
+      cam?.addEventListener("unmute", () => say(null));
 
       set("connecting…");
       bc = await startBroadcast({ relayUrl: relay, broadcastName: node.id, stream, onStatus: set, salts: salt });
@@ -1770,7 +1861,11 @@ export async function runBroadcast() {
         if (id) void endBroadcast(id);
       });
     } catch (e) {
-      set(`error: ${e instanceof Error ? e.message : e}`);
+      // teardown rather than a bare status line: everything above this can fail AFTER the camera
+      // is open (the relay handshake, the encoder), and leaving the device lit under a "Go live"
+      // button is both a lie and — on Windows, where one app owns the camera — the reason the
+      // next attempt would fail against our own abandoned capture.
+      teardown(`error: ${e instanceof Error ? e.message : e}`);
     } finally {
       goBtn.disabled = false;
     }

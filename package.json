@@ -16,7 +16,9 @@
     "//e2e": "These run against a DEPLOYED origin, not a local build — there is no local build. Pass --admin <password> where a suite mints its own publish key.",
     "e2e": "node scripts/e2e/control-plane.mjs && node scripts/e2e/no-key-no-publish.mjs",
     "e2e:ui": "node scripts/e2e/ui-chrome.mjs",
-    "e2e:media": "node scripts/e2e/broadcast-watch.mjs"
+    "e2e:media": "node scripts/e2e/broadcast-watch.mjs",
+    "//e2e:camera": "The exception: this one serves simple/ itself and needs no origin, no key and no relay. Pass an origin to run it against a deployment instead.",
+    "e2e:camera": "node scripts/e2e/camera-yanked.mjs"
   },
   "devDependencies": {
     "puppeteer": "^25.7.0",
