@@ -482,6 +482,25 @@ video { min-height: 240px; }
 }
 .report-title { font-weight: 600; margin-bottom: 6px; }
 
+/* The frame preview inside the report panel.
+
+   Capped rather than shown at full size, and it is the reporter's own picture — they are
+   looking at it already. The point of showing it here is consent, not inspection: they have to
+   be able to see WHAT will be sent before deciding, and one untick removes it. */
+.report-frame { align-items: flex-start; gap: 8px; flex-wrap: wrap; }
+.report-frame input[type="checkbox"] { margin-top: 4px; flex: none; }
+.report-frame label { flex: 1 1 14em; min-width: 0; }
+.report-frame-img {
+  display: block;
+  flex: 1 0 100%;
+  width: 100%;
+  max-width: 16em;
+  margin-top: 8px;
+  border: 1px solid var(--es-border);
+  border-radius: var(--es-radius);
+  background: #000;
+}
+
 /* The publish key row on the broadcast page. Hidden until go-live finds no key, so a
    broadcaster who already has one never meets it. */
 #keyrow input { font-family: var(--es-font-mono); font-size: 0.85rem; }

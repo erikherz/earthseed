@@ -15,7 +15,9 @@
   buttons:
 
     1. Nothing here is verified. We cannot decrypt a stream. Every row is an assertion by an
-       anonymous person who held a share link, and there is no way to check it.
+       anonymous person who held a share link. A frame, where one was attached, is the only thing
+       on this page that shows anything — and it shows one instant that the reporter's browser
+       chose, which is not the same as evidence of what a broadcast was.
     2. Nothing acts automatically. Reports do not accumulate into a kill. A person decides, every
        time, because "enough reports" would be a weapon aimed at exactly the broadcasters this
        site exists to protect.
@@ -94,6 +96,28 @@
   .bar { display: flex; align-items: center; justify-content: space-between; gap: 12px;
          margin: 0 0 22px; flex-wrap: wrap; }
   .err { color: #f87171; }
+  /* A reported frame. Small by default and never auto-enlarged: this queue can contain the
+     worst thing a person has seen today, and an operator scrolling it should choose when to
+     look closely rather than have it filled in for them. */
+  .frame { display: block; margin: 8px 0 0; width: 100%; max-width: 15em; border-radius: 5px;
+           border: 1px solid var(--border); background: #000; cursor: zoom-in; }
+  .frame-note { color: var(--muted); font-size: 0.8rem; margin: 6px 0 0; }
+  /* An open statutory duty. Loud on purpose and the only red block on the page: it is the one
+     thing here with a clock running on it, and the operator is the only clock-watcher. */
+  .duty { margin: 8px 0 0; padding: 10px 12px; border-radius: 5px; background: #2a1414;
+          border: 1px solid #5a2626; color: #e8b0b0; font-size: 0.85rem; line-height: 1.45; }
+  .duty .linkbtn { color: #e8b0b0; padding-top: 8px; }
+  .duty .linkbtn:hover { color: #ffffff; }
+  /* The same fact once it is discharged. Quiet — a filed report needs recording, not chasing. */
+  .filed { margin: 8px 0 0; color: #7a9a7a; font-size: 0.8rem; }
+  .linkbtn { background: none; border: 0; padding: 4px 0 0; color: var(--muted); font-size: 0.78rem;
+             text-decoration: underline; cursor: pointer; display: block; }
+  .linkbtn:hover { color: #e09090; }
+  .linkbtn:disabled { opacity: 0.45; cursor: default; }
+  #lightbox { position: fixed; inset: 0; z-index: 90; display: none; align-items: center;
+              justify-content: center; background: rgba(0,0,0,0.92); padding: 24px;
+              cursor: zoom-out; }
+  #lightbox img { max-width: 100%; max-height: 100%; border-radius: 5px; }
 </style>
 </head>
 <body>
@@ -133,6 +157,9 @@
     We cannot decrypt a stream, so every report is an anonymous claim by someone who held a share
     link. A count is not evidence — a single person with a grudge and an invitation can file
     repeatedly. Terminate because you judged it right, not because the number grew.
+    A frame is the one thing here that shows rather than asserts, and it is still only what a
+    reporter's browser handed us for a single instant: it can be pointed at the wrong moment, and
+    it cannot tell you what came before or after.
   </div>
 
   <h2>Open <span id="open-count" class="muted"></span></h2>
@@ -145,6 +172,8 @@
   <div id="done-list"></div>
 </main>
 
+<div id="lightbox"><img alt="Reported frame, enlarged" /></div>
+
 <script>
 (function () {
   var KEY = "earthseed.adminpw";
@@ -155,11 +184,26 @@
   var SEVERE = "sexual-content-involving-minors";
   var LABELS = {
     "sexual-content-involving-minors": "Sexual content involving a minor",
+    "adult-sexual-content": "Nudity or sexual activity",
+    "adult-services": "Selling or advertising sexual services",
+    "adult-paid-performance": "Paid sexual performance or live sex chat",
+    "adult-ai-generated": "AI-generated sexual imagery",
     "violence-or-threats": "Violence or threats",
     "non-consensual-content": "Filmed without consent",
     "harassment": "Harassment",
     "other": "Something else"
   };
+
+  // D1 writes naive UTC in "YYYY-MM-DD HH:MM:SS", and preserve_until is written in the same
+  // shape by the Worker — so comparing them as strings is also comparing them chronologically.
+  // Built here rather than from a Date so the two sides cannot drift on a timezone.
+  function nowSql() {
+    return new Date().toISOString().replace("T", " ").slice(0, 19);
+  }
+  /** Is this report under a preservation hold right now? */
+  function held(r) {
+    return !!r.preserve_until && r.preserve_until > nowSql();
+  }
 
   var el = function (id) { return document.getElementById(id); };
 
@@ -172,6 +216,15 @@
     return n;
   }
   function clear(n) { while (n.firstChild) n.removeChild(n.firstChild); }
+
+  // Enlarge one frame, on the operator's own click. Never on load: this queue can hold the worst
+  // thing somebody has seen today, and scrolling past a thumbnail is a choice a full-bleed image
+  // takes away.
+  function showLightbox(src) {
+    var box = el("lightbox");
+    box.querySelector("img").src = src;
+    box.style.display = "flex";
+  }
 
   var when = function (ts) {
     if (!ts) return "";
@@ -236,6 +289,100 @@
       li.appendChild(node("span", "muted", when(r.created_at)));
       li.appendChild(document.createTextNode(" · " + (LABELS[r.category] || r.category)));
       li.appendChild(r.note ? node("div", "note", r.note) : node("div", "muted", "no description given"));
+
+      // The frame. `src` is set as a property and the Worker asserts image/jpeg on the way out;
+      // the reporter never gets to say what these bytes are. Click to enlarge, never automatic.
+      if (r.has_frame) {
+        var img = document.createElement("img");
+        img.className = "frame";
+        img.alt = "Frame attached to report " + r.id;
+        img.src = "/api/admin/reports/frame?id=" + r.id;
+        img.onclick = function () { showLightbox(img.src); };
+        li.appendChild(img);
+
+        var drop = node("button", "linkbtn", "Remove this picture, keep the report");
+        drop.onclick = function () {
+          drop.disabled = true;
+          api("/api/admin/reports/drop-frame", { method: "POST", body: JSON.stringify({ id: r.id }) })
+            .then(function (j) {
+              // A preserved row REFUSES, and says so. Reporting the refusal matters as much as
+              // making it: a silent no-op looks exactly like success, and the operator would
+              // carry on believing the picture was gone.
+              if (j && j.error === "preserved") {
+                alert(j.detail + "\n\nHeld until " + when(j.preserve_until) + ".");
+                drop.disabled = false;
+                return;
+              }
+              return load();
+            })
+            .catch(function () { drop.disabled = false; });
+        };
+        li.appendChild(drop);
+      }
+
+      // ── The one row on this page with a statutory clock on it ─────────────────────────
+      //
+      // Loud, and above everything else on the card, because 2258A measures from when we
+      // obtained actual knowledge — which is the moment this row was written. An operator who
+      // scrolls past it has not deferred a decision, they have started running out of time.
+      if (held(r) && !r.ncmec_reported_at) {
+        var duty = node("div", "duty");
+        duty.appendChild(node("strong", null, "This report carries a reporting duty."));
+        duty.appendChild(document.createTextNode(
+          " Filed under the most serious category, so 18 U.S.C. 2258A applies: report it to the " +
+          "NCMEC CyberTipline as soon as reasonably possible. The frame is preserved until " +
+          when(r.preserve_until) + " and cannot be removed or deleted until then."
+        ));
+
+        var filed = node("button", "linkbtn", "I have filed this with NCMEC");
+        filed.onclick = function () {
+          if (!confirm(
+            "Record that a CyberTipline submission was made for report " + r.id + "?\n\n" +
+            "This only writes down the date. It does NOT file anything — Earthseed has no " +
+            "CyberTipline credentials and this button will not create a submission.\n\n" +
+            "Recording it re-bases the preservation window to a year from today, and the hold " +
+            "can no longer be released here."
+          )) return;
+          filed.disabled = true;
+          api("/api/admin/reports/ncmec", { method: "POST", body: JSON.stringify({ id: r.id }) })
+            .then(load).catch(function () { filed.disabled = false; });
+        };
+        duty.appendChild(filed);
+
+        // The counterweight, and it has to exist. Filing costs a viewer nothing but a share
+        // link, and the severe category sits one click from the ordinary ones — so without a
+        // release, any hostile invitee can pin a still of somebody's living room here forever
+        // under the worst accusation available.
+        var release = node("button", "linkbtn", "This is not what it was reported as — release the hold");
+        release.onclick = function () {
+          var reason = prompt(
+            "Releasing the hold on report " + r.id + ".\n\n" +
+            "Only do this if you have looked and it is plainly not child sexual abuse material. " +
+            "The report and its frame stay; the hold and the duty go, and the ordinary retention " +
+            "clock takes over.\n\n" +
+            "Why? (recorded against this report)"
+          );
+          if (reason === null) return;
+          release.disabled = true;
+          api("/api/admin/reports/release-hold", { method: "POST", body: JSON.stringify({ id: r.id, reason: reason }) })
+            .then(function (j) {
+              if (j && j.error) { alert(j.detail || j.error); release.disabled = false; return; }
+              return load();
+            })
+            .catch(function () { release.disabled = false; });
+        };
+        duty.appendChild(release);
+        li.appendChild(duty);
+      } else if (r.ncmec_reported_at) {
+        li.appendChild(node("div", "filed",
+          "Reported to NCMEC on " + when(r.ncmec_reported_at) +
+          " · preserved until " + when(r.preserve_until)));
+      } else if (r.hold_released_at) {
+        li.appendChild(node("div", "muted",
+          "Hold released " + when(r.hold_released_at) +
+          (r.hold_release_reason ? " — " + r.hold_release_reason : "")));
+      }
+
       ul.appendChild(li);
     });
     d.appendChild(ul);
@@ -359,6 +506,10 @@
   };
   el("pw").addEventListener("keypress", function (e) { if (e.key === "Enter") el("signin").click(); });
   el("refresh").onclick = function () { load(); };
+  el("lightbox").onclick = function () {
+    this.style.display = "none";
+    this.querySelector("img").removeAttribute("src");
+  };
   el("signout").onclick = function () { signOut(); };
 
   // A stream you can still stop is a live one, so the list going stale has a real cost.

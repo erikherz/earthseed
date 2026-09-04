@@ -32,10 +32,10 @@ the answer for anyone who cannot accept that; the client is static and the repos
 | `/watch.html` | `b9058fe6f2ec76e0e8fe814ebb909818f7e8db11d29edd5199ee154704cf4424` |
 | `/request.html` | `45dcb5f7658babd584450570a445e37148488f5545bc3e70c27132a186201796` |
 | `/trust.html` | `a4ba2ddec362338408854b8ed8a76bfbba298105d15dca1eb3635b8cb1a5abb0` |
-| `/theme.css` | `72eacf3b320b9ce6644fc0ff9de541da3037db5163cf3b9e435585ad8a2ff634` |
+| `/theme.css` | `1da153ebc1b9fed7147961e94cd9cd9ec416cda782cbb5266e32394809845660` |
 | `/custom.css` | `06ad2a5d03f2ddd43f0a742503c3f323f11445d5531664aa044e1d5eaa7b2efd` |
 | `/favicon.svg` | `adc7808e817a00c804778b8e962ba3e7f6c601fcc98be0937a053b1a19beb721` |
-| `/earthseed.js` | `4a36aa7ef1d3bb35852dd1e34527dda799dc22816acf72b83c01ccf0f303bd22` |
+| `/earthseed.js` | `d5c99bce76694d79cc000187bd190620ca94374abc86b519a9f924596514a273` |
 | `/offline-notice.js` | `2feb7125de2d2b8c98abd26c704da241a55f04f9ec3b78772d3adf19fa7fb62e` |
 | `/audio-capture-worklet.js` | `07ab2a238f16a842bb04d31cd54e015991f9c23493763df3fe6f32ca6372c50b` |
 | `/vendor/moq-net-0.1.5.mjs` | `d38b3f603d6b8491184a56115ebbb76ebe4c374e3abec5431686c3aa427dd5ff` |

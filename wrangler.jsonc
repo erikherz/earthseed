@@ -3,6 +3,13 @@
   "name": "earthseed",
   "compatibility_date": "2025-01-01",
   "main": "src/worker/index.ts",
+  // The only scheduled work this Worker does: null reported still frames once their
+  // retention window passes (REPORT_FRAME_RETENTION_DAYS, default 30). Hourly rather than
+  // daily because the window is measured in days — an hour of slop either side is free,
+  // and an hourly tick is easier to confirm is alive than one that fires at 04:00.
+  //
+  // Reports under a preservation hold are exempt in SQL, not here. See migration 0010.
+  "triggers": { "crons": ["0 * * * *"] },
   // STREAMING FLEET: the tinymoq broker (cdnadmin) and our own relay boxes. Deliberately NOT
   // moq.pro — this deployment runs on Erik's fleet, and the broker ASN-steers traffic to it.
   //
