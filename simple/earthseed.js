@@ -1110,6 +1110,27 @@ async function startBroadcast(opts) {
   }
 
   return {
+    /**
+     * Point the encoder at a different camera, without stopping the broadcast.
+     *
+     * Only the SOURCE changes. The connection, the encoder, the salts and the key are all
+     * untouched, so a viewer sees the picture change and nothing else — no reconnect, no
+     * re-subscribe, no gap while a session is rebuilt. That matters more than it looks: this
+     * client's own watch path rebuilds its player on a stream-count change, and a flip that
+     * tore down the publish would show up as every viewer dropping.
+     *
+     * The encoder is not reconfigured here either. Front and back cameras usually differ in
+     * aspect, and the capture loop already re-sizes and reconfigures the moment the displayed
+     * dimensions move — the same path a phone rotation takes. Doing it twice would cost an
+     * extra keyframe for nothing.
+     *
+     * @param {MediaStreamTrack} track
+     */
+    setVideoTrack(track) {
+      capVideo.srcObject = new MediaStream([track]);
+      // Safari needs the play() again after a source swap; Chrome does not mind.
+      capVideo.play().catch(() => {});
+    },
     stop() {
       running = false;
       wake?.();
@@ -1601,7 +1622,11 @@ export async function runBroadcast() {
 
   const preview = $("preview");
   const goBtn = $("go");
-  /** @type {{stop():void}|null} */ let bc = null;
+  /** @type {{stop():void, setVideoTrack(t:MediaStreamTrack):void}|null} */ let bc = null;
+  // Which way the camera points. "user" is the front camera and the sane default: someone
+  // pressing Go live is almost always talking to their audience rather than filming past
+  // themselves. Only ever changed by the Flip control below.
+  /** @type {"user"|"environment"} */ let facing = "user";
   // Held so teardown can give the camera back. Nothing else in this file stopped these tracks,
   // which left the camera light on after "Stop" — and would have made the retry this change
   // invites fail on Windows against our own still-open capture.
@@ -1711,6 +1736,108 @@ export async function runBroadcast() {
     set("publish key saved — press “Go live”");
   });
 
+  // ── Watching the camera itself ───────────────────────────────────────────────────────
+  //
+  // Armed from the moment of capture, not from the moment we go live: the relay handshake takes
+  // a second or two, and a camera that dies during it is the same camera.
+  //
+  // Windows hands the device to one application at a time, so Teams waking up or a driver reset
+  // ends the track under us and nothing downstream notices. The encoder simply stops being fed,
+  // viewers freeze on the last frame, and #status still reads "● live" — which is the one thing
+  // a status light must never do. There is no second video source to fall back to here, so this
+  // ends the broadcast and says why.
+  //
+  // A FUNCTION rather than inline code because Flip swaps in a second track mid-broadcast, and a
+  // new camera with no watcher on it is a camera that can die silently. AbortController is what
+  // takes the old listeners off: without that, stopping the outgoing track after a flip would
+  // still be running teardown through a handler nobody wanted any more.
+  /** @type {AbortController|null} */ let camWatch = null;
+  /** @param {MediaStreamTrack|undefined} cam */
+  const watchCamera = (cam) => {
+    camWatch?.abort();
+    camWatch = null;
+    if (!cam) return;
+    const ac = new AbortController();
+    camWatch = ac;
+    cam.addEventListener("ended", () => {
+      const id = nodeId;
+      teardown("the camera stopped");
+      say(
+        "The camera stopped and the broadcast ended. Another app or the system took it — " +
+        "close whatever else is using it, then press Go live again."
+      );
+      if (id) void endBroadcast(id);
+    }, { signal: ac.signal });
+    // The milder half of the same behaviour: frames stop arriving from a track that is still
+    // live. Viewers freeze, but the source may come back on its own, so this warns rather than
+    // tearing anything down.
+    cam.addEventListener("mute", () =>
+      say(
+        "The camera has stopped sending frames — it is probably in use by another app. " +
+        "Anyone watching is seeing a frozen picture."
+      ), { signal: ac.signal });
+    cam.addEventListener("unmute", () => say(null), { signal: ac.signal });
+  };
+
+  // ── Flip: front camera ⇄ back camera ─────────────────────────────────────────────────
+  //
+  // A PHONE control, and an action rather than a toggle — it carries no on/off state and never
+  // lights up. It is hidden until the broadcast is live, because there is nothing to flip before
+  // then, and hidden on pointer devices, where "front and back" means nothing: a desktop with two
+  // webcams has two cameras pointing wherever they were put, and no browser reports a facingMode
+  // for either, so the button would relabel itself with a direction it cannot know.
+  //
+  // DELIBERATELY NOT GATED on how many cameras enumerateDevices admits to. iOS Safari reports ONE
+  // videoinput for a phone with three cameras, exposing front and back through the facingMode
+  // constraint instead of as separate devices — gating on that count hid the control on every
+  // iPhone when Wallflower first tried it. The cost of not gating is that a single-camera phone
+  // gets a button which re-acquires the same camera, which is a far smaller problem.
+  const flipBtn = $("flip");
+  const flipLabel = () => {
+    if (!flipBtn) return;
+    // The label names where it will GO, not where it is. "Switch to the back camera" is a thing
+    // to do; "front camera" is a status nobody asked for on a button.
+    const words = `Switch to the ${facing === "user" ? "back" : "front"} camera`;
+    flipBtn.title = words;
+    flipBtn.setAttribute("aria-label", words);
+  };
+  flipLabel();
+  flipBtn?.addEventListener("click", async () => {
+    if (!bc || !camStream) return;
+    const want = facing === "user" ? "environment" : "user";
+    flipBtn.disabled = true;
+    try {
+      // `ideal`, not `exact`. A phone that cannot honour the request hands back what it has
+      // rather than throwing, which is the right failure: the picture does not change and the
+      // broadcast does not stop. `exact` would end a live broadcast to satisfy a preference.
+      const next = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: want }, width: { ideal: 1280 }, height: { ideal: 720 } },
+      });
+      const track = next.getVideoTracks()[0];
+      if (!track) throw new Error("no video track");
+
+      // Order matters. Watch the new track BEFORE stopping the old one, so there is no window in
+      // which a dying camera has nobody listening; and detaching the old watcher is what stops
+      // the deliberate stop() below from being reported as a camera failure.
+      watchCamera(track);
+      const old = camStream.getVideoTracks()[0];
+      camStream.removeTrack(old);
+      old?.stop();
+      camStream.addTrack(track);
+      bc.setVideoTrack(track);
+      if (preview) preview.srcObject = camStream;
+      facing = want;
+      flipLabel();
+      say(null);
+    } catch (e) {
+      // The broadcast is untouched — the old track is only stopped after the new one is in hand,
+      // so a refusal here costs nothing but the flip.
+      say(captureFailureText(e));
+    } finally {
+      flipBtn.disabled = false;
+    }
+  });
+
   /** @type {(() => void)|null} */ let stopKillWatch = null;
   const teardown = (message) => {
     stopKillWatch?.();
@@ -1719,8 +1846,15 @@ export async function runBroadcast() {
     bc = null;
     // bc.stop() closes the encoders and the connection but never held the camera; the preview
     // does. Both have to let go or the device stays lit with nothing being broadcast.
+    // Detach before stopping, not after. stop() is not specified to fire "ended", but a
+    // watcher left armed over a deliberate teardown is one browser quirk away from reporting
+    // the stop as a camera failure.
+    camWatch?.abort();
+    camWatch = null;
     camStream?.getTracks().forEach((t) => t.stop());
     camStream = null;
+    facing = "user"; // the next broadcast starts facing the broadcaster again
+    flipBtn?.setAttribute("hidden", "");
     if (preview) preview.srcObject = null;
     goBtn.textContent = "Go live";
     goBtn.classList.remove("is-live");
@@ -1799,34 +1933,7 @@ export async function runBroadcast() {
       camStream = stream;
       preview.srcObject = stream;
 
-      // Watched from the moment of capture, not from the moment we go live: the relay handshake
-      // below takes a second or two, and a camera that dies during it is the same camera.
-      //
-      // Windows hands the device to one application at a time, so Teams waking up or a driver
-      // reset ends the track under us and nothing downstream notices. The encoder simply stops
-      // being fed, viewers freeze on the last frame, and #status still reads "● live" — which is
-      // the one thing a status light must never do. There is no second video source to fall back
-      // to here, so this ends the broadcast and says why.
-      const cam = stream.getVideoTracks()[0];
-      cam?.addEventListener("ended", () => {
-        const id = nodeId;
-        teardown("the camera stopped");
-        say(
-          "The camera stopped and the broadcast ended. Another app or the system took it — " +
-          "close whatever else is using it, then press Go live again."
-        );
-        if (id) void endBroadcast(id);
-      });
-      // The milder half of the same behaviour: frames stop arriving from a track that is still
-      // live. Viewers freeze, but the source may come back on its own, so this warns rather than
-      // tearing anything down.
-      cam?.addEventListener("mute", () =>
-        say(
-          "The camera has stopped sending frames — it is probably in use by another app. " +
-          "Anyone watching is seeing a frozen picture."
-        )
-      );
-      cam?.addEventListener("unmute", () => say(null));
+      watchCamera(stream.getVideoTracks()[0]);
 
       set("connecting…");
       bc = await startBroadcast({ relayUrl: relay, broadcastName: node.id, stream, onStatus: set, salts: salt });
@@ -1838,6 +1945,9 @@ export async function runBroadcast() {
       $("share").value = link.toString();
       goBtn.textContent = "Stop";
       goBtn.classList.add("is-live");
+      // Nothing to flip until there is a picture going out. CSS keeps it off pointer devices;
+      // this keeps it off the pre-broadcast screen on every device.
+      flipBtn?.removeAttribute("hidden");
       // Name, copy affordance and live pill all become true at the same moment — when there is
       // actually something to copy and something to watch.
       const idEl = $("stream-id");

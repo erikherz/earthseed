@@ -482,6 +482,18 @@ video { min-height: 240px; }
 }
 .report-title { font-weight: 600; margin-bottom: 6px; }
 
+/* Flip is a PHONE control. A desktop can have two webcams, but "front and back" means nothing
+   there — they are two cameras pointing wherever they were put, and no browser reports a
+   facingMode for either, so the button would relabel itself with a direction it cannot know.
+
+   The `hidden` ATTRIBUTE has to keep winning here, or a control JavaScript has marked hidden
+   stays on screen looking perfectly clickable: the UA stylesheet's [hidden] rule loses to any
+   selector that sets display, which the unhide rule below does. Hence :not([hidden]). */
+.cap-mobile { display: none; }
+@media (hover: none) and (pointer: coarse) {
+  .cap-mobile:not([hidden]) { display: inline-flex; }
+}
+
 /* The frame preview inside the report panel.
 
    Capped rather than shown at full size, and it is the reporter's own picture — they are

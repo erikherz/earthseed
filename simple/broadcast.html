@@ -109,6 +109,18 @@
              should need scrolling to reach. -->
         <div class="row stage-controls">
           <button id="go" type="button">Go live</button>
+          <!-- Front ⇄ back. Hidden until live (JavaScript) and hidden on pointer devices (CSS):
+               "front and back" describes a phone, and a desktop with two webcams has two cameras
+               pointing wherever they were put. The icon carries the whole meaning — the label is
+               in the title and aria-label, and names where it will go rather than where it is. -->
+          <button id="flip" class="icon-btn cap-mobile" type="button" hidden
+                  title="Switch to the back camera" aria-label="Switch to the back camera">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M4 8h11l-2.5-2.5" />
+              <path d="M20 16H9l2.5 2.5" />
+              <circle cx="12" cy="12" r="2.4" fill="currentColor" stroke="none" />
+            </svg>
+          </button>
           <div id="status">Loading…</div>
         </div>
         <!-- Why capture stopped, when nobody asked it to. Above the picture rather than over it:
