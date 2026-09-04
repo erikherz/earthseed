@@ -871,6 +871,16 @@ async function startBroadcast(opts) {
           } catch {}
         }
       } else {
+        // ONE GROUP PER AUDIO FRAME, and therefore one unidirectional QUIC stream per frame —
+        // ~50/s at the 20ms default. This is the documented MoQ mapping (draft-ietf-moq-loc-02
+        // §4.1), not an oversight, and Chrome and Firefox carry it indefinitely.
+        //
+        // KNOWN CONSEQUENCE, UNMITIGATED HERE: Safari and iOS stall permanently after a few
+        // minutes of it — WebKit bug 317084, moved to Apple as rdar://problem/179722013 and
+        // still open. Wallflower and vivoh.earth work around it by rebuilding the <moq-watch>
+        // element on a stream budget; this client owns its own decode loop and has no
+        // equivalent, so an iPhone viewer stalls with no recovery. Broadcasting is currently
+        // shuttered (BROADCAST_OFFLINE=1), which is the only reason it is not biting.
         for (const sink of sinks.audio) {
           try {
             const g = sink.track.appendGroup();
@@ -1115,9 +1125,10 @@ async function startBroadcast(opts) {
      *
      * Only the SOURCE changes. The connection, the encoder, the salts and the key are all
      * untouched, so a viewer sees the picture change and nothing else — no reconnect, no
-     * re-subscribe, no gap while a session is rebuilt. That matters more than it looks: this
-     * client's own watch path rebuilds its player on a stream-count change, and a flip that
-     * tore down the publish would show up as every viewer dropping.
+     * re-subscribe, no gap while a session is rebuilt. That matters here more than it would in
+     * a client that could recover: this viewer has NO stall mitigation (see the note on the
+     * audio group-per-frame path above), so a flip that tore down the publish would drop every
+     * iPhone watching and nothing would bring them back.
      *
      * The encoder is not reconfigured here either. Front and back cameras usually differ in
      * aspect, and the capture loop already re-sizes and reconfigures the moment the displayed
