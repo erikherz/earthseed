@@ -27,7 +27,13 @@
 // they run this Worker too. That is the honest trade: publisher admission and a working kill switch
 // cannot exist without someone in a position to say no.
 
-import { publicVerifyJwk, mintEd25519Token, type MoqClaims } from "./auth/moq-token";
+import {
+  publicVerifyJwk,
+  mintEd25519Token,
+  mintMoqProToken,
+  mintMoqProTokenEd25519,
+  type MoqClaims,
+} from "./auth/moq-token";
 import { getGoogleAuthUrl, exchangeCodeForTokens, getGoogleUserInfo } from "./auth/google";
 import {
   createSessionToken,
@@ -52,6 +58,26 @@ export interface Env {
   // ── Relay tokens (BYOK). The tenant's Ed25519 PRIVATE signing key as an OKP JWK. Only its
   // public half is exposed, via /api/pubkey, for an operator to install as the fleet's verify_jwk.
   MOQ_AUTH_PRIVATE_JWK?: string;
+
+  // ── moq.pro (Luke Curley's hosted CDN) — Mode A, and the relay backend when set.
+  //
+  // MOQ_PRO_JWK is the PRIVATE half of an Ed25519 keypair whose public half was uploaded through
+  // moq.pro's "Import Asymmetric". MOQ_PRO_K is the older symmetric key. Set either and
+  // moqProAssign() answers first, so every broadcast goes through cdn.moq.pro with a
+  // per-broadcast token this Worker mints, and the tinymoq broker below is never reached.
+  //
+  // That makes moving between the two relay backends A SECRET CHANGE, not a deploy. It also
+  // means the BROKER_* / FLEET_* vars in wrangler.jsonc prove nothing about where traffic is
+  // actually going: they stay populated on purpose. `wrangler secret list` is the only honest
+  // answer to "which CDN is this on".
+  MOQ_PRO_JWK?: string;
+  /** Legacy symmetric key. Preferred only in that unsetting the JWK falls back here rather than
+   *  breaking — moq.pro holds this one, so it can mint any token we could. */
+  MOQ_PRO_K?: string;
+  /** Account root: the path namespace under cdn.moq.pro. Defaults to "erik", the same namespace
+   *  vivoh.earth and wallflower.tv publish into. See wrangler.jsonc for why sharing it is an
+   *  accepted risk here and not an oversight. */
+  MOQ_PRO_ROOT?: string;
 
   // ── Broker credential. The `cdn_…` CUSTOMER token from tinymoq/cdnadmin, sent as a Bearer to
   // /cdn/assign. A SECRET, unlike the `pk_` it replaces: the whole point of moving assignment
@@ -1143,6 +1169,93 @@ function tokenSource(env: Env): "worker" | "broker" {
 const PUBLISHER_TOKEN_TTL_DEFAULT = 12 * 3600;
 const VIEWER_TOKEN_TTL_DEFAULT = 3600;
 
+/* ── moq.pro assignment (Mode A) ──────────────────────────────────────────────────────────────
+ *
+ * The same hosted CDN vivoh.earth and wallflower.tv publish through, joined here on 20 Sep 2026.
+ *
+ * There is no /assign call and no broker in the path. The relay is always cdn.moq.pro, the
+ * broadcast lives at `<root>/<broadcast>`, and this Worker mints a short-lived token scoped to
+ * THAT ONE NAME. A publisher gets put+get; a viewer gets get only, so a token handed to an
+ * audience cannot be turned round and published with.
+ *
+ * ── What this does NOT change ────────────────────────────────────────────────────────────────
+ *
+ * The content key. It is derived in the two browsers from the `#k=` fragment, which browsers
+ * never transmit, so cdn.moq.pro carries ciphertext it cannot read — exactly as the tinymoq
+ * fleet did. Moving CDN moves who fans out the bytes, not who can decode them. Worth stating
+ * plainly because "we moved to somebody else's CDN" sounds like it should weaken the claim on
+ * the front page, and it does not touch it.
+ *
+ * ── The shared root ──────────────────────────────────────────────────────────────────────────
+ *
+ * MOQ_PRO_ROOT defaults to "erik", the namespace the other two products already use. That is an
+ * accepted risk rather than an oversight, and it is cheaper here than it is for them: earthseed
+ * broadcast names are 52-character base32 Ed25519 PUBLIC KEYS, not five random characters, so a
+ * cross-product collision is not improbable — it is a key collision, which is to say impossible.
+ * A name is also unforgeable: taking one would mean holding its private half.
+ *
+ * Returns null when no moq.pro secret is set, and callers fall through to the broker.
+ */
+const MOQ_PRO_RELAY = "cdn.moq.pro";
+
+/**
+ * Mark this broadcast live, superseding any earlier row for the same name.
+ *
+ * One live row per session. Closing the previous one first matters more than it looks: a
+ * broadcaster who reloads mid-stream would otherwise leave a stale row carrying the route tag of
+ * the OLD link, and every viewer holding the NEW link would be refused by proof-of-link.
+ *
+ * Extracted when moq.pro arrived, so that the two placement backends cannot drift in how they
+ * record a broadcast — the row is the thing viewers are gated against, and a difference between
+ * the paths would show up as "watching works on one CDN and not the other".
+ */
+async function openBroadcastRow(env: Env, broadcast: string, tag: string | null): Promise<void> {
+  await env.DB
+    .prepare("UPDATE broadcasts SET ended_at = datetime('now') WHERE stream_id = ? AND ended_at IS NULL")
+    .bind(broadcast)
+    .run();
+  await env.DB
+    .prepare("INSERT INTO broadcasts (stream_id, route_tag) VALUES (?, ?)")
+    .bind(broadcast, tag)
+    .run();
+}
+
+async function moqProAssign(
+  env: Env,
+  broadcast: string,
+  role: "publish" | "watch",
+  ttlSeconds: number
+): Promise<{ relay: string; path: string; jwt: string } | null> {
+  // Prefer the asymmetric key: moq.pro holds only its public half, so it can verify our tokens
+  // and cannot mint one. MOQ_PRO_K is the legacy symmetric secret moq.pro also holds, kept so
+  // that unsetting the JWK restores previous behaviour rather than breaking.
+  const jwk = env.MOQ_PRO_JWK;
+  const k = env.MOQ_PRO_K;
+  if (!jwk && !k) return null;
+
+  const root = env.MOQ_PRO_ROOT || "erik";
+
+  // No ".hang" suffix, unlike vivoh.earth and wallflower.tv. Theirs is real: those clients
+  // publish the @moq/hang catalog format and the suffix tells a watcher how to parse it. This
+  // client publishes its OWN catalog track (see simple/earthseed.js §4), so the suffix here
+  // would be a claim about a format that is not being used. moq.pro matches the name as a
+  // string and has no opinion about it either way.
+  const sub = broadcast;
+
+  const claims = {
+    root,
+    put: role === "publish" ? [sub] : [],
+    get: [sub],
+    exp: Math.floor(Date.now() / 1000) + ttlSeconds,
+  };
+
+  const jwt = jwk
+    ? await mintMoqProTokenEd25519(jwk, claims)
+    : await mintMoqProToken(k as string, claims);
+
+  return { relay: MOQ_PRO_RELAY, path: `${root}/${sub}`, jwt };
+}
+
 async function brokerAssign(env: Env, body: Record<string, unknown>): Promise<Record<string, any>> {
   const credential = brokerCredential(env);
   if (!credential) return { error: "relay placement is not configured" };
@@ -1249,6 +1362,29 @@ async function handlePlacementRoutes(request: Request, env: Env, url: URL): Prom
       return Response.json({ error: "could not verify this broadcast name is yours" }, { status: 403 });
     }
 
+    const tag = typeof body.tag === "string" && /^[A-Za-z0-9_-]{16,64}$/.test(body.tag) ? body.tag : null;
+    const ttl = Math.floor(numVar(env.PUBLISHER_TOKEN_TTL, PUBLISHER_TOKEN_TTL_DEFAULT));
+
+    // ── moq.pro (Mode A) ────────────────────────────────────────────────────────────────────
+    //
+    // Answers first when a MOQ_PRO_* secret is set, and there is nothing to ask anyone for: the
+    // relay is fixed and the token is minted here. The broker path below is then unreachable,
+    // which is what makes switching CDN a secret change rather than a deploy.
+    //
+    // `origin_endpoint_id` is deliberately absent from this response. It is an iroh EndpointId
+    // for a fleet box to pull from, and on moq.pro there is no second box — `path` takes its
+    // place, and its presence is how the client tells the two backends apart.
+    const mp = await moqProAssign(env, broadcast, "publish", ttl);
+    if (mp) {
+      await openBroadcastRow(env, broadcast, tag);
+      return Response.json({
+        relay_url: `https://${mp.relay}/`,
+        path: mp.path,
+        jwt: mp.jwt,
+        ttl,
+      });
+    }
+
     const assigned = await brokerAssign(env, {
       broadcast,
       role: "publish",
@@ -1267,20 +1403,8 @@ async function handlePlacementRoutes(request: Request, env: Env, url: URL): Prom
       );
     }
 
-    // One live row per session. Close any earlier one for this name first: a broadcaster who
-    // reloads mid-stream would otherwise leave a stale row whose route_tag is from the OLD link,
-    // and every viewer of the NEW link would be turned away by proof-of-link.
-    await env.DB
-      .prepare("UPDATE broadcasts SET ended_at = datetime('now') WHERE stream_id = ? AND ended_at IS NULL")
-      .bind(broadcast)
-      .run();
-    const tag = typeof body.tag === "string" && /^[A-Za-z0-9_-]{16,64}$/.test(body.tag) ? body.tag : null;
-    await env.DB
-      .prepare("INSERT INTO broadcasts (stream_id, route_tag) VALUES (?, ?)")
-      .bind(broadcast, tag)
-      .run();
+    await openBroadcastRow(env, broadcast, tag);
 
-    const ttl = Math.floor(numVar(env.PUBLISHER_TOKEN_TTL, PUBLISHER_TOKEN_TTL_DEFAULT));
     const jwt = await mintRelayToken(env, broadcast, "publish", ttl, assigned.jwt ?? null);
     return Response.json({
       relay_url: `https://${assigned.relay}/`,
@@ -1328,6 +1452,26 @@ async function handlePlacementRoutes(request: Request, env: Env, url: URL): Prom
     // live === null (nobody is broadcasting this name) falls through to the broker, which answers
     // "not live" — the same answer a viewer who opened the link early has always got.
 
+    const configured = Math.floor(numVar(env.VIEWER_TOKEN_TTL, VIEWER_TOKEN_TTL_DEFAULT));
+    // A test may ask for a shorter one; it may never ask for a longer one.
+    const requested = Math.floor(numVar(body?.ttl as unknown as string, configured));
+    const ttl = Math.max(10, Math.min(configured, requested));
+
+    // ── moq.pro (Mode A) ────────────────────────────────────────────────────────────────────
+    //
+    // `get` only, never `put`. A viewer token that could publish would let anyone holding a
+    // share link overwrite the broadcast they were invited to watch, and an audience cannot
+    // tell a presenter's camera from a fabrication published under the presenter's own name.
+    // The role argument is what enforces that; see moqProAssign.
+    //
+    // There is no edge/origin distinction to make here. moq.pro fans out from one name, so the
+    // `origin` field a viewer sends for the fleet path is simply unused — not ignored by
+    // oversight, but because there is no second relay for it to address.
+    const mp = await moqProAssign(env, broadcast, "watch", ttl);
+    if (mp) {
+      return Response.json({ relay_url: `https://${mp.relay}/`, path: mp.path, jwt: mp.jwt, ttl });
+    }
+
     const assigned = await brokerAssign(env, {
       broadcast,
       role: "watch",
@@ -1337,10 +1481,6 @@ async function handlePlacementRoutes(request: Request, env: Env, url: URL): Prom
     if (assigned.error) return Response.json({ error: String(assigned.error) }, { status: 502 });
     if (!assigned.relay) return Response.json({ error: "edge assign incomplete" }, { status: 502 });
 
-    const configured = Math.floor(numVar(env.VIEWER_TOKEN_TTL, VIEWER_TOKEN_TTL_DEFAULT));
-    // A test may ask for a shorter one; it may never ask for a longer one.
-    const requested = Math.floor(numVar(body?.ttl as unknown as string, configured));
-    const ttl = Math.max(10, Math.min(configured, requested));
     const jwt = await mintRelayToken(env, broadcast, "watch", ttl, assigned.jwt ?? null);
     return Response.json({ relay_url: `https://${assigned.relay}/`, jwt, ttl });
   }

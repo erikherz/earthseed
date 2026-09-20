@@ -1,10 +1,16 @@
 #!/usr/bin/env node
-// moqplay BYOK signing keypair — generate if absent, store the PRIVATE half, print the PUBLIC.
+// Earthseed relay signing keypair — generate if absent, store the PRIVATE half, print the PUBLIC.
 //
-//   npm run keygen                                        # Cloudflare: store private as the
+//   npm run keygen                                        # tinymoq fleet: store private as the
 //                                                         #   MOQ_AUTH_PRIVATE_JWK secret
-//   npm run keygen -- --out-env /etc/moqplay/moqplay.env  # self-host: write into an env file
+//   npm run keygen -- --secret MOQ_PRO_JWK                # moq.pro: the key whose PUBLIC half
+//                                                         #   goes in "Import Asymmetric"
+//   npm run keygen -- --out-env /etc/earthseed/relay.env  # self-host: write into an env file
 //   npm run keygen -- --force                             # rotate even if a key already exists
+//
+// REGISTER THE PUBLIC HALF FIRST, THEN SET THE SECRET. A CDN that does not know the key does not
+// refuse the connection — the WebTransport session opens normally and then dies the moment it
+// speaks MoQ, which looks like a transport bug and is not one.
 //
 // Idempotent: if a key is already present it does nothing (unless --force). The PRIVATE half
 // is NEVER printed or transmitted — only written to the secret store / env file. The PUBLIC
@@ -20,7 +26,20 @@ const args = process.argv.slice(2);
 const force = args.includes("--force");
 const envFileIdx = args.indexOf("--out-env");
 const envFile = envFileIdx >= 0 ? args[envFileIdx + 1] : null;
-const SECRET = "MOQ_AUTH_PRIVATE_JWK";
+
+// Which secret to write. Two relay backends want a key of exactly this shape but store it under
+// different names, and generating one under the wrong name is a mistake you find out about at
+// go-live rather than here:
+//
+//   MOQ_AUTH_PRIVATE_JWK  the tinymoq fleet (BYOK). Its PUBLIC half goes in the fleet's
+//                         verify_jwk.
+//   MOQ_PRO_JWK           moq.pro. Its PUBLIC half is uploaded through "Import Asymmetric".
+const secretIdx = args.indexOf("--secret");
+const SECRET = secretIdx >= 0 ? args[secretIdx + 1] : "MOQ_AUTH_PRIVATE_JWK";
+if (!/^[A-Z][A-Z0-9_]*$/.test(SECRET)) {
+  console.error(`--secret must be an env-var name, got ${JSON.stringify(SECRET)}`);
+  process.exit(2);
+}
 
 const log = (...m) => console.error(...m); // stderr — keep stdout clean for the public JWK
 const b64url = (b) => Buffer.from(b).toString("base64url");
@@ -66,6 +85,21 @@ const thumb = JSON.stringify({ crv: pub.crv, kty: pub.kty, x: pub.x });
 const kid = b64url(new Uint8Array(await c.subtle.digest("SHA-256", new TextEncoder().encode(thumb))));
 pub.kid = kid;
 priv.kid = kid;
+
+// RFC 8037 §3.1: the JWA algorithm name for Ed25519 is "EdDSA". Node's WebCrypto exports
+// `alg: "Ed25519"` — the CURVE name — and workerd's crypto.subtle.importKey refuses it outright.
+//
+// This one word is worth the paragraph. The key generates fine, registers fine, and the failure
+// arrives much later as a bare 500 from importKey at token-minting time, with nothing in it that
+// names the cause. It reads as a broken CDN. Stamped correctly at rest here; the Worker also
+// strips a wrong `alg` on the way in (parsePrivateOkpJwk), so keys generated before this fix
+// keep working rather than needing a rotation.
+priv.alg = "EdDSA";
+// Node's `ext` and `key_ops` describe the key it just exported, not the one workerd will import,
+// and workerd validates key_ops against the usages requested at import. Dropped for the same
+// reason: they can only be wrong on the other side.
+delete priv.ext;
+delete priv.key_ops;
 
 const privateJwk = JSON.stringify(priv); // contains `d` — never printed
 const publicJwk = { kty: "OKP", crv: "Ed25519", x: pub.x, alg: "EdDSA", use: "sig", key_ops: ["verify"], kid };

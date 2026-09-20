@@ -18,8 +18,34 @@
   //                hourly tick is easier to confirm is alive than one that fires at 04:00.
   //                Reports under a preservation hold are exempt in SQL, not here; see 0010.
   "triggers": { "crons": ["* * * * *", "0 * * * *"] },
-  // STREAMING FLEET: the tinymoq broker (cdnadmin) and our own relay boxes. Deliberately NOT
-  // moq.pro — this deployment runs on Erik's fleet, and the broker ASN-steers traffic to it.
+  // ── RELAY BACKEND: moq.pro (Mode A) since 20 Sep 2026 ────────────────────────────────────────
+  //
+  // Everything in this section about the tinymoq broker is now the DORMANT alternative. The
+  // MOQ_PRO_JWK secret is set, so moqProAssign() answers first and every broadcast goes through
+  // cdn.moq.pro with a per-broadcast token this Worker mints. earthseed.live now shares a CDN
+  // with vivoh.earth and wallflower.tv.
+  //
+  // THE VARS BELOW PROVE NOTHING ABOUT WHERE TRAFFIC GOES. They stay populated on purpose, so
+  // that moving between backends is a secret change rather than a deploy — and so the rollback
+  // is `wrangler secret delete MOQ_PRO_JWK`, with no code to revert. The only honest answer to
+  // "which CDN is this on" is `npx wrangler secret list`.
+  //
+  // The signing key is Earthseed's OWN (EdDSA, kid f-UtSYfdV_QdZntX2QzEqzaRHlCBOgC3an9gRQUHA48,
+  // generated 20 Sep 2026). Deliberately not vivoh.earth's or wallflower.tv's: one key across
+  // products means a compromise of any one Worker forges tokens for all of them. moq.pro holds
+  // only the public half, so it can verify our tokens and cannot mint one.
+  //
+  // MOQ_PRO_ROOT is unset, so the namespace is "erik" — shared with the other two products. For
+  // them that is an accepted collision risk. Here it is not a risk at all: an earthseed broadcast
+  // name is a 52-character base32 Ed25519 PUBLIC KEY, so a collision is a key collision, and
+  // taking someone's name would mean holding their private half.
+  //
+  // What did NOT change: the content key is still derived in the two browsers from the `#k=`
+  // fragment, which browsers never transmit. cdn.moq.pro carries ciphertext it cannot read,
+  // exactly as the fleet did. Moving CDN moves who fans out the bytes, not who can decode them.
+  //
+  // ── The dormant path ─────────────────────────────────────────────────────────────────────────
+  // STREAMING FLEET: the tinymoq broker (cdnadmin) and our own relay boxes.
   //
   // The Worker now sits in front of the broker: it POSTs {broadcast, role, …} to
   // <BROKER_BASE>/cdn/assign with the CDN_API_TOKEN secret. That token replaced the public `pk_`
@@ -37,6 +63,15 @@
     // ── THE BROADCAST SHUTTER ────────────────────────────────────────────────────────────────
     // "1" while the relay fleet is shut down: /api/broadcast/{start,challenge} answer 503 and the
     // client shows a modal instead of walking someone into a broker that is not there.
+    //
+    // STILL "1" AS OF 20 Sep 2026, and the reason it closed has now gone away: this deployment
+    // is on moq.pro, which is up, rather than on the fleet that was down. What is NOT yet done is
+    // registering the public half of MOQ_PRO_JWK with moq.pro's "Import Asymmetric". Until that
+    // is in place the CDN does not know the key — and an unregistered key does not refuse the
+    // connection, it opens a WebTransport session that dies the moment it speaks MoQ. Reopening
+    // before then would produce a broadcast that looks like it started and carries nothing.
+    //
+    // So: register the key, THEN set this to "0" and deploy.
     //
     // TO REOPEN: set this to "0" and `npm run deploy`. That is the whole procedure — the client
     // reads it from /api/config and needs no edit. Bring the relays up FIRST; this var only

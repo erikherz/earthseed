@@ -715,8 +715,17 @@ async function assignPublish(node, tag, code) {
   const sig = await signClaim(node, challenge);
   const d = await postJson("/api/broadcast/start", { broadcast: node.id, challenge, sig, tag, code });
   if (d.error) return d;
-  if (!d.relay_url || !d.origin_endpoint_id) return { error: "origin assign incomplete" };
-  return { relay_url: d.relay_url, origin_endpoint_id: d.origin_endpoint_id, jwt: d.jwt ?? null };
+  if (!d.relay_url) return { error: "origin assign incomplete" };
+  // `origin_endpoint_id` is the fleet's iroh EndpointId, for a viewer edge to pull from. On
+  // moq.pro there is no second relay to address and `path` arrives instead, so requiring the
+  // EndpointId unconditionally — as this did — refused every moq.pro placement as "incomplete".
+  if (!d.path && !d.origin_endpoint_id) return { error: "origin assign incomplete" };
+  return {
+    relay_url: d.relay_url,
+    path: d.path ?? null,
+    origin_endpoint_id: d.origin_endpoint_id ?? null,
+    jwt: d.jwt ?? null,
+  };
 }
 /** Place a viewer edge that pulls from the given origin; get the subscribe token.
  * @param {string} nodeId @param {string} originEid @param {string} tag */
@@ -724,7 +733,7 @@ async function assignWatch(nodeId, originEid, tag) {
   const d = await postJson("/api/watch/start", { broadcast: nodeId, origin: originEid, tag });
   if (d.error) return d;
   if (!d.relay_url) return { error: "edge assign incomplete" };
-  return { relay_url: d.relay_url, jwt: d.jwt ?? null, ttl: d.ttl ?? null };
+  return { relay_url: d.relay_url, path: d.path ?? null, jwt: d.jwt ?? null, ttl: d.ttl ?? null };
 }
 /** Tell the control plane this broadcast is over. Best-effort; nothing depends on it arriving. */
 async function endBroadcast(nodeId) {
@@ -795,8 +804,32 @@ async function putSalt(nodeId, stream, secret) {
     return null;
   }
 }
-/** Append the token to the relay URL (relay_url ends in "/", so ?jwt= appends cleanly). @param {string} relayUrl @param {string|null} jwt */
-const connectUrl = (relayUrl, jwt) => (jwt ? `${relayUrl}?jwt=${jwt}` : relayUrl);
+/**
+ * Build the relay connect URL from what the control plane returned.
+ *
+ * TWO BACKENDS, and they put the broadcast name in different places. Which one is live is a
+ * secret on the Worker, not a setting here, so this reads it off the SHAPE of the response:
+ *
+ *   moq.pro       `path` present. The broadcast lives in the URL —
+ *                 `https://cdn.moq.pro/<root>/<name>?jwt=…` — and the moq path is EMPTY.
+ *   tinymoq fleet no `path`. The URL is the bare relay and the broadcast name is the moq path.
+ *
+ * Hence `moqName` below. Getting the pair the wrong way round does not fail loudly: the
+ * connection opens either way, and then nothing is ever announced or received.
+ *
+ * @param {{relay_url:string, jwt?:string|null, path?:string|null}} placement
+ * @param {string} name the broadcast name, used only on the fleet path
+ * @returns {{url:string, moqName:string}}
+ */
+function connectTarget(placement, name) {
+  const base = placement.path
+    ? `${placement.relay_url.replace(/\/+$/, "")}/${String(placement.path).replace(/^\/+/, "")}`
+    : placement.relay_url;
+  return {
+    url: placement.jwt ? `${base}?jwt=${placement.jwt}` : base,
+    moqName: placement.path ? "" : name,
+  };
+}
 
 /* ═══════════════════════════════ 4. MEDIA LOOP ═══════════════════════════════ */
 // Native WebCodecs only: video = VP8 (self-contained keyframes, no out-of-band description),
@@ -1925,7 +1958,7 @@ export async function runBroadcast() {
       const salt = await putSalt(node.id, newStreamSalt(), getOrCreateRotateSecret(node.id));
       if (!salt?.stream) return set("could not set the stream salt");
       await deriveMediaKey({ fragmentKeyB64: fragmentKey, globalSaltB64: salt.global, streamSaltB64: salt.stream, streamId: node.id, epoch: salt.epoch, pw });
-      const relay = connectUrl(pub.relay_url, pub.jwt);
+      const target = connectTarget(pub, node.id);
       const originEid = pub.origin_endpoint_id;
 
       set("starting camera…");
@@ -1947,7 +1980,7 @@ export async function runBroadcast() {
       watchCamera(stream.getVideoTracks()[0]);
 
       set("connecting…");
-      bc = await startBroadcast({ relayUrl: relay, broadcastName: node.id, stream, onStatus: set, salts: salt });
+      bc = await startBroadcast({ relayUrl: target.url, broadcastName: target.moqName, stream, onStatus: set, salts: salt });
 
       const link = new URL("watch.html", location.href);
       link.searchParams.set("node", node.id);
@@ -2490,8 +2523,15 @@ export async function runWatch() {
     edge = await assignWatch(node, originEid || "", routeTag);
   }
   if (edge.error) return set("stream is not live");
-  const relay = connectUrl(edge.relay_url, edge.jwt);
-  connectedRelay = { host: new URL(edge.relay_url).host, role: "watching (edge)", transport: "WebTransport / QUIC" };
+  const target = connectTarget(edge, node);
+  // "edge" is the fleet's word for a relay that pulls from an origin box. moq.pro fans out from
+  // one name with no second hop, so saying "edge" there would describe a topology that is not
+  // there — and this string is shown to the viewer in the relay panel.
+  connectedRelay = {
+    host: new URL(edge.relay_url).host,
+    role: edge.path ? "watching" : "watching (edge)",
+    transport: "WebTransport / QUIC",
+  };
 
   // Reporting is offered only to someone who actually got placed, because only they can have seen
   // anything. Mounted before playback starts so it is there the moment it might be wanted.
@@ -2532,7 +2572,7 @@ export async function runWatch() {
 
   set("connecting…");
   try {
-    player = await startWatch({ relayUrl: relay, broadcastName: node, canvas: $("video"), onStatus: set, onSalts });
+    player = await startWatch({ relayUrl: target.url, broadcastName: target.moqName, canvas: $("video"), onStatus: set, onSalts });
   } catch (e) {
     set(`watch error: ${e instanceof Error ? e.message : e}`);
   }
