@@ -35,6 +35,12 @@
   // products means a compromise of any one Worker forges tokens for all of them. moq.pro holds
   // only the public half, so it can verify our tokens and cannot mint one.
   //
+  // Its PUBLIC half is committed as ./earthseed-moqpro.public.jwk, and that file earns its place:
+  // Cloudflare secrets are write-only, so once the private half is deployed NOTHING otherwise
+  // records which key is live. That absence is what once turned a one-line misconfiguration into
+  // an afternoon. (./earthseed-ed25519.public.jwk is the different, older key — the tinymoq fleet
+  // BYOK one, kid X3Kz…. Two keys, two backends; do not paste one where the other belongs.)
+  //
   // MOQ_PRO_ROOT is unset, so the namespace is "erik" — shared with the other two products. For
   // them that is an accepted collision risk. Here it is not a risk at all: an earthseed broadcast
   // name is a 52-character base32 Ed25519 PUBLIC KEY, so a collision is a key collision, and
