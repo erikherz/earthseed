@@ -22,6 +22,9 @@ export const FILES = [
   "simple/audio-capture-worklet.js",
   "simple/overlay.js",
   "simple/chat.js",
+  // Burned into the picture rather than overlaid in the DOM, so they travel inside the E2E
+  // media encryption like every other pixel. qr.js is imported by compositor.js alone.
+  "simple/qr.js",
   // The seeds demo. Two files, reached from one dynamic import in earthseed.js, so deleting the
   // demo is deleting these two lines and those two files.
   "simple/seeds.js",
