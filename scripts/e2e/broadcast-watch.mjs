@@ -26,6 +26,8 @@ const adminFlag = args.indexOf("--admin");
 const ADMIN = adminFlag >= 0 ? args[adminFlag + 1] : process.env.EARTHSEED_ADMIN;
 
 let failures = 0;
+/** Sections that could not run here. Named in the summary so green never overstates itself. */
+const skipped = [];
 const check = (name, actual, expected) => {
   const ok = JSON.stringify(actual) === JSON.stringify(expected);
   if (!ok) failures++;
@@ -54,19 +56,71 @@ const SAMPLER = () => {
   return { w: c.width, h: c.height, mean: sum / px, litFraction: nonBlack / px };
 };
 
-if (!ADMIN) {
-  console.error("This test mints its own publish key. Pass --admin <password>.");
-  process.exit(2);
+/**
+ * Get a publish key, by whichever door is open.
+ *
+ * With --admin (or EARTHSEED_ADMIN) this asks /api/admin/mint-code. Without one it walks the
+ * PUBLIC path instead: request a challenge, burn the proof of work, exchange it for a code —
+ * exactly what a stranger with a browser does.
+ *
+ * The fallback is worth having for a reason beyond convenience. A suite that can only run when
+ * the operator's password is to hand is a suite that mostly does not run, and this is the only
+ * test that drives capture → encrypt → relay → decrypt → paint. The PoW path also proves
+ * something the admin path cannot: that the door an actual user knocks on still opens.
+ *
+ * The code is a LIVE CREDENTIAL. It is never printed, never passed on a command line, and only
+ * ever travels in the URL handed to the headless browser.
+ */
+async function getPublishCode() {
+  if (ADMIN) {
+    const mint = await fetch(`${ORIGIN}/api/admin/mint-code`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${ADMIN}` },
+    }).then((r) => r.json());
+    if (!mint?.code) throw new Error(`admin mint refused: ${JSON.stringify(mint)}`);
+    console.log("  publish key minted via /api/admin/mint-code");
+    return mint.code;
+  }
+
+  const ch = await fetch(`${ORIGIN}/api/publish-code/challenge`).then((r) => r.json());
+  if (!ch?.challenge) throw new Error(`no proof-of-work challenge: ${JSON.stringify(ch)}`);
+
+  // Same rule the Worker checks: SHA-256(`${challenge}|${nonce}`) must start with `bits` zero
+  // bits. 18 bits is ~262k hashes — a second or two here, and the point is that it is not free
+  // for someone farming codes.
+  const { createHash } = await import("node:crypto");
+  const leadingZeroBits = (buf) => {
+    let seen = 0;
+    for (const b of buf) {
+      if (b === 0) { seen += 8; continue; }
+      seen += Math.clz32(b) - 24;
+      break;
+    }
+    return seen;
+  };
+  const started = Date.now();
+  let nonce = 0;
+  for (;;) {
+    const d = createHash("sha256").update(`${ch.challenge}|${nonce}`).digest();
+    if (leadingZeroBits(d) >= ch.bits) break;
+    nonce++;
+  }
+  console.log(`  proof of work solved: ${ch.bits} bits, ${nonce} nonces, ${Date.now() - started}ms`);
+
+  const got = await fetch(`${ORIGIN}/api/publish-code/request`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ challenge: ch.challenge, nonce: String(nonce) }),
+  }).then((r) => r.json());
+  if (!got?.code) throw new Error(`code request refused: ${JSON.stringify(got)}`);
+  if (got.active_immediately === false) {
+    throw new Error("this deployment delays new publish codes; pass --admin to mint an active one");
+  }
+  console.log("  publish key minted via the public proof-of-work path");
+  return got.code;
 }
 
-const mint = await fetch(`${ORIGIN}/api/admin/mint-code`, {
-  method: "POST",
-  headers: { Authorization: `Bearer ${ADMIN}` },
-}).then((r) => r.json());
-if (!mint?.code) {
-  console.error(`could not mint a publish key: ${JSON.stringify(mint)}`);
-  process.exit(2);
-}
+const mint = { code: await getPublishCode() };
 
 const browser = await puppeteer.launch({
   headless: "new",
@@ -175,6 +229,52 @@ try {
   }, streamId);
   check("a wrong route tag gets 404 (not 403, which would confirm it exists)", refused, 404);
 
+  step("Which CDN actually carried it");
+  //
+  // Neither wrangler.jsonc nor the Worker source can answer this. The FLEET_* vars stay populated
+  // for the dormant backend on purpose, and the choice is made by whether a SECRET is set — so
+  // the only honest answer comes from asking for a placement and reading what comes back.
+  //
+  // That needs a valid route tag, which means deriving it the way the client does:
+  //   HKDF-SHA256(fragment key, salt="es-route|<id>", info="earthseed-route-auth-v1")
+  // Re-deriving it here rather than scraping it out of the page is worth the dozen lines: it
+  // independently confirms the tag contract, so a change to either side shows up as a failure
+  // here instead of as viewers being silently turned away.
+  const fragmentKey = new URL(share).hash.replace(/^#k=/, "");
+  const { subtle } = await import("node:crypto").then((m) => m.webcrypto);
+  const b64urlToBytes = (s) => Buffer.from(s.replace(/-/g, "+").replace(/_/g, "/"), "base64");
+  const ikm = await subtle.importKey("raw", b64urlToBytes(fragmentKey), "HKDF", false, ["deriveBits"]);
+  const bits = await subtle.deriveBits(
+    {
+      name: "HKDF",
+      hash: "SHA-256",
+      salt: Buffer.from(`es-route|${streamId}`),
+      info: Buffer.from("earthseed-route-auth-v1"),
+    },
+    ikm,
+    256
+  );
+  const tag = Buffer.from(bits).toString("base64url");
+
+  const placement = await fetch(`${ORIGIN}/api/watch/start`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ broadcast: streamId, origin: "", tag }),
+  }).then((r) => r.json());
+
+  check("a correctly derived route tag is accepted", !!placement.relay_url, true);
+  console.log(`    relay_url ${placement.relay_url}   path ${placement.path ?? "(none — fleet backend)"}`);
+  check("the viewer is placed on cdn.moq.pro", placement.relay_url, "https://cdn.moq.pro/");
+  check("  under the account root", (placement.path || "").startsWith("erik/"), true);
+  check("  naming this broadcast and no other", placement.path, `erik/${streamId}`);
+
+  if (!ADMIN) {
+    step("Terminating stops the viewer — SKIPPED");
+    console.log("  no --admin password, so the kill switch cannot be exercised.");
+    skipped.push("the kill switch (needs --admin)");
+    throw { skipRest: true };
+  }
+
   step("Terminating stops the viewer");
   await fetch(`${ORIGIN}/api/admin/kill`, {
     method: "POST",
@@ -193,8 +293,12 @@ try {
   const afterKill = await vpage.evaluate(SAMPLER);
   check("and the canvas is cleared rather than left frozen", afterKill.litFraction < 0.02, true);
 } catch (e) {
-  failures++;
-  console.error(`\nERROR: ${e.message}`);
+  // A deliberate early exit from an un-runnable section is not a failure, and must not be
+  // reported as a pass either — the summary line says what was skipped.
+  if (!e?.skipRest) {
+    failures++;
+    console.error(`\nERROR: ${e.message}`);
+  }
 } finally {
   if (streamId && ADMIN) {
     // Leave nothing terminated behind: this id belongs to a throwaway identity, but a stale kill
@@ -208,5 +312,15 @@ try {
   await browser.close();
 }
 
-console.log(failures ? `\nFAIL: ${failures} assertion(s)\n` : "\nPASS: broadcast → watch works end to end\n");
+// A bare "PASS" after a section was skipped is the failure this whole suite exists to avoid —
+// green that means less than it appears to. Say what did not run, every time, in the line people
+// actually read.
+if (failures) {
+  console.log(`\nFAIL: ${failures} assertion(s)\n`);
+} else if (skipped.length) {
+  console.log(`\nPASS (INCOMPLETE): broadcast → watch works end to end.`);
+  console.log(`  NOT RUN: ${skipped.join("; ")}\n`);
+} else {
+  console.log("\nPASS: broadcast → watch works end to end\n");
+}
 process.exit(failures ? 1 : 0);

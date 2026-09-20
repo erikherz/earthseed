@@ -70,23 +70,25 @@
     // "1" while the relay fleet is shut down: /api/broadcast/{start,challenge} answer 503 and the
     // client shows a modal instead of walking someone into a broker that is not there.
     //
-    // STILL "1" AS OF 20 Sep 2026, and the reason it closed has now gone away: this deployment
-    // is on moq.pro, which is up, rather than on the fleet that was down. What is NOT yet done is
-    // registering the public half of MOQ_PRO_JWK with moq.pro's "Import Asymmetric". Until that
-    // is in place the CDN does not know the key — and an unregistered key does not refuse the
-    // connection, it opens a WebTransport session that dies the moment it speaks MoQ. Reopening
-    // before then would produce a broadcast that looks like it started and carries nothing.
+    // REOPENED 20 Sep 2026, after 24 days closed.
     //
-    // So: register the key, THEN set this to "0" and deploy.
+    // It closed on 27 Aug because the tinymoq relay fleet was down. That is no longer the
+    // backend: this deployment is on moq.pro (see the relay section above), and the public half
+    // of MOQ_PRO_JWK is registered there as "Earthseed.Live" — EdDSA, kid f-UtSY…, enabled.
     //
-    // TO REOPEN: set this to "0" and `npm run deploy`. That is the whole procedure — the client
-    // reads it from /api/config and needs no edit. Bring the relays up FIRST; this var only
-    // controls what we say, not whether anything is actually listening.
+    // THE ORDER MATTERED. An unregistered key does not refuse a connection: the WebTransport
+    // session opens, the ALPN negotiates, and it dies a few hundred milliseconds later the moment
+    // it speaks MoQ. Reopening before the import would have produced a broadcast that looked like
+    // it started and carried nothing — which is a far worse failure than being shut.
+    //
+    // TO CLOSE AGAIN: set this to "1" and `npm run deploy`. The client reads it from /api/config
+    // and needs no edit. Note this var only controls what we SAY — it is not a kill switch and
+    // does not stop a relay that is already carrying traffic.
     //
     // Only "1" and "true" close it. Anything else, including unset, is open — a fat-fingered var
     // must not take broadcasting down, and "0"/"false" are the values someone reaches for to turn
     // it off (both of which are truthy strings, which is the bug this avoids).
-    "BROADCAST_OFFLINE": "1",
+    "BROADCAST_OFFLINE": "0",
     "OFFLINE_MESSAGE": "Temporarily offline. Please contact erik@vivoh.com for a demo.",
 
     "BROKER_BASE": "https://tinymoq.com",
