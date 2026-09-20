@@ -1355,7 +1355,166 @@ async function handlePlacementRoutes(request: Request, env: Env, url: URL): Prom
  * enumerate which names are live. Answers 404 rather than {live:false} for an unknown name, for
  * the same reason.
  */
+/* ── Per-stream settings ────────────────────────────────────────────────────────────────────
+ *
+ * The overlay, the chat opt-in, the viewer-auth flag and the sealed link watermark. Ported from
+ * Wallflower; the storage is migration 0013 and the reasoning for each column lives there.
+ *
+ * ── Who may write them ─────────────────────────────────────────────────────────────────────
+ *
+ * Whoever holds the private half of the key the stream id is MADE of. The id is a 52-character
+ * base32 Ed25519 public key, so ownership needs no account, no row and no allow list: sign a
+ * challenge, and the name proves itself.
+ *
+ * The challenge is minted HERE rather than relayed from the broker, and that is the one place
+ * this departs from the go-live path. Go-live hands its signature on to the broker, which checks
+ * freshness; a settings write has no broker in the path, so relaying a broker challenge would
+ * mean accepting a signature nothing had ever checked the age of — and a captured signature could
+ * then rewrite someone's overlay for as long as their stream id existed. Minting our own, MAC'd
+ * against ISSUE_KEY with the issue time inside it, is the same idiom already used for the
+ * publish-code proof-of-work and it makes the signature expire.
+ *
+ * ── Reading them is open, and has to be ────────────────────────────────────────────────────
+ *
+ * A viewer needs the overlay and the chat flag to render the page, and a viewer holds a link and
+ * nothing else. So GET is ungated. What that discloses is exactly what the broadcaster chose to
+ * put on screen in front of strangers, plus two booleans. `link_enc` is returned too and is
+ * meaningless without the fragment key — it is a sealed blob this service cannot read.
+ */
+
+const SETTINGS_CONTEXT = "earthseed-settings-v1";
+const SETTINGS_CHALLENGE_TTL_SECONDS = 300;
+
+/** Length bound on the sealed watermark. Opaque to us, so a bound is the only check available —
+ *  and it is the one that matters: without it this column is a free blob store. A sealed URL runs
+ *  to a few hundred bytes. */
+const LINK_ENC_MAX = 2048;
+/** Bound on the overlay. Sanitised in the client, not here; this only stops the column being used
+ *  as storage. */
+const OVERLAY_MAX = 64 * 1024;
+
+async function mintSettingsChallenge(env: Env): Promise<string | null> {
+  if (!env.ISSUE_KEY) return null;
+  const issued = Math.floor(Date.now() / 1000).toString();
+  return `${issued}.${await hmac(env.ISSUE_KEY, `${SETTINGS_CONTEXT}|${issued}`)}`;
+}
+
+async function settingsChallengeIsValid(env: Env, challenge: string): Promise<boolean> {
+  if (!env.ISSUE_KEY) return false;
+  const [issued, mac] = challenge.split(".");
+  if (!issued || !mac) return false;
+  const age = Math.floor(Date.now() / 1000) - Number(issued);
+  if (!Number.isFinite(age) || age < -5 || age > SETTINGS_CHALLENGE_TTL_SECONDS) return false;
+  return constantTimeEqual(mac, await hmac(env.ISSUE_KEY, `${SETTINGS_CONTEXT}|${issued}`));
+}
+
+type StreamSettings = {
+  require_auth: number;
+  overlay_html: string | null;
+  chat_enabled: number;
+  link_enc: string | null;
+};
+
+async function handleStreamSettings(
+  request: Request,
+  env: Env,
+  url: URL,
+  streamId: string
+): Promise<Response> {
+  // GET — what a viewer needs to render the page.
+  if (request.method === "GET") {
+    const row = await env.DB
+      .prepare("SELECT require_auth, overlay_html, chat_enabled, link_enc FROM streams WHERE stream_id = ?")
+      .bind(streamId)
+      .first<StreamSettings>();
+
+    return Response.json(
+      {
+        require_auth: row?.require_auth === 1,
+        overlay_html: row?.overlay_html ?? "",
+        chat_enabled: row?.chat_enabled === 1,
+        link_enc: row?.link_enc ?? "",
+      },
+      { headers: { "Cache-Control": "no-store" } }
+    );
+  }
+
+  if (request.method !== "POST") return new Response("method not allowed", { status: 405 });
+
+  const body = (await request.json().catch(() => null)) as {
+    challenge?: string;
+    signature?: string;
+    require_auth?: boolean;
+    overlay_html?: string;
+    chat_enabled?: boolean;
+    link_enc?: string;
+  } | null;
+
+  if (!body?.challenge || !body?.signature) {
+    return Response.json({ error: "signed claim required" }, { status: 400 });
+  }
+  if (!(await settingsChallengeIsValid(env, body.challenge))) {
+    return Response.json({ error: "challenge expired or invalid" }, { status: 403 });
+  }
+  if (!(await claimIsValid(streamId, body.challenge, body.signature))) {
+    return Response.json({ error: "claim signature does not verify" }, { status: 403 });
+  }
+
+  // Read-then-write, so a caller can send one field without clearing the others. Anything absent
+  // keeps its current value rather than reverting to a default — a settings POST that silently
+  // wiped the overlay because it only meant to toggle chat would be a bad surprise.
+  const current = await env.DB
+    .prepare("SELECT require_auth, overlay_html, chat_enabled, link_enc FROM streams WHERE stream_id = ?")
+    .bind(streamId)
+    .first<StreamSettings>();
+
+  const requireAuth = body.require_auth ?? current?.require_auth === 1;
+  const chatEnabled = body.chat_enabled ?? current?.chat_enabled === 1;
+  const overlayHtml = body.overlay_html ?? current?.overlay_html ?? "";
+  const linkEnc = body.link_enc ?? current?.link_enc ?? "";
+
+  if (typeof overlayHtml !== "string" || overlayHtml.length > OVERLAY_MAX) {
+    return Response.json({ error: "overlay_html too large" }, { status: 400 });
+  }
+  if (typeof linkEnc !== "string" || linkEnc.length > LINK_ENC_MAX) {
+    return Response.json({ error: "link_enc too large" }, { status: 400 });
+  }
+
+  await env.DB
+    .prepare(
+      `INSERT INTO streams (stream_id, require_auth, overlay_html, chat_enabled, link_enc)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(stream_id) DO UPDATE SET
+         require_auth = excluded.require_auth,
+         overlay_html = excluded.overlay_html,
+         chat_enabled = excluded.chat_enabled,
+         link_enc     = excluded.link_enc,
+         updated_at   = datetime('now')`
+    )
+    .bind(streamId, requireAuth ? 1 : 0, overlayHtml, chatEnabled ? 1 : 0, linkEnc)
+    .run();
+
+  return Response.json({
+    require_auth: requireAuth,
+    overlay_html: overlayHtml,
+    chat_enabled: chatEnabled,
+    link_enc: linkEnc,
+  });
+}
+
 async function handleStreamStatus(request: Request, env: Env, url: URL): Promise<Response> {
+  // GET /api/stream/challenge — a nonce for a broadcaster to sign before writing settings.
+  // Public: it grants nothing on its own and is useless without the private half of the key the
+  // stream id is made of.
+  if (request.method === "GET" && url.pathname === "/api/stream/challenge") {
+    const challenge = await mintSettingsChallenge(env);
+    if (!challenge) return Response.json({ error: "ISSUE_KEY is not configured" }, { status: 503 });
+    return Response.json({ challenge, expires_in: SETTINGS_CHALLENGE_TTL_SECONDS });
+  }
+
+  const s = url.pathname.match(/^\/api\/stream\/([a-z2-7]+)\/settings$/);
+  if (s && isNodeId(s[1])) return handleStreamSettings(request, env, url, s[1]);
+
   const m = url.pathname.match(/^\/api\/stream\/([a-z2-7]+)\/status$/);
   if (request.method !== "GET" || !m || !isNodeId(m[1])) {
     return new Response("Not Found", { status: 404 });
