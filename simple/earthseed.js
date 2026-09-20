@@ -735,6 +735,116 @@ async function assignWatch(nodeId, originEid, tag) {
   if (!d.relay_url) return { error: "edge assign incomplete" };
   return { relay_url: d.relay_url, path: d.path ?? null, jwt: d.jwt ?? null, ttl: d.ttl ?? null };
 }
+/* ── Viewing sessions ─────────────────────────────────────────────────────────────────────────
+ *
+ * "How many are watching, and for how long." Ported from Wallflower's migration-0014 work; the
+ * Worker half is in handleStatsRoutes.
+ *
+ * ── A ROW IS A SESSION, NEVER A PERSON ──────────────────────────────────────────────────────
+ *
+ * The token below is the whole reason this is safe to have, so it is worth saying what it is
+ * not. It is minted per session, held in this page's memory ONLY, and never written to
+ * localStorage, sessionStorage or a cookie. It authorises exactly two calls about one row —
+ * heartbeat and end — and it is gone when the tab is.
+ *
+ * Persisting it, or reusing one across streams, would turn this from audience measurement into
+ * an audience register: two rows could then be shown to be the same human. Nothing else in this
+ * table can do that, and nothing here may start.
+ *
+ * ── WHY A HEARTBEAT AND NOT `beforeunload` ──────────────────────────────────────────────────
+ *
+ * beforeunload does not fire on iOS backgrounding, a tab crash, force-quit or network loss. A
+ * design that opens a row and closes it there leaves rows open for ever and every number
+ * computed from them wrong in the same direction. So the page pings while it is alive and the
+ * Worker's cron closes what has gone quiet, AT the last heartbeat — a viewer whose battery died
+ * is credited with what was actually observed.
+ *
+ * `pagehide` rather than `beforeunload` for the close, because it is the one that fires on iOS.
+ * It goes out via sendBeacon, which survives the page going away — and sendBeacon can only send
+ * text/plain without triggering a CORS preflight, which is why the Worker parses this body
+ * tolerantly instead of calling request.json().
+ */
+
+/** Open a viewing session, and keep it alive until the page goes away. Best-effort throughout. */
+async function trackViewing(nodeId, tag) {
+  let session = null;
+  try {
+    const r = await fetch(api("/api/stats/watch"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ broadcast: nodeId, tag }),
+    });
+    if (!r.ok) return () => {}; // not live, or the tag did not match — nothing to count
+    session = await r.json();
+  } catch {
+    return () => {}; // measurement is never worth failing playback over
+  }
+  if (!session?.id || !session.token) return () => {};
+
+  const every = Math.max(5, Number(session.heartbeat_seconds) || 30) * 1000;
+  const beat = setInterval(async () => {
+    try {
+      const r = await fetch(api(`/api/stats/watch/${session.id}/heartbeat`), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token: session.token }),
+      });
+      const d = await r.json().catch(() => null);
+      // The Worker answers ok:false rather than an error status when the row is gone — reaped
+      // after a long backgrounding, say. Stop beating at a row that no longer exists; a viewer
+      // who comes back is watching again, and stitching that into the old row would credit them
+      // for the gap.
+      if (d && d.ok === false) clearInterval(beat);
+    } catch {
+      /* transient; the reaper is the backstop */
+    }
+  }, every);
+
+  const end = () => {
+    clearInterval(beat);
+    try {
+      // text/plain: the only type sendBeacon can send without a CORS preflight it would not
+      // survive. The Worker reads it with a tolerant parser for exactly this reason.
+      navigator.sendBeacon?.(
+        api(`/api/stats/watch/${session.id}/end`),
+        new Blob([JSON.stringify({ token: session.token })], { type: "text/plain" })
+      );
+    } catch {
+      /* the reaper closes it within 150s anyway */
+    }
+  };
+  addEventListener("pagehide", end, { once: true });
+  return end;
+}
+
+/**
+ * Show the broadcaster how many people are watching.
+ *
+ * Gated on the same proof-of-link tag as everything else, which the broadcaster can produce
+ * because it derives from the link it just minted. Audience size is metadata ABOUT a
+ * broadcaster, and ungated it would be readable by anyone who guessed a name.
+ */
+function watchViewerCount(nodeId, tag, onCount) {
+  let stopped = false;
+  const tick = async () => {
+    if (stopped) return;
+    try {
+      const r = await fetch(api(`/api/stats/stream/${encodeURIComponent(nodeId)}/viewers?tag=${encodeURIComponent(tag)}`));
+      if (r.ok) {
+        const d = await r.json();
+        onCount(Number(d.viewers) || 0);
+      }
+    } catch {
+      /* leave the last number rather than flashing a zero at somebody mid-broadcast */
+    }
+    if (!stopped) setTimeout(tick, 10000);
+  };
+  void tick();
+  return () => {
+    stopped = true;
+  };
+}
+
 /** Tell the control plane this broadcast is over. Best-effort; nothing depends on it arriving. */
 async function endBroadcast(nodeId) {
   try {
@@ -1905,6 +2015,7 @@ export async function runBroadcast() {
   });
 
   /** @type {(() => void)|null} */ let stopKillWatch = null;
+  /** @type {(() => void)|null} */ let stopViewerCount = null;
   const teardown = (message) => {
     stopKillWatch?.();
     stopKillWatch = null;
@@ -1927,7 +2038,13 @@ export async function runBroadcast() {
     // The live pill and the relay panel go back to the truth. Leaving either showing would mean
     // a stopped broadcast still reading as live, which is the one thing a status light must
     // never do.
-    $("live-pill")?.classList.remove("on");
+    const pill = $("live-pill");
+    pill?.classList.remove("on");
+    // Back to the bare word. A stopped broadcast still reading "live · 3 watching" would be the
+    // same lie as the pill staying lit, told with more precision.
+    stopViewerCount?.();
+    stopViewerCount = null;
+    if (pill) pill.textContent = "live";
     connectedRelay = null;
     if (pcToggle) pcToggle.disabled = false;
     if (regenBtn) regenBtn.disabled = false;
@@ -2020,6 +2137,18 @@ export async function runBroadcast() {
       if (idEl) idEl.textContent = node.id;
       $("copy")?.classList.remove("hidden");
       $("live-pill")?.classList.add("on");
+
+      // How many people are actually there.
+      //
+      // Written into the live pill rather than given a control of its own: it is the one place
+      // already reserved for "what is true about this broadcast right now", and a broadcaster
+      // glances at it rather than reading it. Left as plain "live" until somebody arrives — "live
+      // · 0 watching" at the moment you start is a discouraging way to describe a normal state.
+      stopViewerCount?.();
+      stopViewerCount = watchViewerCount(node.id, routeTag, (n) => {
+        const pill = $("live-pill");
+        if (pill) pill.textContent = n > 0 ? `live · ${n} watching` : "live";
+      });
       connectedRelay = { host: new URL(pub.relay_url).host, role: "publishing (origin)", transport: "WebTransport / QUIC" };
       if (keyRow) keyRow.hidden = true;
       if (keyHint) keyHint.hidden = true;
@@ -2558,6 +2687,12 @@ export async function runWatch() {
   // Reporting is offered only to someone who actually got placed, because only they can have seen
   // anything. Mounted before playback starts so it is there the moment it might be wanted.
   mountReportControl(node);
+
+  // Count this viewing. Opened here rather than after playback succeeds, because someone who was
+  // placed on a relay and then failed to decode still watched as far as this service can tell,
+  // and pretending otherwise would quietly under-report exactly the broken cases worth knowing
+  // about. Nothing below depends on it: the token lives in this closure and dies with the tab.
+  void trackViewing(node, routeTag);
 
   /** @type {{stop():void}|null} */ let player = null;
   const stopKillWatch = watchKill(node, routeTag, () => {

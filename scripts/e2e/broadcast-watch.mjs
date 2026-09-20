@@ -229,6 +229,48 @@ try {
   }, streamId);
   check("a wrong route tag gets 404 (not 403, which would confirm it exists)", refused, 404);
 
+  step("The viewing is counted, and the broadcaster is told");
+  //
+  // The Worker's /api/stats/* endpoints existed for a day with nothing calling them — a surface
+  // that looks like a feature and measures nothing. This is what makes them real, so it asserts
+  // the whole loop: a row opened for THIS viewer, and the number reaching the broadcaster's own
+  // pill. Both are gated on the proof-of-link tag, so this also proves the viewer could produce
+  // one and the broadcaster could produce the same one.
+  const pillCount = () =>
+    bpage.$eval("#live-pill", (e) => {
+      const m = /(\d+) watching/.exec(e.textContent || "");
+      return m ? Number(m[1]) : 0;
+    });
+
+  const sawOne = await bpage
+    .waitForFunction(() => /1 watching/.test(document.getElementById("live-pill")?.textContent || ""),
+      { timeout: 45000, polling: 1000 })
+    .then(() => true, () => false);
+  check("the broadcaster's pill shows one watcher", sawOne, true);
+
+  // A SECOND viewer, so this measures counting rather than mere presence — and so the first
+  // viewer's page survives for the kill-switch section below.
+  const v2ctx = await browser.createBrowserContext();
+  const v2 = await v2ctx.newPage();
+  await v2.goto(share, { waitUntil: "networkidle2", timeout: 60000 });
+  const sawTwo = await bpage
+    .waitForFunction(() => /2 watching/.test(document.getElementById("live-pill")?.textContent || ""),
+      { timeout: 45000, polling: 1000 })
+    .then(() => true, () => false);
+  check("a second viewer makes it two", sawTwo, true);
+
+  // Closing a tab must close the session, not leave it to the 150s reaper. pagehide fires on
+  // close and the end goes out by sendBeacon; if that were broken the count would stay up until
+  // the cron caught it — exactly the ghost-row problem the heartbeat replaced.
+  await v2.close();
+  await v2ctx.close();
+  const backToOne = await bpage
+    .waitForFunction(() => /1 watching/.test(document.getElementById("live-pill")?.textContent || ""),
+      { timeout: 45000, polling: 1000 })
+    .then(() => true, () => false);
+  check("closing that tab takes it back to one", backToOne, true);
+  console.log(`    pill: ${JSON.stringify(await bpage.$eval("#live-pill", (e) => e.textContent.trim()))}`);
+
   step("Which CDN actually carried it");
   //
   // Neither wrangler.jsonc nor the Worker source can answer this. The FLEET_* vars stay populated

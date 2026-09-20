@@ -35,7 +35,7 @@ the answer for anyone who cannot accept that; the client is static and the repos
 | `/theme.css` | `2e7e8c1a545eb8d14c49f13c84acf47306316f227660a30222cc1ad062582f8b` |
 | `/custom.css` | `06ad2a5d03f2ddd43f0a742503c3f323f11445d5531664aa044e1d5eaa7b2efd` |
 | `/favicon.svg` | `adc7808e817a00c804778b8e962ba3e7f6c601fcc98be0937a053b1a19beb721` |
-| `/earthseed.js` | `ce1ac6514ba5626b4d88ec8fe57f2afae9841a0a5dd120a974a6c9f12082b25a` |
+| `/earthseed.js` | `3f20342fdab0677bd65516a6bf80a20b4267bfd899e998eca60a8e193813ed18` |
 | `/offline-notice.js` | `2feb7125de2d2b8c98abd26c704da241a55f04f9ec3b78772d3adf19fa7fb62e` |
 | `/audio-capture-worklet.js` | `07ab2a238f16a842bb04d31cd54e015991f9c23493763df3fe6f32ca6372c50b` |
 | `/overlay.js` | `9d564d158bc39ec73364d40b9b97d68e28f7c353d41d708ba330ac382b6e0713` |
