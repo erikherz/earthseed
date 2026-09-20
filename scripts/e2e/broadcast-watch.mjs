@@ -147,6 +147,16 @@ try {
     timeout: 60000,
   });
   await bpage.waitForSelector("#go", { timeout: 30000 });
+
+  // Switch live chat on BEFORE going live. The toggle writes a signed per-stream setting, and a
+  // viewer's page reads that setting to decide whether to mount anything — so doing it after
+  // would leave the viewer already loaded without chat.
+  await bpage.click("#usechat");
+  await bpage
+    .waitForFunction(() => document.getElementById("usechat")?.disabled === false,
+      { timeout: 20000, polling: 200 })
+    .catch(() => {});
+
   await bpage.click("#go");
 
   await bpage
@@ -271,6 +281,94 @@ try {
   check("closing that tab takes it back to one", backToOne, true);
   console.log(`    pill: ${JSON.stringify(await bpage.$eval("#live-pill", (e) => e.textContent.trim()))}`);
 
+  // The route tag, re-derived here the way the client does:
+  //   HKDF-SHA256(fragment key, salt "es-route|<id>", info "earthseed-route-auth-v1")
+  // Re-deriving rather than scraping it out of the page independently confirms the tag contract,
+  // so a change to either side shows up here instead of as viewers being silently turned away.
+  // Used by the chat probe and the CDN check below.
+  const fragmentKey = new URL(share).hash.replace(/^#k=/, "");
+  const { subtle } = await import("node:crypto").then((m) => m.webcrypto);
+  const ikm = await subtle.importKey(
+    "raw",
+    Buffer.from(fragmentKey.replace(/-/g, "+").replace(/_/g, "/"), "base64"),
+    "HKDF", false, ["deriveBits"]
+  );
+  const tag = Buffer.from(
+    await subtle.deriveBits(
+      { name: "HKDF", hash: "SHA-256",
+        salt: Buffer.from(`es-route|${streamId}`),
+        info: Buffer.from("earthseed-route-auth-v1") },
+      ikm, 256
+    )
+  ).toString("base64url");
+
+  step("Chat, end to end");
+  //
+  // The broadcaster switched chat on before going live (the toggle writes a signed setting), so
+  // the viewer's page mounted it. Three things, in order: a message crosses between two separate
+  // browsers, the RELAY holds something it cannot read, and a socket without the tag is refused.
+  const chatUp = await vpage
+    .waitForFunction(() => !document.getElementById("chat-mount")?.hidden, { timeout: 30000, polling: 500 })
+    .then(() => true, () => false);
+  check("the viewer got a chat panel", chatUp, true);
+
+  if (chatUp) {
+    const SECRET = `open-sesame-${Date.now().toString(36)}`;
+    await bpage.waitForSelector(".es-chat-text", { timeout: 20000 });
+    await bpage.type(".es-chat-text", SECRET);
+    await bpage.click(".es-chat-send");
+
+    const arrived = await vpage
+      .waitForFunction((n) => (document.querySelector(".es-chat-log")?.textContent || "").includes(n),
+        { timeout: 30000, polling: 500 }, SECRET)
+      .then(() => true, () => false);
+    check("a message crosses from broadcaster to viewer", arrived, true);
+
+    // THE POINT OF THE WHOLE FEATURE, and the assertion worth having above all the others here.
+    //
+    // Join the room from Node with the tag but NO key — which is exactly the position the
+    // operator is in — and read the history the Durable Object hands out. The plaintext must not
+    // be in it. If this ever fails, chat has quietly become the least private thing on a site
+    // whose entire argument is that it cannot see your stream.
+    const wireUrl = `${ORIGIN.replace(/^http/, "ws")}/api/stream/${streamId}/chat?tag=${encodeURIComponent(tag)}`;
+    const history = await new Promise((resolve) => {
+      const ws = new WebSocket(wireUrl);
+      const done = (v) => { try { ws.close(); } catch {} resolve(v); };
+      ws.addEventListener("message", (ev) => {
+        try {
+          const d = JSON.parse(ev.data);
+          if (d.type === "history") done(d.messages ?? []);
+        } catch { /* keep waiting */ }
+      });
+      ws.addEventListener("error", () => done(null));
+      setTimeout(() => done(null), 20000);
+    });
+
+    check("  an operator can join the room with only the tag", Array.isArray(history), true);
+    if (Array.isArray(history)) {
+      const raw = JSON.stringify(history);
+      console.log(`    relay holds ${history.length} message(s), ${raw.length} bytes of envelope`);
+      check("  and what it stores does NOT contain the plaintext", raw.includes(SECRET), false);
+      check("  nor the sender's display name in the clear", /Guest-|es-chat/.test(raw), false);
+      check("  each message is a sealed <nonce>.<ciphertext>",
+        history.every((m) => typeof m.ct === "string" && /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(m.ct)), true);
+      check("  and carries no name or text field at all",
+        history.every((m) => !("name" in m) && !("text" in m)), true);
+    }
+
+    // A WebSocket, not fetch(): Node forbids setting `Upgrade` and `Connection` by hand, so a
+    // fetch-based probe throws before it reaches the Worker and reports its own failure as the
+    // server's answer. The first version of this check did exactly that and "passed" a 0.
+    const refused = await new Promise((resolve) => {
+      const ws = new WebSocket(`${ORIGIN.replace(/^http/, "ws")}/api/stream/${streamId}/chat?tag=${"z".repeat(43)}`);
+      const done = (v) => { try { ws.close(); } catch {} resolve(v); };
+      ws.addEventListener("open", () => done("connected"));
+      ws.addEventListener("error", () => done("refused"));
+      setTimeout(() => done("timeout"), 15000);
+    });
+    check("  a socket with the wrong tag is refused", refused, "refused");
+  }
+
   step("Which CDN actually carried it");
   //
   // Neither wrangler.jsonc nor the Worker source can answer this. The FLEET_* vars stay populated
@@ -282,22 +380,6 @@ try {
   // Re-deriving it here rather than scraping it out of the page is worth the dozen lines: it
   // independently confirms the tag contract, so a change to either side shows up as a failure
   // here instead of as viewers being silently turned away.
-  const fragmentKey = new URL(share).hash.replace(/^#k=/, "");
-  const { subtle } = await import("node:crypto").then((m) => m.webcrypto);
-  const b64urlToBytes = (s) => Buffer.from(s.replace(/-/g, "+").replace(/_/g, "/"), "base64");
-  const ikm = await subtle.importKey("raw", b64urlToBytes(fragmentKey), "HKDF", false, ["deriveBits"]);
-  const bits = await subtle.deriveBits(
-    {
-      name: "HKDF",
-      hash: "SHA-256",
-      salt: Buffer.from(`es-route|${streamId}`),
-      info: Buffer.from("earthseed-route-auth-v1"),
-    },
-    ikm,
-    256
-  );
-  const tag = Buffer.from(bits).toString("base64url");
-
   const placement = await fetch(`${ORIGIN}/api/watch/start`, {
     method: "POST",
     headers: { "content-type": "application/json" },

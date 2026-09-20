@@ -214,6 +214,49 @@ async function deriveMediaKey(p) {
   keyReadyResolve?.();
 }
 
+/**
+ * The CHAT key. Same inputs as the media key above, different HKDF info.
+ *
+ * That one difference is the whole argument. HKDF's info parameter gives domain separation: the
+ * same secret and the same salts produce two independent keys, so holding every chat key ever
+ * derived decrypts no video and vice versa. A passcode protects both, because it is mixed into
+ * the input material for both — which is why this takes the same `p` and not a subset.
+ *
+ * Deliberately built from the SAME parameter object as deriveMediaKey rather than from its own
+ * copy of the inputs. If the two ever drifted apart — a salt rotation that reached one and not
+ * the other — the failure would be a chat that silently stops decrypting for some participants,
+ * which is the kind of bug that gets blamed on the network for a week.
+ *
+ * Returns a key rather than storing one: chat derives per use, because a broadcaster learns the
+ * stream salt only at go-live and a regenerated passcode re-keys mid-session.
+ *
+ * @param {{fragmentKeyB64:string, globalSaltB64:string, streamSaltB64:string, streamId:string, epoch:number, pw?:Uint8Array|null}} p
+ */
+async function deriveChatKey(p) {
+  const g = b64urlToBytes(p.globalSaltB64);
+  const s = b64urlToBytes(p.streamSaltB64);
+  const salt = new Uint8Array(g.byteLength + s.byteLength);
+  salt.set(g, 0);
+  salt.set(s, g.byteLength);
+  const fk = b64urlToBytes(p.fragmentKeyB64);
+  const pw = p.pw || null;
+  let ikmBytes = fk;
+  if (pw) {
+    ikmBytes = new Uint8Array(fk.byteLength + pw.byteLength);
+    ikmBytes.set(fk, 0);
+    ikmBytes.set(pw, fk.byteLength);
+  }
+  const info = new TextEncoder().encode(`earthseed-chat-${pw ? "v2" : "v1"}|${p.streamId}|${p.epoch}`);
+  const ikm = await crypto.subtle.importKey("raw", bs(ikmBytes), "HKDF", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey(
+    { name: "HKDF", hash: "SHA-256", salt: bs(salt), info: bs(info) },
+    ikm,
+    { name: ALGO, length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+
 // The frame on the wire is `[varint timestamp][12-byte nonce][AES-256-GCM ciphertext+tag]`. The
 // timestamp stays clear (the decoder needs it) and is bound as GCM additional-authenticated-data,
 // so a tampering relay fails decryption. Only the codec payload is encrypted.
@@ -843,6 +886,99 @@ function watchViewerCount(nodeId, tag, onCount) {
   return () => {
     stopped = true;
   };
+}
+
+/**
+ * Write a per-stream setting, signed with the key the broadcast is named after.
+ *
+ * Ownership needs no account: the stream id IS a 52-character base32 Ed25519 public key, so
+ * signing a challenge proves the name is yours. The challenge is minted by our own Worker and
+ * expires in 300s, which is what stops a captured signature rewriting these settings for as long
+ * as the id exists.
+ *
+ * @param {{id:string, keyPair:CryptoKeyPair}} node
+ * @param {Record<string, unknown>} patch fields to change; anything omitted keeps its value
+ */
+async function writeStreamSettings(node, patch) {
+  try {
+    const ch = await fetch(api("/api/stream/challenge")).then((r) => (r.ok ? r.json() : null));
+    if (!ch?.challenge) return false;
+    const sig = await signClaim(node, ch.challenge);
+    const r = await fetch(api(`/api/stream/${encodeURIComponent(node.id)}/settings`), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ challenge: ch.challenge, signature: sig, ...patch }),
+    });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Mount live chat, if this stream has it enabled.
+ *
+ * Two round trips before anything appears: ask whether chat is on for this broadcast, then load
+ * the module. Both are deliberate.
+ *
+ * The SETTINGS check means a broadcaster who never switched chat on gets no panel and no socket,
+ * rather than an empty box implying the feature is broken. The DYNAMIC IMPORT means the chat code
+ * and its crypto never load for the majority of viewings that do not use it, and never sit in the
+ * path to first frame.
+ *
+ * Everything here is best-effort and silent on failure. Chat is an accompaniment; nothing about
+ * it is worth interrupting a broadcast for.
+ *
+ * @param {string} nodeId
+ * @param {string} tag proof-of-link, for the socket
+ * The inputs getter supplies the fragment key EXPLICITLY rather than this module reading
+ * location.hash. A viewer has `#k=` in the URL and a broadcaster does not — they minted the key
+ * and it only ever leaves in the share link they hand out. Reading the hash would have worked on
+ * the watch page and silently produced a wrong key on the broadcast page, so the broadcaster
+ * would have sat in their own chat unable to read a word of it.
+ *
+ * @param {string} nodeId
+ * @param {string} tag proof-of-link, for the socket
+ * @param {() => ({salts:{global:string,stream:string,epoch:number}, pw:Uint8Array|null, fragmentKey:string}|null)} inputs
+ */
+async function mountChat(nodeId, tag, inputs) {
+  let enabled = false;
+  try {
+    const r = await fetch(api(`/api/stream/${encodeURIComponent(nodeId)}/settings`));
+    enabled = r.ok && !!(await r.json()).chat_enabled;
+  } catch {
+    return;
+  }
+  if (!enabled) return;
+
+  const mount = $("chat-mount");
+  if (!mount) return;
+
+  try {
+    const { initChat } = await import("./chat.js");
+    mount.hidden = false;
+    initChat({
+      nodeId,
+      tag,
+      container: mount,
+      // Derived per use, never cached: a salt rotation or a passcode change must reach chat at
+      // the same moment it reaches the video, and a pinned key would silently stop matching.
+      chatKey: async () => {
+        const i = inputs();
+        if (!i) return null;
+        return deriveChatKey({
+          fragmentKeyB64: i.fragmentKey,
+          globalSaltB64: i.salts.global,
+          streamSaltB64: i.salts.stream,
+          streamId: nodeId,
+          epoch: i.salts.epoch,
+          pw: i.pw,
+        });
+      },
+    });
+  } catch {
+    /* chat is absent or broke; the broadcast is unaffected */
+  }
 }
 
 /** Tell the control plane this broadcast is over. Best-effort; nothing depends on it arriving. */
@@ -1842,6 +1978,45 @@ export async function runBroadcast() {
   };
   pcToggle?.addEventListener("change", syncPcUi);
 
+  // ── Live chat ─────────────────────────────────────────────────────────────────────────────
+  //
+  // Remembered locally AND written to the stream row, because the two answer different
+  // questions: the local one is "what does this broadcaster usually want", the server one is
+  // "does THIS stream have chat", which is what a viewer's page reads before mounting anything.
+  //
+  // The write is signed and therefore needs the identity, which is minted lazily here for the
+  // same reason as the passcode — opening this page must not create one.
+  const chatToggle = /** @type {HTMLInputElement|null} */ ($("usechat"));
+  const CHAT_PREF = "es:chat-on";
+  try {
+    if (chatToggle && localStorage.getItem(CHAT_PREF) === "1") chatToggle.checked = true;
+  } catch {
+    /* private mode */
+  }
+  chatToggle?.addEventListener("change", async () => {
+    const on = !!chatToggle.checked;
+    try {
+      localStorage.setItem(CHAT_PREF, on ? "1" : "0");
+    } catch {
+      /* private mode — the toggle just won't persist */
+    }
+    chatToggle.disabled = true;
+    try {
+      const node = await getOrCreateNode();
+      nodeId = node.id;
+      const ok = await writeStreamSettings(node, { chat_enabled: on });
+      // Put the checkbox back if the write did not land, rather than leaving it showing a state
+      // the server does not have. A toggle that lies about what viewers will get is worse than
+      // one that refuses.
+      if (!ok) {
+        chatToggle.checked = !on;
+        say("could not save the chat setting");
+      }
+    } finally {
+      chatToggle.disabled = false;
+    }
+  });
+
   const newLinkBtn = $("newlink");
   newLinkBtn?.addEventListener("click", async () => {
     // Same rule as the passcode: not applied mid-broadcast, so nobody watching is cut off and we
@@ -2149,6 +2324,11 @@ export async function runBroadcast() {
         const pill = $("live-pill");
         if (pill) pill.textContent = n > 0 ? `live · ${n} watching` : "live";
       });
+
+      // Chat for the broadcaster, on the same terms as a viewer: same room, same key, same
+      // inability of the relay to read it. Mounted only if they switched it on for this stream —
+      // the toggle writes the setting, and this reads it back rather than assuming.
+      void mountChat(node.id, routeTag, () => ({ salts: salt, pw, fragmentKey }));
       connectedRelay = { host: new URL(pub.relay_url).host, role: "publishing (origin)", transport: "WebTransport / QUIC" };
       if (keyRow) keyRow.hidden = true;
       if (keyHint) keyHint.hidden = true;
@@ -2693,6 +2873,14 @@ export async function runWatch() {
   // and pretending otherwise would quietly under-report exactly the broken cases worth knowing
   // about. Nothing below depends on it: the token lives in this closure and dies with the tab.
   void trackViewing(node, routeTag);
+
+  // Chat, if this stream has it switched on. Mounted after placement for the same reason the
+  // report control is: only someone who got placed can have anything to say about it.
+  //
+  // The key GETTER closes over `salts`, which arrive in-band on the broadcaster's catalog track
+  // and may not have arrived yet. Returning null until they do is why initChat can say "waiting
+  // for the stream key" instead of sending something nobody can open.
+  void mountChat(node, routeTag, () => (salts ? { salts, pw, fragmentKey } : null));
 
   /** @type {{stop():void}|null} */ let player = null;
   const stopKillWatch = watchKill(node, routeTag, () => {

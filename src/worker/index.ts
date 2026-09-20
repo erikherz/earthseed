@@ -1736,6 +1736,37 @@ async function handleStreamStatus(request: Request, env: Env, url: URL): Promise
   const s = url.pathname.match(/^\/api\/stream\/([a-z2-7]+)\/settings$/);
   if (s && isNodeId(s[1])) return handleStreamSettings(request, env, url, s[1]);
 
+  // GET /api/stream/:broadcast/chat — the live chat WebSocket, forwarded to the per-stream
+  // ChatRoom Durable Object.
+  //
+  // GATED ON PROOF-OF-LINK, like /api/watch/start and the viewer count. Without it, anyone who
+  // guessed a broadcast name could join its chat — and while the Durable Object cannot read the
+  // messages, an uninvited socket still learns how many people are talking and when, and can
+  // fill the room with sealed junk that every real participant has to download.
+  //
+  // The tag rides in the query string rather than a header because the WebSocket constructor
+  // cannot set headers. It is a capability, not a secret to hide: everyone with the link derives
+  // the same value, and it is cryptographically independent of the key that opens the messages.
+  const c = url.pathname.match(/^\/api\/stream\/([a-z2-7]+)\/chat$/);
+  if (c && isNodeId(c[1])) {
+    const broadcast = c[1];
+    if (request.headers.get("Upgrade") !== "websocket") {
+      return new Response("expected websocket", { status: 426 });
+    }
+    // 404 for every refusal, so this never confirms a stream exists to somebody who cannot
+    // already watch it — the same reasoning as every other gate on this id.
+    if (await streamIsKilled(env, broadcast)) return new Response("Not Found", { status: 404 });
+
+    const live = await liveRouteTag(env, broadcast);
+    if (!live) return new Response("Not Found", { status: 404 });
+    if (live.tag && !constantTimeEqual(url.searchParams.get("tag") ?? "", live.tag)) {
+      return new Response("Not Found", { status: 404 });
+    }
+
+    const id = env.CHAT_ROOMS.idFromName(broadcast);
+    return env.CHAT_ROOMS.get(id).fetch(request);
+  }
+
   const m = url.pathname.match(/^\/api\/stream\/([a-z2-7]+)\/status$/);
   if (request.method !== "GET" || !m || !isNodeId(m[1])) {
     return new Response("Not Found", { status: 404 });

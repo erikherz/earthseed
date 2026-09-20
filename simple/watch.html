@@ -74,6 +74,11 @@
         <!-- The report control is appended here by earthseed.js, and only once a viewer has
              actually been placed — someone who could not watch has nothing to report. -->
         <div id="report-mount"></div>
+        <!-- Live chat, revealed by earthseed.js only when the broadcaster switched it on for
+             this stream. END-TO-END ENCRYPTED under a key derived from the same #k= fragment as
+             the video, through a different HKDF info — the Durable Object that relays it stores
+             a blob it cannot read. See simple/chat.js. -->
+        <div id="chat-mount" class="chat-mount" hidden></div>
       </footer>
     </div>
     <!-- Our whole client — readable, unminified, open source:

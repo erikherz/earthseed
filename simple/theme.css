@@ -516,3 +516,49 @@ video { min-height: 240px; }
 /* The publish key row on the broadcast page. Hidden until go-live finds no key, so a
    broadcaster who already has one never meets it. */
 #keyrow input { font-family: var(--es-font-mono); font-size: 0.85rem; }
+
+/* Live chat. Revealed by earthseed.js only when the broadcaster switched it on, so the mount
+   sits hidden in the markup rather than being created at runtime — a fixed place in the document
+   order keeps it under the player instead of wherever a script happened to append it.
+
+   Everything here is end-to-end encrypted before it leaves the page; the styling has no opinion
+   about that, but the `who` and `said` spans are filled with textContent from strangers, which is
+   why neither is allowed to carry markup. See simple/chat.js. */
+.chat-mount { margin-top: 12px; }
+
+.es-chat-log {
+  height: 14rem;
+  overflow-y: auto;
+  padding: 8px;
+  border: 1px solid var(--es-border);
+  border-radius: var(--es-radius);
+  background: var(--es-field-bg);
+  font-size: var(--es-font-size-small);
+  line-height: 1.5;
+}
+.es-chat-msg { display: flex; gap: 6px; align-items: baseline; padding: 1px 0; }
+/* Fixed width and tabular figures so the clocks line up and the names start at one margin —
+   a ragged left edge makes a chat log much harder to skim than it looks. */
+.es-chat-when {
+  flex: none;
+  color: var(--es-hint);
+  font-variant-numeric: tabular-nums;
+  font-family: var(--es-font-mono);
+  font-size: 0.85em;
+}
+.es-chat-who { flex: none; max-width: 9em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.es-chat-said { min-width: 0; overflow-wrap: anywhere; }
+
+.es-chat-compose { display: flex; gap: 6px; margin-top: 8px; }
+.es-chat-name { flex: 0 1 7em; min-width: 0; }
+.es-chat-text { flex: 1 1 auto; min-width: 0; }
+.es-chat-compose input {
+  padding: var(--es-control-padding);
+  border: 1px solid var(--es-field-border);
+  border-radius: var(--es-radius);
+  background: var(--es-field-bg);
+  color: var(--es-field-fg);
+  font: inherit;
+}
+.es-chat-send { flex: none; }
+.es-chat-status { min-height: 1.2em; margin-top: 4px; color: var(--es-hint); font-size: var(--es-font-size-small); }

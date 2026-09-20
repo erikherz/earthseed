@@ -91,6 +91,15 @@
         <div class="row">
           <label class="check"><input type="checkbox" id="usepc" /> Require a passcode to watch</label>
         </div>
+        <!-- Live chat, off by default. END-TO-END ENCRYPTED: messages are sealed under a key
+             derived from the same #k= fragment as the video, so the Durable Object that relays
+             them stores a blob it cannot read — which also means there is no server-side
+             moderation of chat, because there is nothing there to moderate. Set before going
+             live; the setting is written with a signature from the key this broadcast is named
+             after, so only you can change it. -->
+        <div class="row">
+          <label class="check"><input type="checkbox" id="usechat" /> Live chat for viewers</label>
+        </div>
         <div class="passcode-box" id="pcrow" hidden>
           <input id="passcode" type="text" readonly aria-label="Passcode" />
           <button id="copypc" type="button">Copy</button>
@@ -122,6 +131,11 @@
             </svg>
           </button>
           <div id="status">Loading…</div>
+        <!-- Live chat, revealed by earthseed.js at go-live only if the toggle above is on. The
+             broadcaster joins the same room as viewers on the same terms: same key, derived from
+             the same #k= fragment through a different HKDF info, and the Durable Object that
+             relays it stores a blob it cannot read. See simple/chat.js. -->
+        <div id="chat-mount" class="chat-mount" hidden></div>
         </div>
         <!-- Why capture stopped, when nobody asked it to. Above the picture rather than over it:
              a broadcaster whose camera just died is looking at a black rectangle, and covering
