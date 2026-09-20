@@ -130,6 +130,17 @@
               <circle cx="12" cy="12" r="2.4" fill="currentColor" stroke="none" />
             </svg>
           </button>
+          <!-- Sources, combinable. Camera alone, camera over a screen share (where the camera
+               becomes a draggable, resizable inset), or a screen share alone. Each one lights
+               only when the device is ACTUALLY open, so a lit button is a device in use and
+               never an intention. They work before going live, so a shot can be framed first,
+               and during it: the compositor holds one video track and one audio track for the
+               whole session, so changing sources resets nothing a viewer is subscribed to. -->
+          <button id="cam-toggle" class="src-toggle" type="button" aria-pressed="false">Camera</button>
+          <button id="mic-toggle" class="src-toggle" type="button" aria-pressed="false">Mic</button>
+          <!-- Hidden on phones by CSS: getDisplayMedia is not implemented on iOS at all, and on
+               Android it shares the browser's own tab more often than anything a person meant. -->
+          <button id="screen-toggle" class="src-toggle cap-desktop" type="button" aria-pressed="false">Screen</button>
           <div id="status">Loading…</div>
         <!-- Live chat, revealed by earthseed.js at go-live only if the toggle above is on. The
              broadcaster joins the same room as viewers on the same terms: same key, derived from
@@ -142,7 +153,12 @@
              that with the explanation would be its own small joke. Kept apart from #status so a
              warning never overwrites "● live", or the other way round. -->
         <div id="capture-notice" class="capture-notice" role="status" hidden></div>
-        <video id="preview" muted autoplay playsinline></video>
+        <!-- The composite, which is exactly what viewers receive: the same canvas that is being
+             encoded. Anything drawn into it — the camera inset, the handle watermark, the link
+             QR, the location/time burn-in — is picture, and travels inside the E2E encryption
+             like every other pixel. The compositor appends its canvas here at first use, so the
+             page opens with no device lit. See simple/compositor.js. -->
+        <div id="preview-mount" class="preview-mount"></div>
         <!-- Revealed only when going live finds no publish key, or when one is refused. A key is a
              capability with its own expiry, not an account: requesting one tells us nothing about
              you, and we store nothing that could connect you to what you broadcast. -->

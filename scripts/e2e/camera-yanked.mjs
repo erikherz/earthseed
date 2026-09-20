@@ -123,7 +123,15 @@ const BAD_RELAY = () => {
   };
 };
 
-// Keep every stream getUserMedia hands out, so a scenario can end one later.
+// Keep every stream getUserMedia hands out, so a scenario can end one later — and so that
+// "is the camera still held?" can be answered from the DEVICE GRANTS rather than from the DOM.
+//
+// It used to be answered by reading #preview.srcObject. That stopped being the truth when the
+// compositor landed: the preview is now the composited canvas, the camera is held by a <video>
+// the compositor keeps to itself, and a canvas has no srcObject at all. The old probe would
+// have reported "not holding" for every scenario — which reads as a pass in one place here and
+// as a SKIP in another, so the suite would have gone quiet rather than red. Hence installed on
+// every page below, not just the one scenario that yanks a track.
 const KEEP_STREAMS = () => {
   const real = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
   window.__streams = [];
@@ -150,13 +158,17 @@ const refuseVideo = (name, message) =>
 const STATE = (page) =>
   page.evaluate(() => {
     const n = document.getElementById("capture-notice");
-    const v = document.getElementById("preview");
     const go = document.getElementById("go");
+    const granted = window.__streams || [];
     return {
       note: n && !n.hidden ? (n.textContent || "").trim() : "",
       status: (document.getElementById("status")?.textContent || "").trim(),
-      // A live srcObject with a live video track is the camera still being held.
-      holding: !!(v?.srcObject && v.srcObject.getVideoTracks().some((t) => t.readyState === "live")),
+      // Any video track the browser ever handed this page, still running, is the camera still
+      // being held — whoever in the page happens to be holding it.
+      holding: granted.some((s) => s.getVideoTracks().some((t) => t.readyState === "live")),
+      // The microphone lights an indicator too, and letting go of one device but not the other
+      // is exactly the kind of half-teardown that goes unnoticed.
+      holdingMic: granted.some((s) => s.getAudioTracks().some((t) => t.readyState === "live")),
       live: !!go?.classList.contains("is-live"),
       // Go live is disabled for the duration of an attempt, so this separates "still trying"
       // from "tried and stopped" — which is the whole question in the last scenario.
@@ -169,6 +181,7 @@ const open = async (prep) => {
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 900 });
   await page.evaluateOnNewDocument(STUB_BROKER);
+  await page.evaluateOnNewDocument(KEEP_STREAMS);
   if (prep) await page.evaluateOnNewDocument(prep);
   await page.goto(URL_, { waitUntil: "networkidle2", timeout: 60000 });
   await page.waitForSelector("#go", { timeout: 30000 });
@@ -211,7 +224,7 @@ try {
   // unreachable, which is a legitimate go-live failure and now releases the camera on its way
   // out — so there is nothing left to yank. Reported rather than silently skipped.
   console.log("\n  scenario: camera taken away mid-capture");
-  const b = await open(KEEP_STREAMS);
+  const b = await open();
   await new Promise((r) => setTimeout(r, 5000));
   const before = await STATE(b);
   console.log(`    before: holding=${before.holding} live=${before.live} status="${before.status}"`);
@@ -253,10 +266,11 @@ try {
   const c = await open(BAD_RELAY);
   await new Promise((r) => setTimeout(r, 5000));
   const st = await STATE(c);
-  console.log(`    holding=${st.holding} live=${st.live} busy=${st.busy} status="${st.status}"`);
+  console.log(`    holding=${st.holding} mic=${st.holdingMic} live=${st.live} busy=${st.busy} status="${st.status}"`);
   if (st.busy) fail("the camera light: go-live never finished failing, so nothing was measured");
   else if (st.live) fail("the camera light: go-live was expected to fail against an unparseable relay URL");
   else if (st.holding) fail("the camera is still held after go-live failed and the page went back to idle");
+  else if (st.holdingMic) fail("the camera was released after go-live failed but the microphone was not");
   await c.close();
 
   if (!failures.length) console.log("\nPASS: the camera reports itself");

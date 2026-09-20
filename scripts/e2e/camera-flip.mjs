@@ -138,12 +138,14 @@ const STUB_BROKER = () => {
 const TRACK_TAGS = () => {
   const real = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
   window.__asked = [];
+  window.__streams = [];
   window.__served = 0;
   navigator.mediaDevices.getUserMedia = async (c) => {
     window.__asked.push(JSON.parse(JSON.stringify(c ?? {})));
     const s = await real(c);
     const tag = `t${++window.__served}`;
     for (const track of s.getVideoTracks()) track.__tag = tag;
+    window.__streams.push(s);
     return s;
   };
 };
@@ -152,8 +154,10 @@ const STATE = (page) =>
   page.evaluate(() => {
     const go = document.getElementById("go");
     const flip = document.getElementById("flip");
-    const preview = document.getElementById("preview");
-    const tracks = preview?.srcObject ? preview.srcObject.getVideoTracks() : [];
+    // Read the DEVICE GRANTS, not the DOM. #preview is the composited canvas now — the camera
+    // is held by a <video> inside the compositor and a canvas has no srcObject — so a probe
+    // that went through the preview would report "no tracks" and quietly stop testing anything.
+    const tracks = (window.__streams || []).flatMap((s) => s.getVideoTracks());
     return {
       live: !!go?.classList.contains("is-live"),
       flipPresent: !!flip,
@@ -164,9 +168,9 @@ const STATE = (page) =>
         return n && !n.hidden ? (n.textContent || "").trim() : "";
       })(),
       status: (document.getElementById("status")?.textContent || "").trim(),
-      // Which track the preview — and therefore the encoder, which reads the same MediaStream —
-      // is on, and whether it is still running.
-      tag: tracks[0]?.__tag ?? null,
+      // Which camera track is actually running — and therefore the one the compositor is
+      // drawing from, since it stops the old one before asking for the new.
+      tag: tracks.filter((t) => t.readyState === "live")[0]?.__tag ?? null,
       liveTracks: tracks.filter((t) => t.readyState === "live").length,
       asked: window.__asked ?? [],
     };
@@ -199,7 +203,12 @@ try {
   const live = await STATE(page);
   check("the broadcast went live", live.live, true);
   check("Flip is now offered", live.flipHidden, false);
-  check("the first camera came up without a facing constraint", !!live.asked[0]?.video?.facingMode, false);
+  // The compositor always names a facing, and remembers it across an off/on cycle. That is the
+  // change from the pre-compositor behaviour, where the first camera was opened with no facing
+  // constraint at all: someone who chose the back camera and toggled Camera off and on used to
+  // silently get the front one back.
+  check("the first camera is asked for by facing, and it is the front one",
+    live.asked[0]?.video?.facingMode?.ideal, "user");
   const firstTag = live.tag;
   check("the encoder is reading the camera we opened", typeof firstTag === "string", true);
 
@@ -222,7 +231,7 @@ try {
 
   const after = await STATE(page);
   const facing = after.asked.map((c) => c?.video?.facingMode?.ideal).filter(Boolean);
-  check("pressing Flip asks for the other camera", facing, ["environment"]);
+  check("pressing Flip asks for the other camera", facing, ["user", "environment"]);
   check("the encoder is reading a different track", after.tag !== firstTag, true);
   check("exactly one video track is live — the old one was given back", after.liveTracks, 1);
   check("the label now offers the way back", after.flipLabel, "Switch to the front camera");

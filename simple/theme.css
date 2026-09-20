@@ -494,6 +494,52 @@ video { min-height: 240px; }
   .cap-mobile:not([hidden]) { display: inline-flex; }
 }
 
+/* Screen sharing is the mirror image: a DESKTOP control. getDisplayMedia is not implemented on
+   iOS at all, and where a phone does offer it the useful thing to share is rarely the browser
+   tab it hands you. Same :not([hidden]) reasoning as above. */
+@media (hover: none) and (pointer: coarse) {
+  .cap-desktop { display: none; }
+}
+
+/* Source toggles: Camera, Mic, Screen. Each lights only while its device is actually open, so
+   the lit state is a fact about the machine rather than a preference someone expressed. That is
+   the whole reason they are styled as a pressed state and not as a checkbox — a checkbox that
+   stays ticked over a camera another app has taken is the failure this styling exists to avoid.
+
+   aria-pressed carries the same fact to a screen reader; the class is what paints it. */
+.src-toggle {
+  padding: 7px 13px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  border-radius: 999px;
+  border: 1px solid var(--es-border);
+  background: transparent;
+  color: var(--es-muted);
+  cursor: pointer;
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+.src-toggle:hover:not(:disabled) { border-color: var(--es-link-hover); color: var(--es-text); }
+.src-toggle:disabled { opacity: 0.55; cursor: default; }
+.src-toggle.on {
+  border-color: var(--es-accent);
+  background: color-mix(in srgb, var(--es-accent) 16%, transparent);
+  color: var(--es-text);
+}
+
+/* Where the compositor mounts its canvas. It has to be a positioned box: the drag handles for
+   the camera inset and the QR plate are DOM elements laid over the canvas — deliberately NOT
+   drawn into it, because every pixel of that canvas is published and an audience should not be
+   shown an interface it cannot use.
+
+   The min-height keeps the stage from collapsing before the first source is open, so pressing
+   Camera does not shove the whole page downward. */
+.preview-mount {
+  position: relative;
+  min-height: 240px;
+  border-radius: var(--es-radius);
+  background: var(--es-media-bg);
+}
+
 /* The frame preview inside the report panel.
 
    Capped rather than shown at full size, and it is the reporter's own picture — they are
