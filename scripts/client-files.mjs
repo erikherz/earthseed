@@ -20,6 +20,7 @@ export const FILES = [
   // unless /api/config says broadcasting is closed. Delete this line with the file.
   "simple/offline-notice.js",
   "simple/audio-capture-worklet.js",
+  "simple/overlay.js",
   "simple/vendor/moq-net-0.1.5.mjs",
 ];
 

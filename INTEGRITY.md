@@ -38,6 +38,7 @@ the answer for anyone who cannot accept that; the client is static and the repos
 | `/earthseed.js` | `befc07300a8de2c05614f857224736d961baca62b9587b22906848f6f720a95d` |
 | `/offline-notice.js` | `2feb7125de2d2b8c98abd26c704da241a55f04f9ec3b78772d3adf19fa7fb62e` |
 | `/audio-capture-worklet.js` | `07ab2a238f16a842bb04d31cd54e015991f9c23493763df3fe6f32ca6372c50b` |
+| `/overlay.js` | `9d564d158bc39ec73364d40b9b97d68e28f7c353d41d708ba330ac382b6e0713` |
 | `/vendor/moq-net-0.1.5.mjs` | `d38b3f603d6b8491184a56115ebbb76ebe4c374e3abec5431686c3aa427dd5ff` |
 
 _Regenerate with `npm run integrity`; `npm run check` fails if this file is stale._

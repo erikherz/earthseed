@@ -5,6 +5,25 @@ Media-over-QUIC transport, bundled with its dependencies and served from this or
 
 It is the only third-party code the client runs.
 
+## A sanitiser was vendored here and then removed — 2026-09-20
+
+DOMPurify 3.4.15 was added to support a broadcaster overlay ported from Wallflower, and taken out
+again the same day. Recorded because the reason is a property of this deployment that the next
+person to reach for an HTML library will hit too.
+
+This origin serves `require-trusted-types-for 'script'; trusted-types 'none'`. Together those mean
+no string can become DOM here by ANY route, and no policy may be created to permit one. DOMPurify
+parses internally with an `innerHTML` sink, so under that policy it does not fail loudly — it
+returns an empty result for every input, including `<p>hi</p>`. Tests written against it pass
+vacuously, which is worse than a crash.
+
+`DOMParser.parseFromString` is a Trusted Types sink as well, so parsing the string ourselves and
+handing DOMPurify a Node does not work either. Both were measured on the live deployment, not
+inferred.
+
+The overlay is therefore built from structured blocks with `createElement` and `textContent`
+instead — see `simple/overlay.js`. No HTML sanitiser is needed because no HTML is ever parsed.
+
 ## Why it is vendored rather than fetched from a CDN
 
 The pages used to load it from `https://esm.sh/@moq/net@0.1.5`. That was a single point of total

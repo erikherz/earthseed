@@ -28,11 +28,25 @@
 --                  this check twice in a form that could not fail, which is the reason the
 --                  default is written down here rather than left to the caller.
 --
---   overlay_html   Broadcaster-supplied HTML rendered over the player ("Extras"). Stored raw and
---                  sanitised on the way OUT, in the client, by src/overlay-sanitize.ts. Storing
---                  the sanitised form instead would look safer and be worse: it would bake one
---                  version of the sanitiser's judgement into the database permanently, so a
---                  later fix to the sanitiser could not reach rows already written.
+--   overlay_html   Broadcaster-supplied content rendered over the player ("Extras").
+--
+--                  THE NAME IS A FOSSIL, kept because Wallflower's column is called this and a
+--                  rename buys nothing. It does NOT hold HTML. It holds a JSON list of typed
+--                  blocks — heading, paragraph, list, link, image, rule, embed — which the client
+--                  turns into DOM with createElement and textContent (simple/overlay.js).
+--
+--                  That is not a stylistic choice. This origin serves
+--                  `require-trusted-types-for 'script'; trusted-types 'none'`, so no string can
+--                  become DOM here by any route: innerHTML throws, and so does
+--                  DOMParser.parseFromString. An HTML column would be a column nothing could
+--                  ever render. Wallflower stores markup and sanitises it with DOMPurify on the
+--                  way out; DOMPurify cannot run under this policy at all — it parses through an
+--                  innerHTML sink and silently returns empty for every input. Measured on the
+--                  deployment, not assumed.
+--
+--                  Stored as the broadcaster wrote it and validated on the way OUT, which is the
+--                  same principle Wallflower applied to markup: baking today's judgement into the
+--                  database would mean a later fix could not reach rows already written.
 --
 --   chat_enabled   Live chat opt-in. Messages flow through the ChatRoom Durable Object, which
 --                  this Worker has had bound since 0006 with no client attached to it.

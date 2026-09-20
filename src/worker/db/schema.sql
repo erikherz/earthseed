@@ -155,7 +155,11 @@ CREATE TABLE IF NOT EXISTS streams (
   stream_id     TEXT UNIQUE NOT NULL,
   user_id       INTEGER,
   require_auth  INTEGER DEFAULT 0,
-  overlay_html  TEXT DEFAULT '',   -- raw; sanitised on the way OUT, in the client
+  -- NOT HTML, despite the name (a fossil from Wallflower's column). A JSON list of typed blocks
+  -- the client turns into DOM with createElement/textContent. This origin serves
+  -- `trusted-types 'none'`, so no string can become DOM here by any route — an HTML column would
+  -- be one nothing could render. See migration 0013 and simple/overlay.js.
+  overlay_html  TEXT DEFAULT '',
   chat_enabled  INTEGER DEFAULT 0,
   link_enc      TEXT,              -- SEALED watermark URL, `<nonce>.<ciphertext>`; unreadable here
   created_at    TEXT DEFAULT (datetime('now')),
