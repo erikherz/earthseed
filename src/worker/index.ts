@@ -65,6 +65,12 @@ export interface Env {
   // the frame is someone's living room. Default 30. Set to 0 to keep frames indefinitely,
   // which is a decision worth making deliberately rather than by leaving a variable unset.
   REPORT_FRAME_RETENTION_DAYS?: string;
+  // How many days of viewing-session rows to keep. Unset ⇒ keep everything, because the point of
+  // the table is to be reportable. The opposite default from REPORT_FRAME_RETENTION_DAYS above,
+  // and deliberately: a session row is a timestamp against a stream id, a reported frame is a
+  // photograph. Setting this is still worth considering — the safest audience record is the one
+  // that is no longer there to be compelled.
+  STATS_RETENTION_DAYS?: string;
 
   // ── Vars (wrangler.jsonc) ──
   BROKER_BASE?: string;
@@ -146,9 +152,25 @@ export default {
   //
   // Scheduled rather than opportunistic: a frame's clock must run whether or not anybody
   // happens to file another report. See wrangler.jsonc `triggers` for the interval.
-  async scheduled(_event: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
-    const frames = await expireReportFrames(env);
-    if (frames) console.log(`[reaper] report frames expired=${frames}`);
+  // Two schedules now, doing different work on different clocks (see wrangler.jsonc):
+  //
+  //   * * * * *   close viewing sessions whose heartbeat stopped
+  //   0 * * * *   forget reported frames past their retention window
+  //
+  // Splitting them is the point. A frame's clock is measured in days and running it every
+  // minute would be sixty pointless UPDATEs an hour; a session's is measured in seconds, and
+  // an hourly reaper would leave finished sessions sitting open for up to an hour. The live
+  // viewer count does not depend on this — it is computed from the heartbeat watermark and is
+  // correct whether or not the reaper has run — but the recorded DURATION of a session does.
+  async scheduled(event: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
+    if (event.cron === "0 * * * *") {
+      const frames = await expireReportFrames(env);
+      if (frames) console.log(`[reaper] report frames expired=${frames}`);
+      return;
+    }
+
+    const { closed, purged } = await reapSessions(env);
+    if (closed || purged) console.log(`[reaper] sessions closed=${closed} purged=${purged}`);
   },
 };
 
@@ -238,6 +260,9 @@ async function handleApiRoutes(
 
     if (url.pathname.startsWith("/api/auth/")) {
       return handleAuthRoutes(request, env, url);
+    }
+    if (url.pathname.startsWith("/api/stats/")) {
+      return handleStatsRoutes(request, env, url);
     }
     if (url.pathname.startsWith("/api/publish-code/")) {
       return handlePublishCodeRoutes(request, env, url);
@@ -418,6 +443,267 @@ async function handleAuthRoutes(request: Request, env: Env, url: URL): Promise<R
       console.error("oauth callback:", e);
       return Response.redirect(`${url.origin}/?error=auth_failed`, 302);
     }
+  }
+
+  return new Response("Not Found", { status: 404 });
+}
+
+/* ═════════════════════════ Viewing sessions ═════════════════════════ */
+//
+// How many people are watching, and for how long. Ported from Wallflower's migration-0014 work.
+//
+// ── The thing this is not ────────────────────────────────────────────────────────────────────
+//
+// It is not an audience register, and the distinction is the whole design. A row in watch_events
+// is a SESSION. Nothing on it is stable across sessions — no IP, no IP hash, no cookie, no
+// fingerprint, and no account id even though this Worker now has accounts. Two rows cannot be
+// shown to be the same human, on one stream or across streams, by us or by anyone who later
+// holds this database or compels a copy of it.
+//
+// "How many, and for how long" is answerable without any of that. "Which of these is the same
+// person" is not, and must stay unanswerable. Migration 0011 says the same thing at the schema
+// level; it is repeated here because this is where a future column would actually get added.
+//
+// What DID change the day this shipped: audience size became visible to an operator, which it
+// was not before. That is a real change and it is named in the README rather than left to be
+// discovered.
+//
+// ── Why a heartbeat ─────────────────────────────────────────────────────────────────────────
+//
+// The obvious design — open a row on page load, close it in `beforeunload` — does not work.
+// beforeunload does not fire on iOS backgrounding, tab crashes, force-quit or network loss, so
+// rows accumulate open for ever and every number computed from them is wrong in the same
+// direction. The client pings while it is alive and the cron closes what has gone quiet, AT the
+// last heartbeat: a viewer whose battery died is credited with what was observed, not with the
+// hours until the next tick.
+
+/** How often a watching client says "still here". */
+const SESSION_HEARTBEAT_SECONDS = 30;
+
+// Silence after which a session is treated as over. Deliberately several missed beats: browsers
+// throttle background timers to roughly one a minute, so a tighter window would reap a viewer
+// who merely switched tabs, and under-reporting real viewing is the worse error here.
+const SESSION_STALE_SECONDS = 150;
+
+/**
+ * "Currently watching", computed WITHOUT trusting the reaper to have run recently.
+ *
+ * This is why the live count is correct on a cron that has not fired, and why it would still be
+ * correct if the cron were deleted tomorrow. The reaper exists for the recorded duration of a
+ * finished session, not for this number.
+ */
+const liveSessionSql = (t = "") =>
+  `${t}ended_at IS NULL AND COALESCE(${t}last_seen_at, ${t}started_at) > datetime('now', '-${SESSION_STALE_SECONDS} seconds')`;
+
+/** base64url SHA-256 of an arbitrary string. The session token is only ever stored like this. */
+async function sha256b64url(s: string): Promise<string> {
+  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return bytesToB64url(new Uint8Array(d));
+}
+
+/**
+ * Parse a JSON body that may have arrived via sendBeacon.
+ *
+ * sendBeacon sends a Blob, and the only content type it can send without turning the request
+ * into a CORS preflight is text/plain — so the page-close path cannot use request.json().
+ * Tolerant on purpose: a body we cannot parse is a request we answer, not one we 500 on.
+ */
+async function readJsonBody<T>(request: Request): Promise<T | null> {
+  try {
+    const text = await request.text();
+    return text ? (JSON.parse(text) as T) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Advance a session's heartbeat. False when it does not exist, is closed, or the token is wrong. */
+async function touchSession(env: Env, id: number, token: string): Promise<boolean> {
+  if (!Number.isFinite(id) || !token) return false;
+
+  const row = await env.DB
+    .prepare("SELECT session_hash FROM watch_events WHERE id = ? AND ended_at IS NULL")
+    .bind(id)
+    .first<{ session_hash: string | null }>();
+  if (!row?.session_hash) return false;
+  if (!constantTimeEqual(await sha256b64url(token), row.session_hash)) return false;
+
+  await env.DB
+    .prepare("UPDATE watch_events SET last_seen_at = datetime('now') WHERE id = ?")
+    .bind(id)
+    .run();
+  return true;
+}
+
+/**
+ * Close sessions whose heartbeat stopped, and optionally forget old ones.
+ *
+ * Every row carries last_seen_at from the moment it is inserted, so `end_reason` here is only
+ * ever 'reaped' — there is no legacy backlog of heartbeat-less rows, because this table was
+ * created new in migration 0011 rather than restored. Wallflower needed a third 'unmeasured'
+ * state for exactly that backlog; carrying it across would have been importing the scar without
+ * the wound.
+ *
+ * Retention is opt-in via STATS_RETENTION_DAYS, and unset means keep everything — the point of
+ * the table is to be reportable. Setting it is still worth considering: these rows are
+ * timestamps against stream ids, and the safest audience record is the one that is no longer
+ * there to be compelled.
+ */
+async function reapSessions(env: Env): Promise<{ closed: number; purged: number }> {
+  const closed = await env.DB
+    .prepare(
+      `UPDATE watch_events
+          SET ended_at = COALESCE(last_seen_at, started_at),
+              end_reason = 'reaped'
+        WHERE ended_at IS NULL
+          AND COALESCE(last_seen_at, started_at) <= datetime('now', '-${SESSION_STALE_SECONDS} seconds')`
+    )
+    .run();
+
+  let purged = 0;
+  const days = parseInt(env.STATS_RETENTION_DAYS ?? "", 10);
+  if (Number.isFinite(days) && days > 0) {
+    const res = await env.DB
+      .prepare(`DELETE FROM watch_events WHERE started_at < datetime('now', '-${days} days')`)
+      .run();
+    purged = res.meta?.changes ?? 0;
+  }
+
+  return { closed: closed.meta?.changes ?? 0, purged };
+}
+
+async function handleStatsRoutes(request: Request, env: Env, url: URL): Promise<Response> {
+  const method = request.method;
+  const path = url.pathname;
+
+  // POST /api/stats/watch — open a viewing session.
+  //
+  // Gated on the same proof-of-link tag as /api/watch/start, and for the same reason. Without
+  // it this is an unauthenticated INSERT that accepts any stream id: anyone could manufacture
+  // an audience for a broadcast they had never been given, inflating somebody's viewer badge
+  // and burning unbounded D1 writes for free. The tag makes it a capability — you can only open
+  // a session on a broadcast whose link you already hold.
+  //
+  // Enforced only once a live broadcast has registered a tag, matching the placement path
+  // exactly. An attacker cannot choose whether the row carries one; only the broadcaster can.
+  if (method === "POST" && path === "/api/stats/watch") {
+    const body = await readJsonBody<{ broadcast?: string; tag?: string }>(request);
+    const broadcast = body?.broadcast ?? "";
+    if (!isNodeId(broadcast)) return new Response("offline", { status: 404 });
+
+    // 404 for every refusal, so a stranger sweeping ids cannot use this endpoint to learn which
+    // ones are live. Same reasoning as /api/watch/start.
+    if (await streamIsKilled(env, broadcast)) return new Response("offline", { status: 404 });
+
+    const live = await liveRouteTag(env, broadcast);
+    if (!live) return new Response("offline", { status: 404 });
+    if (live.tag && !constantTimeEqual(body?.tag ?? "", live.tag)) {
+      return new Response("offline", { status: 404 });
+    }
+
+    // The session token. Held in the viewer's page memory only, never persisted in the browser
+    // and never reused across streams — it authorises heartbeat and end for THIS session, and
+    // is not an identifier for the person holding it. Persisting it, or reusing one, would
+    // rebuild precisely the cross-session identifier this whole table is shaped to avoid.
+    const token = bytesToB64url(crypto.getRandomValues(new Uint8Array(32)));
+
+    const result = await env.DB
+      .prepare(
+        `INSERT INTO watch_events (stream_id, last_seen_at, session_hash)
+         VALUES (?, datetime('now'), ?) RETURNING id`
+      )
+      .bind(broadcast, await sha256b64url(token))
+      .first<{ id: number }>();
+
+    return Response.json({
+      id: result?.id,
+      token,
+      heartbeat_seconds: SESSION_HEARTBEAT_SECONDS,
+    });
+  }
+
+  // POST /api/stats/watch/:id/heartbeat — "still watching".
+  //
+  // This is what makes a duration measured rather than assumed. Answers `ok: false` instead of
+  // an error status when the session is gone — reaped after a long backgrounding, say — so the
+  // client can simply open a fresh one. A viewer who comes back is watching again, and stitching
+  // that into the old row would credit them for the gap.
+  const beat = path.match(/^\/api\/stats\/watch\/(\d+)\/heartbeat$/);
+  if (method === "POST" && beat) {
+    const body = await readJsonBody<{ token?: string }>(request);
+    const ok = await touchSession(env, parseInt(beat[1], 10), body?.token ?? "");
+    return Response.json(ok ? { ok: true } : { ok: false, reason: "unknown" });
+  }
+
+  // POST /api/stats/watch/:id/end — close a viewing session.
+  //
+  // Token-checked because ids are sequential integers: unauthenticated, this lets anyone walk the
+  // range and close sessions they had no part in, zeroing out every stream's audience. Idempotent,
+  // because it is called from pagehide and may race the reaper.
+  const end = path.match(/^\/api\/stats\/watch\/(\d+)\/end$/);
+  if (method === "POST" && end) {
+    const id = parseInt(end[1], 10);
+    const body = await readJsonBody<{ token?: string }>(request);
+
+    const row = await env.DB
+      .prepare("SELECT session_hash FROM watch_events WHERE id = ?")
+      .bind(id)
+      .first<{ session_hash: string | null }>();
+
+    // Already purged, or a row with no hash to check against: nothing to close, and saying so is
+    // not an error. The reaper handles anything this cannot.
+    if (!row?.session_hash) return Response.json({ ok: true });
+
+    if (!constantTimeEqual(await sha256b64url(body?.token ?? ""), row.session_hash)) {
+      return Response.json({ error: "unauthorized" }, { status: 401 });
+    }
+
+    await env.DB
+      .prepare(
+        `UPDATE watch_events SET ended_at = datetime('now'), end_reason = 'client'
+          WHERE id = ? AND ended_at IS NULL`
+      )
+      .bind(id)
+      .run();
+
+    return Response.json({ ok: true });
+  }
+
+  // GET /api/stats/stream/:broadcast/viewers?tag=… — how many are watching right now.
+  //
+  // Gated on the proof-of-link tag as well. Audience size is metadata ABOUT a broadcaster —
+  // "how many people are watching this right now" is worth knowing to anyone deciding whether
+  // a stream matters — and ungated it would be readable by anyone who guessed an id. The
+  // broadcaster derives the tag from the same link secret its viewers use, so it can still read
+  // its own badge.
+  //
+  // Returns a COUNT and not a list. Wallflower returned rows here, joined to users; there is
+  // nothing to join to and nothing per-viewer worth sending, and an endpoint that emits one
+  // object per watcher is an endpoint somebody will eventually try to correlate.
+  const viewers = path.match(/^\/api\/stats\/stream\/([a-z2-7]+)\/viewers$/);
+  if (method === "GET" && viewers) {
+    const broadcast = viewers[1];
+    if (!isNodeId(broadcast)) return new Response("Not Found", { status: 404 });
+
+    // Only gate once a live broadcast has registered a tag. Nothing to protect before then: with
+    // no live row there is no audience, and the badge must still render 0 while a broadcaster is
+    // setting up.
+    const live = await liveRouteTag(env, broadcast);
+    if (live?.tag) {
+      if (!constantTimeEqual(url.searchParams.get("tag") ?? "", live.tag)) {
+        return Response.json({ viewers: 0 }, { status: 404 });
+      }
+    }
+
+    const row = await env.DB
+      .prepare(`SELECT COUNT(*) AS n FROM watch_events WHERE stream_id = ? AND ${liveSessionSql()}`)
+      .bind(broadcast)
+      .first<{ n: number }>();
+
+    return Response.json(
+      { viewers: row?.n ?? 0, heartbeat_seconds: SESSION_HEARTBEAT_SECONDS },
+      { headers: { "Cache-Control": "no-store" } }
+    );
   }
 
   return new Response("Not Found", { status: 404 });

@@ -3,13 +3,21 @@
   "name": "earthseed",
   "compatibility_date": "2025-01-01",
   "main": "src/worker/index.ts",
-  // The only scheduled work this Worker does: null reported still frames once their
-  // retention window passes (REPORT_FRAME_RETENTION_DAYS, default 30). Hourly rather than
-  // daily because the window is measured in days — an hour of slop either side is free,
-  // and an hourly tick is easier to confirm is alive than one that fires at 04:00.
+  // Two schedules, on clocks that differ by three orders of magnitude. The handler branches on
+  // `event.cron`, so the strings here are load-bearing — change one and change it there too.
   //
-  // Reports under a preservation hold are exempt in SQL, not here. See migration 0010.
-  "triggers": { "crons": ["0 * * * *"] },
+  //   "* * * * *"  close viewing sessions whose heartbeat stopped (SESSION_STALE_SECONDS = 150).
+  //                Measured in seconds, so it needs a minute tick. Note that the LIVE viewer
+  //                count does not depend on this cron at all — it is computed from the heartbeat
+  //                watermark and stays correct if the cron never fires. What needs it is the
+  //                recorded DURATION of a session that ended without a pagehide.
+  //
+  //   "0 * * * *"  null reported still frames once their retention window passes
+  //                (REPORT_FRAME_RETENTION_DAYS, default 30). Hourly rather than daily because
+  //                the window is measured in days — an hour of slop either side is free, and an
+  //                hourly tick is easier to confirm is alive than one that fires at 04:00.
+  //                Reports under a preservation hold are exempt in SQL, not here; see 0010.
+  "triggers": { "crons": ["* * * * *", "0 * * * *"] },
   // STREAMING FLEET: the tinymoq broker (cdnadmin) and our own relay boxes. Deliberately NOT
   // moq.pro — this deployment runs on Erik's fleet, and the broker ASN-steers traffic to it.
   //
