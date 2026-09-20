@@ -1583,6 +1583,28 @@ function wireFooterPanels() {
 function mountChrome() {
   wireTheme();
   wireFooterPanels();
+  mountSeeds();
+}
+
+/**
+ * The seeds demo — the tipping and prepaid-bandwidth economy.
+ *
+ * ONE LINE, and a dynamic import, which together are the whole of its attachment to this file.
+ * Removing the demo is deleting simple/seeds.js, simple/seeds-recovery.js and this function;
+ * nothing else in this client knows it exists.
+ *
+ * Dynamic so its ~30KB and its PBKDF2 work never touch the path to going live or to playing a
+ * stream. A failure to load is swallowed on purpose: a money-shaped widget is the last thing
+ * that should be able to stop a broadcast starting.
+ *
+ * NO MONEY MOVES. See simple/seeds.js and src/worker/seeds.ts.
+ */
+function mountSeeds() {
+  import("./seeds.js")
+    .then((m) => m.initSeeds())
+    .catch(() => {
+      /* the demo is absent or broke; the site works without it */
+    });
 }
 
 /**

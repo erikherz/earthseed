@@ -21,6 +21,10 @@ export const FILES = [
   "simple/offline-notice.js",
   "simple/audio-capture-worklet.js",
   "simple/overlay.js",
+  // The seeds demo. Two files, reached from one dynamic import in earthseed.js, so deleting the
+  // demo is deleting these two lines and those two files.
+  "simple/seeds.js",
+  "simple/seeds-recovery.js",
   "simple/vendor/moq-net-0.1.5.mjs",
 ];
 

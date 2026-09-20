@@ -35,10 +35,12 @@ the answer for anyone who cannot accept that; the client is static and the repos
 | `/theme.css` | `2e7e8c1a545eb8d14c49f13c84acf47306316f227660a30222cc1ad062582f8b` |
 | `/custom.css` | `06ad2a5d03f2ddd43f0a742503c3f323f11445d5531664aa044e1d5eaa7b2efd` |
 | `/favicon.svg` | `adc7808e817a00c804778b8e962ba3e7f6c601fcc98be0937a053b1a19beb721` |
-| `/earthseed.js` | `935b7cb77535d86ba69076097500cfa7fd17cd213979f618b059beaab8b41e11` |
+| `/earthseed.js` | `ce1ac6514ba5626b4d88ec8fe57f2afae9841a0a5dd120a974a6c9f12082b25a` |
 | `/offline-notice.js` | `2feb7125de2d2b8c98abd26c704da241a55f04f9ec3b78772d3adf19fa7fb62e` |
 | `/audio-capture-worklet.js` | `07ab2a238f16a842bb04d31cd54e015991f9c23493763df3fe6f32ca6372c50b` |
 | `/overlay.js` | `9d564d158bc39ec73364d40b9b97d68e28f7c353d41d708ba330ac382b6e0713` |
+| `/seeds.js` | `b6251ef6770be1c6c44a627f237e22b7a56829c798e3b84bbd2c6f132383cc62` |
+| `/seeds-recovery.js` | `bf3c36f14cb5068fa74e6ef1b93f4b21b758fbecbfa1f9921e82faccdaeb4650` |
 | `/vendor/moq-net-0.1.5.mjs` | `d38b3f603d6b8491184a56115ebbb76ebe4c374e3abec5431686c3aa427dd5ff` |
 
 _Regenerate with `npm run integrity`; `npm run check` fails if this file is stale._
