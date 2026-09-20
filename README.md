@@ -11,31 +11,27 @@ Live at **[earthseed.live](https://earthseed.live)**.
 - **Trust model:** [`simple/TRUST.md`](simple/TRUST.md) — what each party can and cannot see.
 - **What is published:** [`INTEGRITY.md`](INTEGRITY.md) — SHA-256 of every file the client runs.
 
-## What is true, and what this used to say
+## What it knows about you
 
-This README claimed "No accounts. No server-side list of who's streaming." Neither sentence
-survives contact with what the code now does, so here is the replacement, plainly:
+- **There is no sign-in.** Broadcasting is admitted by a *publish key*: a capability with an expiry
+  inside it, under a MAC only our Worker can produce, never written down.
+  [Requesting one](https://earthseed.live/request) asks you for nothing.
+- **An accounts tier exists in the Worker, and it is switched off.** Google OAuth, a `users` table
+  and a `broadcaster_access` allow list live in `src/worker/auth/`. They are inert while `ACCOUNTS`
+  is `"off"` in [`wrangler.jsonc`](wrangler.jsonc): `/api/auth/*` refuses everything and nothing can
+  be written to `users`. `curl -s https://earthseed.live/api/config` reports `"accounts"`, so the
+  claim is checkable rather than asserted. Turned on, a signed-in allowed address can publish
+  without a key — and we then know who broadcast.
+- **There is a server-side record of broadcast names.** `broadcasts` holds that a name went live and
+  when it stopped; `watch_events` holds viewing sessions against a salted hash with no identity in
+  it; `streams` holds each broadcast's own settings. It is the price of being able to stop a stream.
+  None of it can be tied to a person by us: there is no account, and the publish key that admitted
+  you is not stored. What is absent is **who**, not **what**.
+- **Seeds keeps a persistent row per vault.** See [Seeds](#seeds-a-demo) — it is a demo, nothing in
+  it moves money, and the cash-out path is deliberately unfinished.
 
-- **There is no sign-in on earthseed.live.** Broadcasting is admitted by a *publish key*: a
-  capability with an expiry inside it, under a MAC only our Worker can produce, never written down.
-  Requesting one asks you for nothing.
-- **There is an accounts tier in this repository, and it is switched off.** Google OAuth, a `users`
-  table and a `broadcaster_access` allow list exist in `src/worker/`. They are inert while
-  `ACCOUNTS` is `"off"` in [`wrangler.jsonc`](wrangler.jsonc) — `/api/auth/*` refuses everything and
-  nothing can be written to `users`. Check for yourself: `curl -s https://earthseed.live/api/config`
-  reports `"accounts": false`. If it is ever turned on, a signed-in allowed address can publish
-  without a key, and we then know who broadcast. That is a different product, and it should be
-  described differently.
-- **There IS a server-side list of broadcast names.** `broadcasts` records that a name went live and
-  when it stopped. `watch_events` records viewing sessions against a salted hash with no identity in
-  it. `streams` holds each broadcast's own settings. None of it can be tied to a person by us —
-  there is no account, and the publish key that admitted you is not stored — but "no server-side
-  list" was never the right way to say that. What is absent is **who**, not **what**.
-- **Seeds put a persistent row in the database, and it is a demo.** See [Seeds](#seeds-a-demo)
-  below; nothing there moves money and the cash-out path is deliberately unfinished.
-
-Everything about the encryption is unchanged by all of that: the `#k=` fragment never reaches any
-server, and nothing in the middle can decrypt a frame.
+None of that touches the encryption. The `#k=` fragment never reaches any server, and nothing in the
+middle can decrypt a frame.
 
 ## How a stream travels
 
@@ -76,21 +72,20 @@ flowchart TB
 Dotted lines are the **control plane**; thick lines are the **data plane**. Only the two browsers
 ever hold `CK`.
 
-Salts reach a viewer **in band**, on the broadcaster's own catalog track — so after being placed a
+Salts reach a viewer **in band**, on the broadcaster's own catalog track — so after being placed, a
 viewer never talks to us again. They are public HKDF inputs and decrypt nothing alone.
 
-### Where the media actually goes
+### Where the media goes
 
-Production routes through **[moq.pro](https://moq.pro)**, a CDN we do not operate. Our Worker mints
-a per-broadcast **Ed25519 (`EdDSA`) JWT** naming an account root and one broadcast path; moq.pro
-holds only the public half and can verify a token, never forge one.
+Through **[moq.pro](https://moq.pro)**, a CDN we do not operate. Our Worker mints a per-broadcast
+**Ed25519 (`EdDSA`) JWT** naming an account root and exactly one broadcast path beneath it, with an
+expiry. moq.pro holds only the public half: it can verify a token and cannot forge one.
 
-This replaced a fleet of single-tenant [Hermit unikernel](https://github.com/erikherz/hermit-moq)
-relays that we ran ourselves, one per stream, with no persistent disk. That was a stronger story
-about the machines and it is no longer the truth, so it has been removed from the trust pages rather
-than left standing. The fleet code path is still in `src/worker/` for anyone self-hosting who wants
-it. What did not change: the relay only ever carries ciphertext, so *which* company runs it is not
-what protects your media.
+A relay never holds a content key, so which company runs it is not what protects your media — it
+only ever carries ciphertext. Two things follow from it being shared infrastructure: broadcasts are
+not separated by a machine boundary, and what scopes a compromise is token scope, a token naming one
+broadcast path and nothing else. The Worker also supports placing streams on a self-run relay fleet,
+which is the route for anyone self-hosting who wants that boundary back.
 
 ## The values being exchanged
 
@@ -103,6 +98,7 @@ Everything in the path is one of these. Only two of them are secrets.
 | `node id` | No | An **Ed25519 public key** (base32). The broadcast's identity, its track name, and what a settings write is signed against. |
 | `salts` + `epoch` | No | Public **HKDF inputs** (a global kill-switch salt ‖ a per-stream salt). Rotating one re-keys the stream. |
 | `JWT` | Short-lived | A per-broadcast CDN token authorizing the **connection** (publish or subscribe scope). Not a content key. |
+| `link_enc` | Opaque | A sealed blob a broadcaster may store against their own stream, encrypted under a key derived from `#k=`. Meaningless to us. |
 | `#k=` → `CK` | **Yes** | **The secret.** 32 bytes in the link fragment (never sent to a server) → the `AES-256-GCM` key via HKDF. Held only by the two browsers. |
 | `passcode` | **Yes** | **Optional second secret.** Deliberately **not in the link** — spoken or texted, stretched with PBKDF2 and mixed into `CK`. Never sent to or checked by any server. |
 
@@ -121,9 +117,8 @@ No bundler, no build step, no analytics, and **no script from any third-party or
 enforced by a `Content-Security-Policy` that permits only this origin, with each inline block pinned
 by SHA-256 and `require-trusted-types-for 'script'; trusted-types 'none'` on top.
 
-It is no longer one file. It is **13 files, about 7,600 lines**, all unminified and documented,
-each reached by a dynamic import so a page only fetches what it uses — a watch page with no chat
-and no overlay loads three of them.
+**13 files, about 7,600 lines**, all unminified and documented, each reached by a dynamic import so
+a page only fetches what it uses — a watch page with no chat and no overlay loads three of them.
 
 | File | Lines | What it is |
 |---|---|---|
@@ -138,21 +133,20 @@ and no overlay loads three of them.
 
 The transport is **[`@moq/net`](https://www.npmjs.com/package/@moq/net/v/0.1.5)** (Media over QUIC)
 by [Luke Curley](https://github.com/kixelated) — unmodified but **vendored** to
-[`simple/vendor/`](simple/vendor/) and served from our own origin, because fetching it from a CDN put
-a third party in a position to replace code running on the same page as your content key.
+[`simple/vendor/`](simple/vendor/) and served from our own origin, because fetching it from a CDN
+would put a third party in a position to replace code running on the same page as your content key.
 [`simple/vendor/README.md`](simple/vendor/README.md) has the build command, the SHA-256 and the
 resolved dependency table, so you can reproduce it byte-for-byte.
 
-**"Read exactly what runs" is a goal, not a proof**, and 7,500 lines is further from it than 1,600
-was. [`INTEGRITY.md`](INTEGRITY.md) is what remains: the hash of every one of those files, committed
-to git, so the record lives somewhere other than the site being checked. `npm run verify` compares
-the live site against it.
+**"Read exactly what runs" is a goal, not a proof.** [`INTEGRITY.md`](INTEGRITY.md) is what it rests
+on: the hash of every file above, committed to git, so the record lives somewhere other than the
+site being checked. `npm run verify` compares the live site against it.
 
 ## Use it
 
 1. [**Request a publish key**](https://earthseed.live/request) — free, about a minute, and it asks
    you for nothing. Broadcasting needs one; watching never does.
-2. Open **`broadcast.html`**, switch on **Camera**, **Mic**, **Screen** in any combination, and
+2. Open **`broadcast.html`**, switch on **Camera**, **Mic** and **Screen** in any combination, and
    press **Go live**.
 3. Press **Copy viewer link** and send it to whoever should watch.
 4. They open it in **`watch.html`** — no account, no password.
@@ -186,15 +180,15 @@ Audio starts muted — tap to unmute.
 ## Seeds, a demo
 
 **Where to find it:** a floating `🌻` pill in the bottom-right corner of
-[`broadcast.html`](https://earthseed.live/broadcast.html) and any watch page. It is deliberately
-not on the landing page — that page loads none of this client — and it disables itself entirely
-unless the Worker answers `GET /api/seeds/vault?pubkey=probe` with a 404, so a deployment without
-the demo shows nothing rather than a pill that opens onto an error.
+[`broadcast.html`](https://earthseed.live/broadcast.html) and any watch page. It is deliberately not
+on the landing page — that page loads none of this client — and it disables itself entirely unless
+the Worker answers `GET /api/seeds/vault?pubkey=probe` with a 404, so a deployment without the demo
+shows nothing rather than a pill that opens onto an error.
 
 `simple/seeds.js` and `src/worker/seeds.ts` implement a tipping and prepaid-bandwidth economy: four
 pools per vault (free, gifted, paid, earned), a ledger, and per-stream accrual. A vault is addressed
-by a public id derived from a 256-word recovery phrase that never leaves the browser, and
-authorised by the other half of the same derivation.
+by a public id derived from a 256-word recovery phrase that never leaves the browser, and authorised
+by the other half of the same derivation.
 
 **Nothing in it moves money.** There is no payment processor. "Buying" a packet credits a vault
 directly; a cash-out records an intent and stops. Every figure on those screens is arithmetically
@@ -202,7 +196,7 @@ correct and none of them moved a cent. The cash-out path is an unresolved *legal
 engineering one, and it must be answered before any of this is connected to a processor. Read that
 as a blocker, not a to-do.
 
-It is also the first persistent per-person row in this database. Migration
+It is also the one persistent per-person row in this database. Migration
 [`0014_seeds.sql`](src/worker/db/migrations/0014_seeds.sql) says so at length, including what it
 costs the privacy claim everything else here is built on.
 
@@ -220,17 +214,14 @@ not reissued. We still cannot say what a terminated stream contained.
 
 ## Host it yourself
 
-The client is static, but since August 2026 it asks **its own origin** for placement rather than a
-broker directly, so a full self-host means running the Worker in `src/worker/` too. `npm run bundle`
-packages the client.
+The client is static, and `npm run bundle` packages it. A full self-host also means running the
+Worker in `src/worker/`, because the client asks **its own origin** for placement rather than a
+relay broker directly.
 
-That was a deliberate trade. The client used to carry a public publishable key and talk to the
-broker itself, which needed no server at all — and meant there was no moment at which anyone could
-decline. A stream could be seen to exist and could not be stopped. Publisher admission and a working
-kill switch cannot exist without someone in a position to say no.
-
-None of it weakens the encryption: the Worker sees names, tags and capabilities, never media, and
-the `#k=` fragment still never reaches any server.
+That is what publisher admission and a working kill switch cost: both need someone in a position to
+decline, and there is no such position in a page that talks straight to a relay. The encryption is
+untouched by it — the Worker sees names, tags and capabilities, never media, and the `#k=` fragment
+never reaches any server.
 
 ```sh
 npm run typecheck     # no build needed
@@ -256,18 +247,6 @@ Most take an origin as their first argument and serve `simple/` themselves witho
 that counts is against a deployed origin**: served locally there is no `_headers`, so Trusted Types
 is not enforced and the constraint several of these are built around is simply absent.
 
-## What is retired, and where it went
-
-Earthseed was rebuilt in a single day on 12 August 2026 around one commitment: *shrink what is
-trusted, then make what remains checkable.* No build step, zero runtime dependencies, published
-hashes, and discovery over the public Mainline DHT (pkarr / BEP44) so that even we held no list of
-broadcasts.
-
-Most of that survives — there is still no build step and still no runtime dependency of our own. The
-DHT does not; it was attached to a client that was deleted for other reasons.
-[`docs/hard-mode.md`](docs/hard-mode.md) records that posture and the route back to it, with a git
-hash on every claim.
-
 ## Privacy, honestly
 
 - Any relay you connect to sees your **IP** (true of any website). Put a **VPN or Tor** in front to
@@ -277,6 +256,10 @@ hash on every claim.
 - **Not DRM:** an authorized viewer can still capture decoded frames.
 - We know **that** a broadcast happened, when, its name, and roughly how many people watched. That
   is the price of being able to stop one. We do not know who you are.
+- **A passcode gates decryption, not connection.** Someone with your link can pull ciphertext and
+  attack the passcode offline. Closing that would mean our Worker verifying passcode knowledge,
+  which would hand it an offline-guessing oracle and destroy the property the passcode exists for.
+  The slow KDF is what makes the trade safe.
 - **Hostile code on the page beats all of this.** Anyone who can run script in your tab reads the
   content key out of the fragment. The CSP and the vendored transport narrow how such code gets
   there; neither makes the page safe to lose.
