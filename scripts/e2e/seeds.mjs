@@ -163,6 +163,41 @@ try {
     check("a seed lands in the vault", after, `balance ${await balance()}`);
   }
 
+  // ── Every child of the panel is an ELEMENT ───────────────────────────────────────────────
+  //
+  // A view builds its children as an array and uses `cond && row(...)` for the optional lines.
+  // h() filters falsy children; replaceChildren does NOT — it stringifies whatever it is given.
+  // So two false conditions rendered the literal word "false" as a line of the panel, between
+  // "Streaming left" and "Burned so far", and sat there in production until somebody opened the
+  // panel and looked at it (2026-09-20).
+  //
+  // Every assertion in this suite passed throughout, because they all read NUMBERS out of
+  // specific elements — the right way to assert a balance, and blind to junk beside it.
+  //
+  // THE FIRST VERSION OF THIS GUARD ALSO PASSED against the broken build. It scanned the panel
+  // text for /\b(false|true|…)\b/ — and the two stray values render adjacent, as "falsefalse",
+  // where there is no word boundary between them and none at either end. A word-boundary regex
+  // cannot see the exact shape of the bug it was written for.
+  //
+  // So this asserts the structure instead, which is exact: replaceChildren turns a non-node into
+  // a TEXT NODE, and every view here returns elements. Any direct child that is not an element
+  // is a stringified value, whatever it happens to spell.
+  for (const view of ["main", "switch"]) {
+    if (view === "switch") await page.click('[data-act="switch"]').catch(() => {});
+    await new Promise((r) => setTimeout(r, 600));
+    const stray = await page.evaluate(() => {
+      const el = document.getElementById("es-seed-panel");
+      if (!el) return ["the panel is not in the page"];
+      return [...el.childNodes]
+        .filter((n) => n.nodeType !== 1 && (n.textContent || "").trim() !== "")
+        .map((n) => JSON.stringify((n.textContent || "").slice(0, 40)));
+    });
+    check(`the ${view} view renders no stringified JavaScript values`, stray.length === 0,
+      stray.length ? `stray text node(s): ${stray.join(", ")}` : "");
+  }
+  await page.click('[data-act="back"]').catch(() => {});
+  await new Promise((r) => setTimeout(r, 400));
+
   console.log("\n── buying, and what purchased seeds may NOT do ─────────────────────────────");
   //
   // Read the BALANCE, not the panel text. The first version of this matched /1[01]\./ against

@@ -46,7 +46,7 @@ the answer for anyone who cannot accept that; the client is static and the repos
 | `/edge-clock.js` | `6b397f9c34715b6383fe98b416e67773b9192cc4743ae8e45b257886f527a296` |
 | `/geo-stamp.js` | `ba00c3f6b7f7b4458662dda529d99de5a79d923e54d54d9d4fbd8b46401304ee` |
 | `/nearest-city.js` | `fb99a85252f0c193b8bf48221587e5c069e2c29f7894a07264c7823acd921cf6` |
-| `/seeds.js` | `b6251ef6770be1c6c44a627f237e22b7a56829c798e3b84bbd2c6f132383cc62` |
+| `/seeds.js` | `8628d3a0d15736899a3802df9fb716216aaccecbd73c74b228548f112857b610` |
 | `/seeds-recovery.js` | `bf3c36f14cb5068fa74e6ef1b93f4b21b758fbecbfa1f9921e82faccdaeb4650` |
 | `/vendor/moq-net-0.1.5.mjs` | `d38b3f603d6b8491184a56115ebbb76ebe4c374e3abec5431686c3aa427dd5ff` |
 

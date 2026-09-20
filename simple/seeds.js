@@ -153,7 +153,9 @@ const isBroadcasting = () => location.pathname.endsWith("/broadcast.html");
 /**
  * Build an element. The only way anything in this file reaches the DOM.
  *
- * Children may be nodes, strings or null/false — so a conditional row is `cond && h(...)`
+ * Children may be nodes, strings or null/false — so a conditional row is `cond && h(...)`.
+ * NOTE that this only holds for children passed THROUGH h(). A view returning a plain array
+ * straight to replaceChildren has to filter the falsy entries itself; see refresh().
  * without a wrapper, exactly where a template literal would have used a ternary returning "".
  *
  * Arrays are flattened one level, so a helper can return several nodes without a wrapper
@@ -697,7 +699,13 @@ function render() {
   if (!panel || !panelOpen) return;
 
   const views = { main: mainView, switch: switchView, phrase: phraseView, restore: restoreView };
-  panel.replaceChildren(...(views[view] || mainView)());
+  // `.filter(Boolean)` is not tidiness. A view builds its children as an array and uses the same
+  // `cond && row(...)` idiom that h() supports — but this call is replaceChildren, not h(), and
+  // replaceChildren stringifies whatever it is given. So a false condition rendered the literal
+  // word "false" as a line in the panel, which is exactly what it did in production between
+  // "Streaming left" and "Burned so far" until 2026-09-20. h() filters its own children; this is
+  // the one place that bypassed it.
+  panel.replaceChildren(...(views[view] || mainView)().filter(Boolean));
 }
 
 /* ── interaction ──────────────────────────────────────────────────────────────────────────── */
