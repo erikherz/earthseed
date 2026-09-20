@@ -26,7 +26,9 @@
     "//e2e:overlay": "Also self-serving, but the run that COUNTS is against a deployed origin: the local harness serves no _headers, so Trusted Types is not enforced and the constraint this renderer is built around is absent. Pass https://earthseed.live.",
     "e2e:overlay": "node scripts/e2e/overlay.mjs && node scripts/e2e/overlay-editor.mjs",
     "//e2e:qr": "Pure Node — qr.js touches no DOM, so there is nothing to serve and no origin to pass.",
-    "e2e:qr": "node scripts/e2e/qr.mjs"
+    "e2e:qr": "node scripts/e2e/qr.mjs",
+    "//e2e:seeds": "Creates a REAL vault and, against earthseed.live, deletes it again through wrangler on the way out. Pass an origin.",
+    "e2e:seeds": "node scripts/e2e/seeds.mjs"
   },
   "devDependencies": {
     "puppeteer": "^25.7.0",

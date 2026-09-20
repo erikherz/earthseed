@@ -121,17 +121,17 @@ No bundler, no build step, no analytics, and **no script from any third-party or
 enforced by a `Content-Security-Policy` that permits only this origin, with each inline block pinned
 by SHA-256 and `require-trusted-types-for 'script'; trusted-types 'none'` on top.
 
-It is no longer one file. It is **13 files, about 7,500 lines**, all unminified and documented, each
-reached by a dynamic import so a page only fetches what it uses — a watch page with no chat and no
-overlay loads three of them.
+It is no longer one file. It is **13 files, about 7,600 lines**, all unminified and documented,
+each reached by a dynamic import so a page only fetches what it uses — a watch page with no chat
+and no overlay loads three of them.
 
 | File | Lines | What it is |
 |---|---|---|
 | [`earthseed.js`](simple/earthseed.js) | 3,207 | capture, encode, **encrypt**, publish, subscribe, **decrypt**, decode, render — and every page controller |
 | [`compositor.js`](simple/compositor.js) | 1,098 | camera + screen + mic into one canvas and one audio mix; the burn-ins are drawn here |
-| [`seeds.js`](simple/seeds.js) · [`seeds-recovery.js`](simple/seeds-recovery.js) | 1,102 | the seeds demo and its 256-word recovery phrase |
+| [`seeds.js`](simple/seeds.js) · [`seeds-recovery.js`](simple/seeds-recovery.js) | 1,110 | the seeds demo and its 256-word recovery phrase |
 | [`qr.js`](simple/qr.js) | 533 | a QR encoder, so a link on screen is encoded here and not by a third party |
-| [`overlay.js`](simple/overlay.js) · [`overlay-editor.js`](simple/overlay-editor.js) | 547 | the broadcaster's panel: typed blocks built as DOM, never parsed from markup |
+| [`overlay.js`](simple/overlay.js) · [`overlay-editor.js`](simple/overlay-editor.js) | 551 | the broadcaster's panel: typed blocks built as DOM, never parsed from markup |
 | [`chat.js`](simple/chat.js) | 251 | end-to-end encrypted chat |
 | [`geo-stamp.js`](simple/geo-stamp.js) · [`edge-clock.js`](simple/edge-clock.js) · [`nearest-city.js`](simple/nearest-city.js) | 644 | the optional location and time burn-in, and the clock it trusts instead of yours |
 | [`offline-notice.js`](simple/offline-notice.js) · [`audio-capture-worklet.js`](simple/audio-capture-worklet.js) | 182 | the shutter notice; Safari's PCM capture path |
@@ -184,6 +184,12 @@ Audio starts muted — tap to unmute.
   clock, so a viewer can compare it with their own and read the delay off the screen.
 
 ## Seeds, a demo
+
+**Where to find it:** a floating `🌻` pill in the bottom-right corner of
+[`broadcast.html`](https://earthseed.live/broadcast.html) and any watch page. It is deliberately
+not on the landing page — that page loads none of this client — and it disables itself entirely
+unless the Worker answers `GET /api/seeds/vault?pubkey=probe` with a 404, so a deployment without
+the demo shows nothing rather than a pill that opens onto an error.
 
 `simple/seeds.js` and `src/worker/seeds.ts` implement a tipping and prepaid-bandwidth economy: four
 pools per vault (free, gifted, paid, earned), a ledger, and per-stream accrual. A vault is addressed
@@ -243,7 +249,12 @@ End-to-end suites run against a **deployed** origin, because there is no local b
 | `npm run e2e:overlay` | the renderer refuses what it says it refuses, and the editor round-trips |
 | `npm run e2e:qr` | every symbol decodes back to its own input, Reed-Solomon check and all |
 | `npm run e2e:camera` | a camera taken away by the OS, and a front/back flip that does not end the broadcast |
+| `npm run e2e:seeds` | the four pools, the gate, a purchase that moves the balance, and the recovery phrase |
 | `npm run e2e:ui` | the page chrome |
+
+Most take an origin as their first argument and serve `simple/` themselves without one. **The run
+that counts is against a deployed origin**: served locally there is no `_headers`, so Trusted Types
+is not enforced and the constraint several of these are built around is simply absent.
 
 ## What is retired, and where it went
 
