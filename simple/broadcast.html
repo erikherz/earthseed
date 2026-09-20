@@ -100,6 +100,61 @@
         <div class="row">
           <label class="check"><input type="checkbox" id="usechat" /> Live chat for viewers</label>
         </div>
+        <!-- ── BURN-INS ──────────────────────────────────────────────────────────────────
+             Three things that can be drawn INTO the picture rather than laid over it in the
+             page: a location and time stamp, a handle, and a QR code for a link. Because they
+             are picture, they survive a screen recording, a re-encode and a screenshot — and
+             they travel inside the same end-to-end encryption as every other pixel, so only
+             people holding the link ever see them.
+
+             All three are OFF by default, and the location one is the reason why: it points in
+             the opposite direction from everything else here. Nothing about it is proof, and
+             the wording below says so rather than letting a broadcaster assume otherwise. -->
+        <div class="row">
+          <label class="check"><input type="checkbox" id="useburn" /> Burn location and time into the picture</label>
+        </div>
+        <div class="hint" id="burnhint" hidden>
+          A line across the bottom of every frame: coordinates, how accurate they are, and the
+          UTC time that frame was <em>captured</em> — taken from our edge rather than from this
+          computer's clock, so a viewer can compare it with their own and read the delay off the
+          screen. <strong>±12m</strong> means your device's own fix; <strong>~city</strong> means
+          it could not get one and the line is showing roughly where the network puts you.
+          <br />
+          This is not proof of anything, and nothing here can make it so — it raises the cost of
+          a casual lie, no more. It also puts your location in the picture, for everyone holding
+          the link.
+        </div>
+
+        <div class="row">
+          <label class="check"><input type="checkbox" id="usemark" /> Watermark the picture with a name</label>
+        </div>
+        <div class="row burn-field" id="markrow" hidden>
+          <input id="markname" type="text" maxlength="40" placeholder="@yourhandle"
+                 autocomplete="off" aria-label="Watermark text" />
+          <div class="hint">
+            Drawn faintly in the upper left of every frame. Whatever you type — we do not check
+            it, own it, or know whether it is yours.
+          </div>
+        </div>
+
+        <div class="row">
+          <label class="check"><input type="checkbox" id="useqr" /> Show a QR code for a link</label>
+        </div>
+        <div class="row burn-field" id="qrrow" hidden>
+          <input id="qrlink" type="url" maxlength="300" placeholder="https://…"
+                 autocomplete="off" aria-label="Link to encode as a QR code" />
+          <div class="hint" id="qrhint">
+            Drawn on a plate in the upper right, big enough that a phone pointed at the screen
+            can actually read it — drag it to move or resize it. Encoded here in your browser,
+            so nothing is told which link you are putting on screen. A long URL needs a bigger
+            plate; past a point it will not fit at a size any camera can scan, and this will say so.
+            <br />
+            <strong>Not your viewer link.</strong> That one carries the key, and putting it on
+            screen as a QR hands your stream to anyone who can see the screen.
+          </div>
+          <div class="hint burn-warn" id="qrwarn" hidden></div>
+        </div>
+
         <div class="passcode-box" id="pcrow" hidden>
           <input id="passcode" type="text" readonly aria-label="Passcode" />
           <button id="copypc" type="button">Copy</button>

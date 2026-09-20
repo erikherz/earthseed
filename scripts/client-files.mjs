@@ -29,6 +29,12 @@ export const FILES = [
   // composited into one canvas and mixed into one audio track. Loaded by a dynamic import, so
   // the watch page never fetches it.
   "simple/compositor.js",
+  // The burn-ins the compositor draws. Three files rather than one because the clock is useful
+  // on its own and the city table is data; all three are reached by dynamic import, so a page
+  // that never switches a burn-in on never fetches them.
+  "simple/edge-clock.js",
+  "simple/geo-stamp.js",
+  "simple/nearest-city.js",
   // The seeds demo. Two files, reached from one dynamic import in earthseed.js, so deleting the
   // demo is deleting these two lines and those two files.
   "simple/seeds.js",

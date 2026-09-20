@@ -285,6 +285,53 @@ async function handleApiRoutes(
       );
     }
 
+    // GET /api/whereami — tells a caller where WE think THEY are, and what time it is here.
+    //
+    // Feeds the broadcaster's location/time burn-in. Everything in the answer is derived from
+    // the caller's OWN request: `request.cf` geo, which we see on every request regardless, plus
+    // our clock. It is returned to that caller and to nobody else — not written to D1, not
+    // logged, not forwarded to the broker. If you add a console.log or an INSERT here you have
+    // turned an echo of the caller's own metadata into a location record; don't.
+    //
+    // `no-store` matters more than it looks: a cached response would hand one broadcaster
+    // another broadcaster's city, and this value gets burned into video as evidence.
+    //
+    // The clock half is the reason this is a round trip rather than a static file. The caller
+    // pairs `server_time_ms` with its own send and receive instants to correct its local clock
+    // (best-of-N, see simple/edge-clock.js), so what is burned into the picture is real time and
+    // not whatever the broadcaster's machine believes — a laptop four seconds fast would
+    // otherwise turn a 400 ms stream into a "4.4 second" one and make the stamp the thing that
+    // is lying.
+    if (request.method === "GET" && url.pathname === "/api/whereami") {
+      const cf = (request as Request & { cf?: IncomingRequestCfProperties }).cf;
+      const num = (v: unknown): number | null => {
+        // cf.latitude is a STRING and may be absent or empty (always under `wrangler dev`).
+        // Number("") is 0, so an empty value would otherwise render as null island {0,0}
+        // burned into the picture as fact.
+        if (v == null || v === "") return null;
+        const n = Number(v);
+        return Number.isFinite(n) ? n : null;
+      };
+      return Response.json(
+        {
+          lat: num(cf?.latitude),
+          lon: num(cf?.longitude),
+          city: cf?.city ?? null,
+          region: cf?.region ?? null,
+          country: cf?.country ?? null,
+          colo: cf?.colo ?? null,
+          server_time_ms: Date.now(),
+          // Say plainly what this is, so a client cannot present it as more than it is —
+          // including when it is nothing. Self-hosted off Cloudflare there is no request.cf, and
+          // reporting "cloudflare-ip-geo" beside a null latitude would be a weaker answer
+          // wearing a stronger label, which is the one thing a burn-in is not allowed to do.
+          source: cf ? "cloudflare-ip-geo" : "none",
+          precision: cf ? "city" : "none",
+        },
+        { headers: { "Cache-Control": "no-store" } }
+      );
+    }
+
     // POST /api/csp-report — where Content-Security-Policy violations are sent. `npx wrangler tail`
     // is the read side; nothing is stored. Unauthenticated because a browser reporting a violation
     // has no credentials to offer — that is the shape of the feature, not an oversight — and

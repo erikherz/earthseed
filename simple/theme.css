@@ -526,6 +526,19 @@ video { min-height: 240px; }
   color: var(--es-text);
 }
 
+/* The burn-in fields: a watermark name and a QR link, each revealed by its own checkbox. Laid
+   out like the passcode box — the input on its line, the explanation wrapping full width under
+   it — because these two need MORE explaining than most controls, not less: what they do is
+   irreversible in the only sense that matters, which is that it reaches viewers as picture. */
+.burn-field { flex-wrap: wrap; gap: 8px; }
+.burn-field input { flex: 1 1 260px; }
+.burn-field .hint { flex-basis: 100%; margin: 0; }
+
+/* Why a QR will not fit, said where the person who typed the link is looking. Amber rather than
+   red: nothing has gone wrong, a limit of the format has been reached. Literal colour because
+   this palette has no warning token — same reasoning as .capture-notice above. */
+.burn-warn { color: #b8860b; }
+
 /* Where the compositor mounts its canvas. It has to be a positioned box: the drag handles for
    the camera inset and the QR plate are DOM elements laid over the canvas — deliberately NOT
    drawn into it, because every pixel of that canvas is published and an audience should not be

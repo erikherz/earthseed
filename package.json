@@ -21,6 +21,8 @@
     "e2e:camera": "node scripts/e2e/camera-yanked.mjs && node scripts/e2e/camera-flip.mjs",
     "//e2e:compositor": "Also self-serving: it stubs both capture APIs with solid-colour canvases and reads the composite back in pixels.",
     "e2e:compositor": "node scripts/e2e/compositor.mjs",
+    "//e2e:burnins": "Stubs /api/whereami and geolocation, then reads the QR back OUT of the composited frame and decodes it.",
+    "e2e:burnins": "node scripts/e2e/burn-ins.mjs",
     "//e2e:overlay": "Also self-serving, but the run that COUNTS is against a deployed origin: the local harness serves no _headers, so Trusted Types is not enforced and the constraint this renderer is built around is absent. Pass https://earthseed.live.",
     "e2e:overlay": "node scripts/e2e/overlay.mjs",
     "//e2e:qr": "Pure Node — qr.js touches no DOM, so there is nothing to serve and no origin to pass.",

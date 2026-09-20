@@ -2206,6 +2206,132 @@ export async function runBroadcast() {
       if (c.hasSystemAudio()) c.setSystemAudioEnabled(true);
     }));
 
+  // ── Burn-ins: location and time, a watermark, a link QR ─────────────────────────────
+  //
+  // All three are drawn INTO the frame by the compositor rather than laid over it in the page.
+  // That is what makes them survive a screen recording and a re-encode, and it is also why they
+  // travel inside the end-to-end media encryption: they are pixels, and every pixel is sealed.
+  //
+  // All three are off by default. The location stamp in particular points in the opposite
+  // direction from everything else on this page, so it is never on unless somebody chose it.
+  const burnToggle = $("useburn"), burnHint = $("burnhint");
+  const markToggle = $("usemark"), markRow = $("markrow"), markField = $("markname");
+  const qrToggle = $("useqr"), qrRow = $("qrrow"), qrField = $("qrlink"), qrWarn = $("qrwarn");
+
+  /** @type {import("./geo-stamp.js").GeoStamp|null} */ let stamp = null;
+
+  const BURN_PREF = "es-burn-ins";
+  const savedBurn = () => {
+    try {
+      return JSON.parse(localStorage.getItem(BURN_PREF) || "{}");
+    } catch {
+      return {}; // private mode, or something else wrote nonsense there
+    }
+  };
+  const saveBurn = () => {
+    try {
+      localStorage.setItem(BURN_PREF, JSON.stringify({
+        burn: !!burnToggle?.checked,
+        mark: markToggle?.checked ? (markField?.value ?? "") : "",
+        qr: qrToggle?.checked ? (qrField?.value ?? "") : "",
+      }));
+    } catch {
+      /* private mode — the settings just do not survive the tab */
+    }
+  };
+
+  /** @param {string|null} m */
+  const qrSay = (m) => {
+    if (!qrWarn) return;
+    qrWarn.textContent = m ?? "";
+    qrWarn.hidden = !m;
+  };
+
+  // Push all three settings at the compositor. Called on every change AND at go-live, so what
+  // gets published is whatever the controls say at that moment rather than whatever they said
+  // when the compositor happened to be built.
+  //
+  // Touching the compositor here is deliberate even before going live: ticking a box mounts the
+  // preview canvas and draws the burn-in onto it immediately, so a watermark or a QR can be
+  // positioned and read BEFORE an audience is looking at it. No device is opened by any of this.
+  const applyBurnIns = async () => {
+    if (burnHint) burnHint.hidden = !burnToggle?.checked;
+    if (markRow) markRow.hidden = !markToggle?.checked;
+    if (qrRow) qrRow.hidden = !qrToggle?.checked;
+    saveBurn();
+
+    const c = await ensureCompositor();
+
+    c.setWatermark(markToggle?.checked && markField?.value.trim() ? markField.value.trim() : null);
+
+    if (!qrToggle?.checked || !qrField?.value.trim()) {
+      c.setLinkQr(null);
+      qrSay(null);
+    } else {
+      const { encodeLinkQr } = await import("./compositor.js");
+      const matrix = encodeLinkQr(qrField.value.trim());
+      c.setLinkQr(matrix);
+      // A link too long to draw at a scannable size is a normal answer to a normal input, not an
+      // error — so it is said in a sentence, next to the field, rather than thrown. Drawing a
+      // smaller symbol instead would not produce a small QR; it would produce a decoration no
+      // phone can read, which is worse than saying no.
+      qrSay(matrix ? null :
+        "That link is too long to draw at a size a camera could read. Shorten it — a link " +
+        "shortener works — or leave the QR off.");
+    }
+
+    if (burnToggle?.checked) {
+      if (!stamp) {
+        const { createGeoStamp } = await import("./geo-stamp.js");
+        // This is what asks for the location permission and syncs the clock against our edge.
+        // Doing it on the tick rather than at go-live is on purpose: a refused permission or an
+        // unreachable edge should be discovered while there is still time to do something
+        // about it, not in the first second of a broadcast.
+        stamp = await createGeoStamp();
+        const where = stamp.place();
+        if (stamp.source() === "network" && where) {
+          say(`No device location yet — the line will show roughly ${where} until there is one.`);
+        }
+      }
+      c.setStampProvider((frame) => (stamp ? stamp.line(frame) : ""));
+    } else {
+      stamp?.stop();
+      stamp = null;
+      c.setStampProvider(null);
+    }
+  };
+
+  // Every control here runs the same function, because the state that matters is all three
+  // settings together and a partial update is how two of them end up disagreeing.
+  const onBurnChange = () => {
+    void applyBurnIns().catch((e) => say(`the burn-in could not be set up: ${e instanceof Error ? e.message : e}`));
+  };
+  burnToggle?.addEventListener("change", onBurnChange);
+  markToggle?.addEventListener("change", onBurnChange);
+  qrToggle?.addEventListener("change", onBurnChange);
+  markField?.addEventListener("input", onBurnChange);
+  qrField?.addEventListener("input", onBurnChange);
+
+  // Restore what was set last time, but do NOT apply it: applying would mount a canvas and
+  // start a geolocation watch on a page somebody has only just opened. The rows are revealed so
+  // the values are visible and editable; the compositor hears about them at the first change,
+  // or at go-live.
+  {
+    const saved = savedBurn();
+    if (burnToggle) burnToggle.checked = !!saved.burn;
+    if (markToggle && saved.mark) {
+      markToggle.checked = true;
+      if (markField) markField.value = String(saved.mark);
+    }
+    if (qrToggle && saved.qr) {
+      qrToggle.checked = true;
+      if (qrField) qrField.value = String(saved.qr);
+    }
+    if (burnHint) burnHint.hidden = !burnToggle?.checked;
+    if (markRow) markRow.hidden = !markToggle?.checked;
+    if (qrRow) qrRow.hidden = !qrToggle?.checked;
+  }
+
   // ── Flip: front camera ⇄ back camera ─────────────────────────────────────────────────
   //
   // A PHONE control, and an action rather than a toggle — it carries no on/off state and never
@@ -2267,6 +2393,11 @@ export async function runBroadcast() {
     comp?.stop();
     comp = null;
     previewMount?.replaceChildren();
+    // The stamp holds a geolocation watch, a re-poll timer and the edge clock's resync timer.
+    // The compositor going away does not stop any of them — a page left idle after "Stop" would
+    // otherwise keep polling a location nothing is drawing.
+    stamp?.stop();
+    stamp = null;
     facing = "user"; // the next broadcast starts facing the broadcaster again
     syncSources();
     goBtn.textContent = "Go live";
@@ -2353,6 +2484,10 @@ export async function runBroadcast() {
         return set("could not start the camera");
       }
       syncSources();
+      // Whatever the burn-in controls say NOW, not whatever they said when the compositor was
+      // built. A broadcaster who typed a watermark and went straight to Go live has never fired
+      // an input event this page saw.
+      await applyBurnIns();
       // Let a source actually size the frame before the encoder is configured from it. Without
       // this the encoder would configure for the placeholder 1280×720, then reconfigure — and
       // spend a keyframe — a frame or two later on every portrait phone.
