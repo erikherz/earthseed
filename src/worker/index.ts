@@ -28,6 +28,13 @@
 // cannot exist without someone in a position to say no.
 
 import { publicVerifyJwk, mintEd25519Token, type MoqClaims } from "./auth/moq-token";
+import { getGoogleAuthUrl, exchangeCodeForTokens, getGoogleUserInfo } from "./auth/google";
+import {
+  createSessionToken,
+  setSessionCookie,
+  clearSessionCookie,
+} from "./auth/session";
+import { upsertGoogleUser, currentUser, canBroadcast } from "./auth/users";
 
 // Per-stream live chat Durable Object. Bound in wrangler.jsonc; removing it needs a deletion
 // migration. Nothing in the shipped client uses it yet.
@@ -83,6 +90,17 @@ export interface Env {
   /** Overrides the notice text. Unset ⇒ OFFLINE_DEFAULT_MESSAGE. */
   OFFLINE_MESSAGE?: string;
   PUBLISHER_TOKEN_TTL?: string;
+
+  // ── Google sign-in. All three must be set for the account path to exist at all; with any of
+  // them missing /api/auth/google/login returns 503, /api/auth/me answers `{user: null}`, and
+  // nothing else in this Worker changes. That is the fail-closed direction and it is also the
+  // migration path: this deployment ran without accounts for a month and must keep working
+  // unchanged for anyone who never sets these.
+  GOOGLE_CLIENT_ID?: string;
+  GOOGLE_CLIENT_SECRET?: string;
+  /** HMAC key for the stateless session cookie. Rotating it signs everyone out at once — the
+   *  only revocation lever there is, because sessions are not stored. See auth/session.ts. */
+  SESSION_SECRET?: string;
 
   DB: D1Database;
   SALTS: KVNamespace;
@@ -218,6 +236,9 @@ async function handleApiRoutes(
       return new Response(null, { status: 204 });
     }
 
+    if (url.pathname.startsWith("/api/auth/")) {
+      return handleAuthRoutes(request, env, url);
+    }
     if (url.pathname.startsWith("/api/publish-code/")) {
       return handlePublishCodeRoutes(request, env, url);
     }
@@ -239,6 +260,167 @@ async function handleApiRoutes(
     console.error("API error:", error);
     return new Response("Internal Server Error", { status: 500 });
   }
+}
+
+/* ═════════════════════════ Accounts ═════════════════════════ */
+//
+// Google sign-in. Ported from Wallflower, where the whole block sat commented out behind an
+// OAUTH-DISABLED marker and `/api/auth/me` returned a hardcoded anonymous user. It is live here,
+// and the difference between "live" and "configured" is the thing to understand before reading
+// on: with GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET or SESSION_SECRET unset, every route below
+// declines and the rest of the Worker behaves exactly as it did before accounts existed.
+//
+// ── What signing in is FOR ───────────────────────────────────────────────────────────────────
+//
+// Publishing, and only publishing. There is no viewer sign-in, no cookie that outlives a viewing
+// session, and `watch_events` still holds nothing that links two sessions to one person. A viewer
+// cannot tell this feature shipped.
+//
+// It is also not the only publishing door. The MAC'd publish code is untouched and remains the
+// path that keeps a broadcaster anonymous to this service. An account is the alternative for
+// someone who would rather manage a stream from any device than carry a code around.
+//
+// ── What it does NOT reach ───────────────────────────────────────────────────────────────────
+//
+// The media. The content key is derived in the two browsers from the `#k=` fragment, which
+// browsers never transmit. Being signed in changes who may ask this Worker for a relay; it moves
+// no key and brings the server not one step closer to decrypting anything.
+//
+// ── Two checks, kept apart on purpose ────────────────────────────────────────────────────────
+//
+//   currentUser()   who is this?        a signed cookie
+//   canBroadcast()  may they publish?   the allow list, default-DENY
+//
+// Signing in is necessary and not sufficient. Collapsing these into one function is how an auth
+// check becomes one that cannot fail, which has happened twice in this codebase's lineage.
+
+/** All three secrets, or nothing. Returned as a tuple so the callers cannot use a partial set. */
+function oauthConfig(env: Env): { clientId: string; clientSecret: string; sessionSecret: string } | null {
+  if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET || !env.SESSION_SECRET) return null;
+  return {
+    clientId: env.GOOGLE_CLIENT_ID,
+    clientSecret: env.GOOGLE_CLIENT_SECRET,
+    sessionSecret: env.SESSION_SECRET,
+  };
+}
+
+async function handleAuthRoutes(request: Request, env: Env, url: URL): Promise<Response> {
+  const path = url.pathname;
+
+  // GET /api/auth/me — who am I, and may I publish?
+  //
+  // Answers `{user: null, can_broadcast: false}` rather than 401 when nobody is signed in. A
+  // signed-out visitor is the ordinary case on this site, not an error, and the client renders
+  // the same page either way — it only needs to know which buttons to offer.
+  if (request.method === "GET" && path === "/api/auth/me") {
+    const user = await currentUser(request, env);
+    if (!user) {
+      return Response.json(
+        { user: null, can_broadcast: false, sign_in_available: oauthConfig(env) !== null },
+        { headers: { "Cache-Control": "no-store" } }
+      );
+    }
+    return Response.json(
+      {
+        user: { id: user.id, email: user.email, name: user.name, avatar_url: user.avatar_url },
+        can_broadcast: await canBroadcast(env.DB, user.email),
+        sign_in_available: true,
+      },
+      { headers: { "Cache-Control": "no-store" } }
+    );
+  }
+
+  // GET /api/auth/logout — drop the cookie and go home.
+  //
+  // Works whether or not OAuth is configured, and whether or not a cookie was presented. A logout
+  // that can fail is a logout somebody is left half inside.
+  if (path === "/api/auth/logout") {
+    return new Response(null, {
+      status: 302,
+      headers: { Location: url.origin, "Set-Cookie": clearSessionCookie() },
+    });
+  }
+
+  const cfg = oauthConfig(env);
+
+  // GET /api/auth/google/login — hand the browser to Google.
+  //
+  // `state` is a random value echoed back by Google and also set as a short-lived cookie; the
+  // callback admits nothing unless the two match. Without it, anyone could feed a victim's
+  // browser a callback URL carrying their OWN authorization code and silently sign that browser
+  // into the attacker's account — which sounds harmless until you remember the victim then
+  // broadcasts from it.
+  if (request.method === "GET" && path === "/api/auth/google/login") {
+    if (!cfg) return new Response("sign-in is not configured on this deployment", { status: 503 });
+
+    const state = crypto.randomUUID();
+    return new Response(null, {
+      status: 302,
+      headers: {
+        Location: getGoogleAuthUrl(cfg.clientId, `${url.origin}/api/auth/google/callback`, state),
+        "Set-Cookie": `oauth_state=${state}; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=600`,
+      },
+    });
+  }
+
+  // GET /api/auth/google/callback — where Google sends them back.
+  //
+  // Every failure path redirects to the origin with an `?error=` rather than rendering a message.
+  // Google's own error text names our misconfiguration (a redirect URI that does not match, most
+  // often) and belongs in the log, not on a stranger's screen.
+  if (request.method === "GET" && path === "/api/auth/google/callback") {
+    if (!cfg) return new Response("sign-in is not configured on this deployment", { status: 503 });
+
+    if (url.searchParams.get("error")) {
+      return Response.redirect(`${url.origin}/?error=oauth_denied`, 302);
+    }
+
+    const code = url.searchParams.get("code");
+    const state = url.searchParams.get("state");
+    if (!code || !state) return Response.redirect(`${url.origin}/?error=invalid_request`, 302);
+
+    const storedState = request.headers.get("Cookie")?.match(/(?:^|;\s*)oauth_state=([^;]*)/)?.[1];
+    if (!storedState || !constantTimeEqual(state, storedState)) {
+      return Response.redirect(`${url.origin}/?error=invalid_state`, 302);
+    }
+
+    try {
+      const tokens = await exchangeCodeForTokens(
+        code,
+        cfg.clientId,
+        cfg.clientSecret,
+        `${url.origin}/api/auth/google/callback`
+      );
+      const profile = await getGoogleUserInfo(tokens.access_token);
+
+      const user = await upsertGoogleUser(env.DB, {
+        provider_id: profile.id,
+        email: profile.email,
+        name: profile.name,
+        avatar_url: profile.picture,
+      });
+
+      // A session is issued to anyone who completes sign-in, including someone not on the allow
+      // list. They are signed in and cannot broadcast, which is the honest state to be in — the
+      // alternative is refusing the session and leaving them unable to tell whether sign-in is
+      // broken or they simply have not been admitted.
+      const session = await createSessionToken(user.id, cfg.sessionSecret);
+
+      return new Response(null, {
+        status: 302,
+        headers: [
+          ["Location", url.origin],
+          ["Set-Cookie", setSessionCookie(session, url.hostname !== "localhost")],
+          ["Set-Cookie", "oauth_state=; Path=/; HttpOnly; Max-Age=0"],
+        ],
+      });
+    } catch (e) {
+      console.error("oauth callback:", e);
+      return Response.redirect(`${url.origin}/?error=auth_failed`, 302);
+    }
+  }
+
+  return new Response("Not Found", { status: 404 });
 }
 
 /* ═════════════════════════ Small shared primitives ═════════════════════════ */
