@@ -84,9 +84,9 @@
       server.
     </p>
     <p>
-      So it never reaches our servers, our database, our logs, the broker that places you, or the
-      relay that carries your video. If we were asked for your stream, by anyone, we would have
-      nothing to give.
+      So it never reaches our servers, our database, our logs, or the CDN that carries your video.
+      The same is true of your chat, which is sealed under a key derived from the same link. If we
+      were asked for your stream, by anyone, we would have nothing to give.
     </p>
   </div>
 
@@ -96,23 +96,21 @@
     <tr><th>Who</th><th>Sees</th><th>Cannot see</th></tr>
     <tr>
       <td>Us</td>
-      <td>That a broadcast happened, when, and how long</td>
-      <td>Your video, your audio, your location</td>
+      <td>That a broadcast happened, its name, when and how long; roughly how many sessions
+          watched; the panel you chose to show viewers; your chat as ciphertext</td>
+      <td>Your video, your audio, your messages, your location, or who you are</td>
     </tr>
     <tr>
-      <td>The broker</td>
-      <td>The stream's name, that it was placed, your IP address, coarse geography</td>
-      <td>Your key, and anything inside the bytes</td>
-    </tr>
-    <tr>
-      <td>The relay</td>
+      <td>The CDN (cdn.moq.pro)</td>
       <td>Encrypted bytes, your IP address, timing, the codec and resolution</td>
       <td>Anything inside those bytes</td>
     </tr>
     <tr>
       <td>Your viewers</td>
-      <td>The stream, if you gave them the link &mdash; and the passcode, if you set one</td>
-      <td>Anything else; they cannot publish as you</td>
+      <td>The stream and the chat, if you gave them the link &mdash; and the passcode, if you set
+          one. Plus anything you chose to burn into the picture, including your location if you
+          switched that on</td>
+      <td>Anything else; they cannot publish as you or rewrite your settings</td>
     </tr>
     <tr>
       <td>Everyone else</td>
@@ -129,6 +127,15 @@
     without telling us anything about yourself. We don't store the key, so there is no record
     connecting you to anything you broadcast — nothing for us to look up, and nothing for anyone
     to compel from us.
+  </p>
+  <p>
+    Two things this does <em>not</em> mean, said plainly. There <strong>is</strong> a record of
+    which broadcast names went live and when, and of how many sessions watched each one — that is
+    the price of being able to stop a stream, and it contains nothing about who you are. And there
+    <strong>is</strong> a sign-in tier in our source code, which is <strong>switched off</strong>
+    on this site; <a href="/api/config"><code>/api/config</code></a> reports it, so you can check
+    rather than take our word. If it were ever turned on, a signed-in broadcaster would be
+    identifiable to us, and this page would have to say so.
   </p>
   <p>
     Each broadcast also identifies itself with a cryptographic key created in your browser, whose
@@ -177,16 +184,22 @@
     be undone.
   </p>
 
-  <h2>The relays are unikernels, not containers</h2>
+  <h2>Where your video actually goes</h2>
 
   <p>
-    A relay never holds a key, so this is not what protects your video — the encryption is. It
-    decides something else: how much an attacker gets if a relay falls. Each relay is a single
-    program in a single address space under a hardware-virtualisation boundary, with
-    <strong>no shell to reach</strong> — not disabled, absent — no package manager, no filesystem
-    and no persistent disk. One relay carries exactly one broadcast, so a compromised relay is
-    confined by a machine boundary rather than by a setting. The fleet holds only the
-    <em>public</em> half of our signing key: it can check a token, it cannot forge one.
+    Through <a href="https://moq.pro">moq.pro</a>, a CDN we do not operate. Our Worker mints a
+    per-broadcast Ed25519 token naming exactly one broadcast path, with an expiry; the CDN holds
+    only the <em>public</em> half of that key, so it can check a token and <strong>cannot forge
+    one</strong>. A relay never holds a content key, which is why whose machine it is was never
+    what protected your video.
+  </p>
+  <p>
+    <strong>This page used to say something stronger, and it was true then.</strong> We ran the
+    relays ourselves — one single-tenant unikernel per broadcast, no shell to reach, no persistent
+    disk, isolated by a hardware boundary rather than by a setting. That no longer describes the
+    infrastructure, so it has been removed rather than left standing. The honest cost: broadcasts
+    are no longer separated by a machine boundary, and we have less to tell you about an operator
+    that is not us. What is unchanged is that only ciphertext ever reaches it.
   </p>
 
   <h2>Moderation, and what it costs</h2>
@@ -227,8 +240,7 @@
   <div class="limit">
     <p>
       <strong>Your IP address is visible to the network.</strong> The relay that carries your
-      stream sees the address you connect from, and so do the broker and Cloudflare, which serves
-      this site. We don't store it — but we can't hide it from them. <strong>If being located
+      stream sees the address you connect from, and so does Cloudflare, which serves this site. We don't store it — but we can't hide it from them. <strong>If being located
       matters to you, use a VPN or Tor.</strong> That's the one protection we can't provide for
       you, and the encryption is unchanged by it.
     </p>
@@ -236,17 +248,18 @@
 
   <div class="limit">
     <p>
-      <strong>We can see that you broadcast, even if not what.</strong> Times, durations and how
-      much data moved are visible to us, to the broker and to the relay. Encryption hides content,
-      not the fact that something happened.
+      <strong>We can see that you broadcast, even if not what.</strong> Times, durations, how
+      many sessions watched and how much data moved are visible to us and to the CDN. Encryption
+      hides content, not the fact that something happened.
     </p>
   </div>
 
   <div class="limit">
     <p>
-      <strong>"Read exactly what runs" is a goal, not a proof.</strong> Our client is one
-      unminified file with no build step, so it is readable — but verifying the bytes this site
-      actually served you is on you.
+      <strong>"Read exactly what runs" is a goal, not a proof — and it got harder.</strong> Our
+      client is unminified with no build step, but it is thirteen files and about 7,500 lines now
+      rather than the one file this page used to point at. Verifying the bytes this site actually
+      served you is on you.
       <a href="https://github.com/erikherz/earthseed/blob/main/INTEGRITY.md">INTEGRITY.md</a>
       publishes their hashes in a different place, under a different party, so substitution
       becomes detectable rather than impossible. Self-hosting is the answer for anyone who cannot
@@ -257,8 +270,10 @@
   <h2>How to know this is true</h2>
 
   <p>
-    Our whole client is one file you can read:
-    <a href="https://github.com/erikherz/earthseed/blob/main/simple/earthseed.js"><code>earthseed.js</code></a>.
+    Our client is <a href="https://github.com/erikherz/earthseed/tree/main/simple">right here</a>,
+    unminified and unbundled, with
+    <a href="https://github.com/erikherz/earthseed/blob/main/INTEGRITY.md">a published hash for
+    every file</a>.
     The transport underneath it is
     <a href="https://www.npmjs.com/package/@moq/net/v/0.1.5"><code>@moq/net</code></a>, which we did
     not write and did not change — we serve our own copy of it so nobody else can push code onto
@@ -272,13 +287,13 @@
   </p>
   <ul>
     <li>Open a live stream without the <code>#</code> part of the link — the position we're in — and nothing decodes.</li>
-    <li>Ask for a relay placement knowing only the stream's name, and be refused.</li>
+    <li>Ask to be placed knowing only the stream's name, without the route tag derived from the link, and be refused.</li>
+    <li>Join the chat room with only the tag, and find the relay holding sealed envelopes with no name and no text field in them.</li>
     <li>Terminate a stream while someone is watching, and confirm it stops.</li>
     <li>Read the database directly after a report is filed, and confirm no key is in it.</li>
   </ul>
   <p>
-    The longer engineering version, including the comparison against ordinary container hosting and
-    every known weakness, is in
+    The longer engineering version, including every known weakness, is in
     <a href="https://github.com/erikherz/earthseed/blob/main/simple/TRUST.md">TRUST.md</a>.
   </p>
 

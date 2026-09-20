@@ -280,7 +280,16 @@ async function handleApiRoutes(
     if (request.method === "GET" && url.pathname === "/api/config") {
       const shutter = broadcastShutter(env);
       return Response.json(
-        { broadcast_offline: shutter !== null, offline_message: shutter },
+        {
+          broadcast_offline: shutter !== null,
+          offline_message: shutter,
+          // Whether the ACCOUNTS tier is live. Published because the documentation makes a claim
+          // about it — "there is no sign-in on earthseed.live" — and a claim nobody can check is
+          // worth about as much as no claim. With this false, /api/auth/* refuses everything and
+          // no row in `users` can be written; with it true, a signed-in allowed address can
+          // publish without a key and we then know who broadcast.
+          accounts: accountsEnabled(env),
+        },
         { headers: { "Cache-Control": "no-store" } }
       );
     }

@@ -127,6 +127,18 @@ h1 { font-size: var(--es-font-size-h1); font-weight: 600; margin: 0 0 16px; lett
    display set by a component rule, which is what makes it safe to toggle anything. */
 .hidden { display: none !important; }
 
+/* And the ATTRIBUTE has to win too, everywhere.
+   The UA stylesheet's `[hidden] { display: none }` has the specificity of a single attribute
+   selector, so ANY class rule that sets `display` beats it — and an element JavaScript has marked
+   hidden goes on rendering, looking perfectly interactive. This file had been fixing that one
+   element at a time (`.capture-notice[hidden]`, and the `:not([hidden])` guards further down),
+   which is a treatment for instances rather than for the class. It was still leaking in
+   production: `.passcode-box` is `display: flex`, so an unticked "Require a passcode to watch"
+   left an empty passcode box with Copy and New buttons sitting on the page. Found in a
+   screenshot, not in source — which is the only place this kind of bug is visible.
+   Nothing in this client ever wants a hidden element to render. */
+[hidden] { display: none !important; }
+
 /* ── Header ─────────────────────────────────────────────────────────────────
    Logo, tagline and the controls that belong to the page rather than the stream. Matches the
    landing page and vivoh.earth so the three read as one product. */

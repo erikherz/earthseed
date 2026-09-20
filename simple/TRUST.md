@@ -1,17 +1,39 @@
 # Trust & flows — what a reviewer sees
 
-This app is deliberately small so you can read all of it before trusting it with a live stream.
 This document states exactly what each party can and cannot see, the cryptography, and the honest
 limits. The interactive version of this map is on the home page (https://earthseed.live).
+
+## What changed, and what this used to say
+
+Two sentences in the older version of this document are no longer true, and they are corrected here
+rather than quietly dropped:
+
+1. **"It's one readable file; read it."** The client is now thirteen files and about 7,500 lines.
+   Still unminified, still no build step, still no runtime dependency of our own — but "small
+   enough that you will actually read it" was a real property and it has been spent. What replaces
+   it is `INTEGRITY.md`: a SHA-256 for every file, committed to git so the record sits somewhere
+   other than the site being checked, and `npm run verify` to compare the live site against it.
+   That is weaker, and saying so is the point of this section.
+
+2. **"The relays are unikernels, not containers."** They were: a fleet we ran ourselves, one
+   single-tenant Hermit unikernel per stream, no shell and no persistent disk. Production now
+   routes through **moq.pro**, a CDN we do not operate, and none of that argument applies to it.
+   The section making it has been removed. What did not change is the part that protects your
+   media: a relay only ever carries ciphertext, so whose machine it is was never the thing keeping
+   your video private.
+
+There is also a third correction, on the front page rather than here: **there is an accounts tier
+in this repository and it is switched off.** `curl -s https://earthseed.live/api/config` reports
+`"accounts": false`. See [Who can see what](#who-can-see-what).
 
 ## The parties
 
 | Party | Role | Runs our code? |
 |---|---|---|
-| **Broadcaster browser** | Captures, encodes, **encrypts**, publishes | Yes — `earthseed.js` |
-| **Viewer browser** | Subscribes, **decrypts**, decodes, plays | Yes — `earthseed.js` |
-| **Broker** (`tinymoq.com`) | Assigns a gated relay + short-lived token; serves public salts | No (it's a server API) |
-| **Relay fleet** | Moves media between browsers over QUIC | No |
+| **Broadcaster browser** | Captures, composites, encodes, **encrypts**, publishes | Yes — `simple/` |
+| **Viewer browser** | Subscribes, **decrypts**, decodes, plays | Yes — `simple/` |
+| **Our Worker** (`earthseed.live`) | Admits publishers, mints CDN tokens, holds settings, relays sealed chat, can refuse | Ours, server-side |
+| **CDN** (`cdn.moq.pro`) | Moves media between browsers over QUIC | No — a third party |
 
 ## The values exchanged
 
@@ -19,10 +41,10 @@ limits. The interactive version of this map is on the home page (https://earthse
 |---|---|---|
 | `publish key` | Sort of | Admits a broadcaster. A capability carrying its own `nbf`/`exp`/batch under a MAC only our Worker can produce, so the expiry can ride inside the credential instead of in a table — and nothing about who requested it is written down. **Can't decrypt.** |
 | `route tag` | No | Proof a viewer holds the link: `HKDF(#k=, salt="es-route\|<id>", info="earthseed-route-auth-v1")`. A *different* salt **and** a different info string than `CK`, so the two are cryptographically independent — every tag ever registered decrypts nothing. Registered by the broadcaster at go-live, presented by each viewer to be placed. |
-| `node id` | No | An Ed25519 public key (base32). The stream identity and the relay track name. |
-| `origin EID` | No | Which relay holds the origin, so a viewer's edge can pull from it. Routing only. |
+| `node id` | No | An Ed25519 public key (base32). The broadcast identity, the relay track name, and what a settings write is signed against. |
 | `salts` + `epoch` | No | Public HKDF inputs: a global (operator kill-switch) salt ‖ a per-stream salt. Rotating one re-keys the stream. |
-| `JWT` | Short-lived | A per-broadcast relay token authorizing the **connection** (publish or subscribe scope). Not a content key. |
+| `JWT` | Short-lived | A per-broadcast CDN token authorizing the **connection** (publish or subscribe scope), signed `EdDSA` by our Worker over one account root and one broadcast path. Not a content key. |
+| `link_enc` | Opaque | A sealed blob a broadcaster may store against their own stream. Encrypted under a key derived from `#k=`, so it is meaningless to us and to anyone without the link. |
 | `#k=` → `CK` | **YES** | 32 random bytes in the link fragment → the `AES-256-GCM` key via HKDF. Held only by the two browsers. |
 | `passcode` | **YES** | Optional. 8 characters, **never in the link and never sent anywhere** — spoken or texted to the viewer, typed into the watch page, stretched into the same `CK`. |
 
@@ -31,7 +53,7 @@ limits. The interactive version of this map is on the home page (https://earthse
 ```
 CK = HKDF-SHA256(
        IKM  = fragmentKey [‖ PW],          // the 32 bytes in the #k= link fragment
-       salt = globalSalt ‖ streamSalt,     // public; served by the broker
+       salt = globalSalt ‖ streamSalt,     // public; carried in band on the catalog track
        info = "earthseed-media-v1|" + nodeId + "|" + epoch )
 
 with a passcode (opt-in per broadcast), PW joins the IKM and the version becomes v2:
@@ -54,8 +76,85 @@ per encoded chunk (audio and video):
   re-derives when it does. Both take effect at the next go-live — nothing rotates mid-broadcast, so
   a viewer's key is fixed for the session it joined.
 - **The salts reach a viewer from the broadcaster, not from us.** They travel on the same cleartext
-  catalog track that carries the codec description, so **a viewer never asks the broker for
-  anything after being placed on a relay.** They are public HKDF inputs and decrypt nothing alone.
+  catalog track that carries the codec description, so **a viewer never asks us for anything after
+  being placed.** They are public HKDF inputs and decrypt nothing alone.
+
+### Chat is sealed under a sibling key
+
+```
+chatKey = HKDF-SHA256(
+            IKM  = fragmentKey [‖ PW],       // the same inputs as CK
+            salt = globalSalt ‖ streamSalt,  // the same salts as CK
+            info = "earthseed-chat-v1|" + nodeId + "|" + epoch )   // v2 with a passcode
+
+each message:  <base64url nonce>.<base64url AES-256-GCM ciphertext+tag>
+```
+
+Same key material, **different `info` string**, so the chat key and the media key are
+cryptographically independent: neither can be derived from the other, and a compromise of one
+reveals nothing about the other. That is what HKDF's `info` parameter is for, and it is the only
+reason chat can ride on the same link without weakening the video.
+
+The display name is sealed **inside the same envelope** as the text, not sent alongside it. The
+Durable Object that relays chat stores `{id, ct, ts}` and nothing else — it has no `name` field and
+no `text` field to hold. Two consequences, and the second is not a feature:
+
+- The relay cannot read a message, and neither can we.
+- **There is no server-side moderation of chat**, because there is nothing there to moderate.
+
+## The overlay, and why it is blocks and not HTML
+
+A broadcaster can put a panel under the video — headings, text, lists, links, images, and a
+cross-origin embed. That is **content from one person rendered in another person's document**, and
+that document holds the media key derived from the `#k=` fragment. It is the only place in this
+client where that happens, so it gets its own rules.
+
+It is **not** markup. The broadcaster sends a list of typed blocks and the viewer's page builds DOM
+with `createElement` and `textContent`. Nothing is ever parsed, so the class of bug a sanitiser
+exists to prevent is not reachable, rather than being defended against. A `<script>` somebody types
+is eleven characters on screen.
+
+That is not merely a preference. These pages serve
+`require-trusted-types-for 'script'; trusted-types 'none'`, which means there is no route from a
+string to DOM in this origin at all — `innerHTML`, `outerHTML`, `insertAdjacentHTML`,
+`document.write` and `DOMParser.parseFromString` all throw. A sanitiser was tried here and removed
+the same day: under that policy it returned **empty output for every input** while catching its own
+violation, so every "no script survived" test passed on nothing having been rendered.
+
+Embeds are the one real trade, and the rule that makes them survivable is that the frame must not be
+**our** origin. A cross-origin frame cannot touch `window.parent`, so a poll or a map can run
+whatever script it likes and never reach the key. Same-host and non-`https` sources are refused,
+`srcdoc` cannot be expressed at all, and we — not the author — set `sandbox` (without
+`allow-top-navigation`), `allow` (so an embed cannot ask for the viewer's camera) and
+`referrerpolicy` (so the share link is not sent to a third party). The Worker serves
+`frame-ancestors 'none'` from the other side, so no earthseed.live page can be framed either way.
+
+## The burn-ins, which point the other way
+
+Three things can be drawn **into** the picture rather than over it: a handle watermark, a QR code
+for a link, and a location and time stamp. Being picture means they survive a screen recording and
+a re-encode, and that they travel inside the media encryption like every other pixel — only people
+holding the link ever see them.
+
+All three are off unless a broadcaster switches them on, and the location stamp is the reason:
+
+- It puts your coordinates in the frame, for everyone with the link. That is the opposite of what
+  the rest of this page is for.
+- **It is not proof.** Geolocation is a number the browser hands us and this page cannot attest to
+  it; a determined faker overrides it from devtools or runs a VPN and settles for the coarse
+  answer. It raises the cost of a casual lie, and nothing more.
+- A device fix and a network guess are **never rendered alike** — `±12m` with six decimals versus
+  `~city` with four — because a city centroid dressed as a GPS fix would manufacture exactly the
+  false confidence the feature exists to prevent. A stale fix counts as no fix.
+- The time is **our edge's**, not your computer's, so a viewer can compare it with their own clock
+  and read the delay off the screen. Best-of-N samples against `/api/whereami`, anchored to a
+  monotonic timebase so an NTP step mid-broadcast cannot corrupt it, corrections slewed at 1% so
+  the burned-in clock never runs backwards. `/api/whereami` echoes the caller's own `request.cf`
+  back to that caller: not logged, not stored, not forwarded.
+
+The QR is encoded **in your browser** (`simple/qr.js`, written out rather than pulled in), so no
+third party is told which link you are putting on screen — and no external script is loaded into a
+page holding your content key.
 
 ## The passcode (optional second lock)
 
@@ -71,9 +170,9 @@ the link and the passcode never travel together.
 **Nothing in the middle is ever told the passcode.** It is not stored on a server, not sent to one,
 and not checked by one. No hash or verifier of it is published anywhere. It is stretched with
 PBKDF2 and mixed into `CK`, so a wrong passcode simply produces a wrong AES key and the GCM tag
-fails **in the viewer's own browser**. The broker's view of the world is byte-for-byte identical
-whether the passcode typed was right or wrong — including whether a stream has one at all, which is
-why the watch page discovers it by trying rather than by asking.
+fails **in the viewer's own browser**. Our view of the world is byte-for-byte identical whether
+the passcode typed was right or wrong — including whether a stream has one at all, which is why the
+watch page discovers it by trying rather than by asking.
 
 - **Why PBKDF2, and why 5,000,000 iterations.** The attacker this defends against is someone who
   *already has your link* — so they hold the fragment key and can fetch the public salts, and the
@@ -104,108 +203,133 @@ why the watch page discovers it by trying rather than by asking.
   | New link | no | **yes** |
   | New ID | no | no |
 
-  What *New ID* does not do is hide you from the broker: a new id appearing from the same address
-  at the same hour is trivially linkable by whoever assigns your relay. It breaks the link between
-  you and the people you handed links to — not between you and the infrastructure.
+  What *New ID* does not do is hide you from us: a new id appearing from the same address at the
+  same hour is trivially linkable by whoever places you. It breaks the link between you and the
+  people you handed links to — not between you and the infrastructure.
 - **Opt-in, and nothing else changes.** With the toggle off, derivation is byte-identical to what it
   was before the feature existed, so **no existing link breaks.**
 
 ## Who can see what
 
-- **Our Worker** sees: that a broadcast started and ended, its `node id`, and its `route tag`. It
-  holds the broker credential, checks the publish key, verifies the name is yours, and is the thing
-  that can refuse. It **never** sees `#k=`, `CK`, your `passcode`, your media, or anything that
-  identifies you — there is no account, and the publish key that admitted you is not stored.
-  This is new as of August 2026 and it is a real cost: we now know *that* you broadcast. It is the
-  price of being able to stop a stream at all, and it buys nothing toward decrypting one.
-- **Broker** sees: `node id`, public `salts`, coarse geo (from the request); it places you on a
-  relay and mints the connection token. It **never** sees `#k=`, `CK`, your `passcode`, or your
-  media — nor whether a broadcast has a passcode at all.
-  **A viewer contacts it exactly once**, to be placed on a relay. After that a viewer talks only to
-  the relay, and the relay only ever carries ciphertext. So the broker sees that someone joined,
-  not how long they stayed — it holds a connection record, not an attendance record.
-- **Relay fleet** sees: a connection `JWT`, ciphertext frames, and the cleartext catalog. It
-  **never** sees `#k=`, `CK`, your `passcode`, or your media. (Hermit unikernel relays keep no
-  persistent disk — see [why they're unikernels](#why-the-relays-are-unikernels-and-not-containers).)
-- **Someone with the link** can watch (decrypt your video and audio) — the link carries `#k=`. Share
-  it carefully. If you set a passcode they need that too, from your other channel. They still
-  **can't publish as you or rotate your key**: your `node id` *is* an Ed25519 public key, and the
-  broker only issues a publish token for it against a signature — over a challenge it just issued —
-  from the matching private key, which never leaves your browser. Rotating your stream salt is
-  likewise gated on a secret only your browser holds.
-- **Your identity key can't be copied out of your browser.** It is generated non-extractable and
+- **Our Worker** is the party that grew. It sees:
+  - **that a broadcast started and ended**, its `node id`, and its `route tag`. This is new as of
+    August 2026 and it is a real cost: we now know *that* you broadcast. It is the price of being
+    able to stop a stream at all, and it buys nothing toward decrypting one.
+  - **viewing sessions** — a count and a duration per broadcast, keyed by a salted hash with no
+    identity in it and reaped by a cron. Enough to answer "is anyone there?", not enough to follow
+    anybody between broadcasts.
+  - **your stream's settings** — the overlay blocks, the chat flag, the sealed `link_enc` blob.
+    These are public by necessity: a viewer holds a link and nothing else, and has to be able to
+    render the page. What that discloses is exactly what the broadcaster chose to put on screen in
+    front of strangers.
+  - **chat ciphertext**, in a Durable Object that holds `{id, ct, ts}` and has no field for a name
+    or a message.
+  - **seed vaults**, if the demo is used — see below, and note it is the one persistent per-person
+    row in this database.
+
+  It **never** sees `#k=`, `CK`, the chat key, your `passcode`, your media, your messages, or
+  anything that identifies you. There is no account, and the publish key that admitted you is not
+  stored.
+
+- **Accounts exist in the code and are switched off.** `src/worker/auth/` holds Google OAuth, a
+  `users` table and a `broadcaster_access` allow list. While `ACCOUNTS` is `"off"`, `/api/auth/*`
+  refuses everything and nothing can be written to `users`; publishing is admitted by a publish key
+  alone. `curl -s https://earthseed.live/api/config` reports `"accounts"` so the claim is
+  checkable rather than merely asserted. **If it is ever turned on, a signed-in allowed address can
+  publish without a key and we then know who broadcast** — which would make a different product,
+  and this page would have to say so.
+
+- **The CDN** (`cdn.moq.pro`) sees: a connection `JWT`, ciphertext frames, the cleartext catalog,
+  and your IP. It **never** sees `#k=`, `CK`, your `passcode`, or your media — nor whether a
+  broadcast has a passcode at all. **It cannot mint tokens for your broadcast**: it holds only the
+  *public* half of the Ed25519 signing key, so it can verify a token and cannot forge one.
+  **A viewer contacts us exactly once**, to be placed. After that a viewer talks only to the CDN,
+  and the CDN only ever carries ciphertext.
+
+- **Someone with the link** can watch and read the chat — the link carries `#k=`. Share it
+  carefully. If you set a passcode they need that too, from your other channel. They still
+  **cannot publish as you, rewrite your settings, or rotate your key**: your `node id` *is* an
+  Ed25519 public key, and each of those requires a signature — over a challenge our Worker just
+  issued and MAC'd with the issue time inside it — from the matching private key, which never
+  leaves your browser.
+
+- **Your identity key cannot be copied out of your browser.** It is generated non-extractable and
   stored as a key *object* in IndexedDB, never as bytes — so there is no exportable copy for a
   malicious script or extension to steal and reuse later. The trade is that an identity cannot be
   backed up or moved between browsers: lose the browser profile and you mint a new one (and a new
   share link). See the limits below for what this does *not* cover.
+
 - **Someone without the link** gets at most opaque ciphertext — plus the cleartext catalog
   (codec/resolution) and traffic size/timing. Never anything decryptable.
 
-## Why the relays are unikernels and not containers
+## Seeds, and the row it adds
 
-The relay never holds a key, so this is not what protects your video — encryption is. It matters
-for everything *around* the media: how much an attacker gets if a relay falls, and how much has to
-go right, continuously, for that to stay true.
+The seeds demo is a tipping and prepaid-bandwidth economy: four pools per vault, a ledger, and
+per-stream accrual. **Nothing in it moves money** — there is no payment processor, "buying" credits
+a vault directly, and a cash-out records an intent and stops.
 
-The usual way to run something like this is containers on Kubernetes. Kubernetes can be hardened
-well. The difficulty is that **its security is a set of policies someone must choose, apply, and
-keep applying** — and each has an off switch:
+A vault is addressed by a public id derived from a 256-word recovery phrase:
+`PBKDF2-SHA256(phrase, "earthseed-vault-v1", 210,000)` → 512 bits, split into a **public id** and a
+**write secret** that never leaves the browser. Only the SHA-256 of that secret is stored, so the
+column leaking does not let anyone spend anyone's seeds. (A real build would verify an Ed25519
+signature over a challenge instead — same identity model, no shared secret at all. That is the
+first thing to replace if this stops being a demo.)
 
-| The exposure | In Kubernetes | In a Hermit unikernel |
-|---|---|---|
-| Interactive access to a running workload | `kubectl exec` gives a shell. Gated by RBAC — a grant someone can make | **No shell exists.** No `/bin`, no `sh`, nothing to exec into |
-| Post-exploitation tooling | The image ships a userland: package manager, `curl`, shell utilities | The binary links what the relay needs. There is no second program to run |
-| Escaping to the host | Containers share **one kernel**; a kernel privilege bug is an escape. `privileged`, `hostPath`, `hostPID` are blocked only if admission policy says so | Isolation is a **KVM boundary** (`uhyve`). Not namespaces on a shared kernel |
-| Reaching other workloads | Default-allow: without a `NetworkPolicy` every pod can reach every pod | One application, one address space, no service-account token to steal |
-| What persists after the fact | Container filesystems and logs sit on the node | **No persistent disk.** Idle relays are reaped and the machine ceases to exist |
+Two things to be straight about:
 
-The distinction is not that Kubernetes is badly built. It is that a hardened cluster is a state you
-have to *achieve and maintain*, against configuration drift, a new operator with broad RBAC, or one
-`hostPath` mount added under deadline. A unikernel's hardening is a property of the artifact: there
-is no `kubectl exec` equivalent to disable because there is no shell to reach, and no policy anyone
-can relax later to bring one back. **Security you cannot switch off beats security you must
-remember to switch on.**
+- **It is the first persistent per-person row in this database.** Every other table here is
+  deliberately unable to link two things to the same human. A vault is not: it accumulates, and it
+  is meant to. Migration `0014_seeds.sql` says so at length.
+- **Cash-out is an unresolved legal question**, not an engineering one, and it has to be answered
+  before any of this touches a payment processor.
 
-**One relay carries exactly one stream.** Many viewers of that stream share it — that is what a
-relay is for — but two different broadcasts are never placed on the same machine, in any locality.
-Verified rather than assumed: two streams taken live at the same moment were assigned separate
-relays on separate ports, with distinct origin endpoints. So a relay compromise is scoped to one
-broadcast by the machine boundary, not merely by policy. Token scope is a second, independent
-barrier — a viewer's token names exactly one broadcast, so co-tenancy would grant nothing even if
-it somehow occurred.
+## Where the media goes now
 
-**The fleet cannot mint tokens for your stream.** Each relay is provisioned with the *public* half
-of the signing key; the private key never leaves the token issuer. The relay can verify a token and
-cannot forge one. (A different deployment mode gives each relay a fresh secret that is destroyed
-when the relay is reaped — revocation by key destruction. That is not how this runs, and it is a
-weaker property than the operator simply never holding a signing key.)
+Production routes through **[moq.pro](https://moq.pro)**, a CDN we do not operate. Our Worker mints
+a per-broadcast **Ed25519 (`EdDSA`) JWT** naming an account root and exactly one broadcast path
+beneath it, with an expiry; moq.pro verifies it against the public half. **The private key never
+leaves the token issuer, so the CDN can check a token and cannot forge one.**
 
-**The honest limits of that argument:**
+This replaced a fleet of single-tenant [Hermit unikernels](https://github.com/erikherz/hermit-moq)
+that we ran ourselves — no shell, no persistent disk, one relay per stream, KVM isolation rather
+than namespaces on a shared kernel. That was a genuinely stronger story about the machines, and it
+is no longer the truth, so the argument for it has been deleted rather than left standing next to
+infrastructure it does not describe. Anyone self-hosting can still take that path: the fleet code is
+in `src/worker/` and `docs/` records how it worked.
 
-- **The host is still an ordinary Linux box.** It runs the fleet manager as root, terminates TLS,
-  and reads relay logs. Those logs carry broadcast names and viewer counts. "No disk to log to" is
-  true of the guest, not of the system it runs on — and the host, not the guest, is the real target.
-- **A small ecosystem cuts both ways.** Fewer eyes on the code than the Linux container stack, and
-  slower to patch. And having no runtime policy layer means you cannot *add* a guardrail you failed
-  to build in.
-- **A bug in the relay is still a bug.** A unikernel bounds the blast radius. It does not make the
-  program correct.
+Two honest consequences of the move:
+
+- **Broadcasts are no longer isolated by a machine boundary.** One relay per stream is gone; a CDN
+  is shared infrastructure. What still scopes a compromise is **token scope** — a token names one
+  broadcast path and nothing else — and, much more importantly, the fact that a relay only ever
+  holds ciphertext. The machine boundary was defence in depth, not the defence.
+- **We have less to tell you about the operator.** We ran the old relays and could describe them
+  precisely. We do not run this one.
+
+What did not change at all: the CDN cannot decode a frame, cannot mint a token, and never receives
+`#k=`.
 
 ## The trusted computing base (what you must trust)
 
-1. **`earthseed.js`** — our client. It's one readable file; read it.
+1. **The client** — thirteen unminified files in `simple/`, about 7,500 lines, no build step and
+   no runtime dependency of our own. This used to read "it's one readable file; read it", and that
+   was a real property that has been spent: it was 1,657 lines in August 2026. What is left in its
+   place is `INTEGRITY.md` — a SHA-256 for every file, committed to git so the record lives under a
+   different party than the site being checked — and `npm run verify`, which compares the live site
+   against it. Weaker, and named as weaker.
 2. **`@moq/net`** — the transport (version `0.1.5`), **vendored**: built once from the published
    package at exact dependency versions and served from our own origin, not a CDN. It is
    unminified, so you can read it; `simple/vendor/README.md` has the build command and the SHA-256
    so you can reproduce it byte-for-byte and confirm we didn't change anything.
 3. **The browser** — WebCrypto, WebCodecs, WebTransport.
 4. **However you host the pages** — whoever serves `earthseed.js` could serve different code. If
-   that's a concern, host it yourself: the client is static, and it talks to the broker from
-   whatever origin you put it on.
+   that's a concern, host it yourself — though a full self-host now means running the Worker in
+   `src/worker/` too, because the client asks its own origin for placement rather than a broker
+   directly. `npm run bundle` packages the client; `INTEGRITY.md` is how you check ours.
 
-You do **not** have to trust the broker or the relay with your content — that's the point. You
-*do* have to trust the broker to be **available**, and to gate publishing honestly; see the
-honest limits below.
+You do **not** have to trust our Worker or the CDN with your content — that's the point. You *do*
+have to trust our Worker to be **available**, and to gate publishing honestly; see the honest
+limits below.
 
 ## Honest limits
 
@@ -215,9 +339,9 @@ honest limits below.
   whoever you send it to — and your own browser history — has it. A passcode is what keeps a leaked
   link from being enough on its own; it only helps if you send it by a *different* route.
 - **A passcode gates decryption, not connection.** Someone with your link can still get a subscribe
-  token and pull ciphertext, then attack the passcode offline. Closing that would mean the broker
-  verifying passcode knowledge — which would give the broker an offline-guessing oracle and destroy
-  the property the passcode exists for. We take the trade: the slow KDF is what makes it safe.
+  token and pull ciphertext, then attack the passcode offline. Closing that would mean our Worker
+  verifying passcode knowledge — which would hand it an offline-guessing oracle and destroy the
+  property the passcode exists for. We take the trade: the slow KDF is what makes it safe.
 - **A passcode expires long before it breaks.** Eight characters is 40 bits: years of GPU time for
   one attacker, but only weeks-to-months for a well-funded one grinding offline. It is not built to
   hold forever — it is built to outlast itself. Regenerate periodically and the window never
@@ -251,23 +375,31 @@ honest limits below.
   other end is not what protects your media. Pinning destinations would only bind an attacker who
   could run script here *without* controlling our response headers, and anyone who can serve a
   modified client controls both.
-- **The broker is a required dependency, on purpose.** It can refuse to mint a token and deny you
+- **We are a required dependency, on purpose.** Our Worker can refuse to mint a token and deny you
   service — though it still can't read your content. There is deliberately no way to route around
-  it. An earlier "open-relay" mode let a page skip the broker and use any public MoQ endpoint, and
-  it was removed: with no broker there is nothing to authorize a publisher, so anyone could publish
-  to anyone's broadcast name. That trade is the honest shape of this product — **availability
-  depends on us; confidentiality does not.** If you need to remove that dependency, host the client
-  yourself *and* run your own broker and relays; the client is static and the protocol is here.
-- **Metadata.** The broker learns that *some* stream (by node id) exists and coarse geo; the relay
-  learns traffic timing/volume. The content stays encrypted.
+  it. An earlier "open-relay" mode let a page skip placement and use any public MoQ endpoint, and
+  it was removed: with nothing to authorize a publisher, anyone could publish to anyone's broadcast
+  name. That trade is the honest shape of this product — **availability depends on us;
+  confidentiality does not.** If you need to remove that dependency, host the client yourself *and*
+  run the Worker and your own relays; both are in this repository.
+- **Metadata.** We learn that *some* broadcast (by node id) exists, when it ran, and roughly how
+  many sessions watched it; the CDN learns traffic timing and volume, and your IP. The content
+  stays encrypted throughout.
+- **The client is bigger than the claim that used to carry it.** 1,657 lines in August 2026,
+  about 7,500 now. No build step and no runtime dependency of our own still hold, and every file is
+  hashed in `INTEGRITY.md` — but "small enough to read in an afternoon" does not, and a document
+  that kept saying it would be doing the thing this page exists not to do. `docs/hard-mode.md`
+  records the posture that was traded away, and how to get back to it.
 
 ## Browser support
 
 - **Broadcast & watch:** recent Chrome/Edge, and Safari on **iOS 18+ / macOS** (needs WebTransport
   + WebCodecs). Capture avoids the Chromium-only `MediaStreamTrackProcessor` so Safari/iOS works.
-- No WebSocket/WASM fallback is shipped (keeping the review surface tiny), so very old browsers
-  are out of scope. **WebTransport is required, not preferred.** If you read the vendored transport
-  you will find WebSocket code in it — `@moq/net` implements qmux over WebSocket and will try it
-  alongside WebTransport — but our relays do not serve WebSocket, so that attempt cannot succeed
-  and nothing falls back to it. A network that blocks UDP blocks this app; it does not silently
-  downgrade to a different transport.
+- We ship no WebSocket or WASM fallback of our own, so very old browsers are out of scope. If you
+  read the vendored transport you will find WebSocket code in it: `@moq/net` implements qmux over
+  WebSocket and will try it alongside WebTransport.
+  **When we ran the relays we could say flatly that they did not serve WebSocket, so that attempt
+  could not succeed. We cannot say that about a CDN we do not operate, and have not measured it.**
+  In practice a network that blocks UDP blocks this app. What is unchanged either way is that a
+  WebSocket path would carry the same ciphertext under the same key — the transport is not what
+  protects your media.

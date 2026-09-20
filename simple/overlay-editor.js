@@ -132,7 +132,7 @@ export function initOverlayEditor(host, opts) {
     // now, rather than from a viewer describing a gap.
     notes.textContent = removed.length ? `Not shown to viewers: ${removed.join("; ")}` : "";
     notes.hidden = removed.length === 0;
-    previewHost.hidden = blocks.length === 0;
+    previewWrap.hidden = blocks.length === 0;
   };
 
   /** @param {number} i */
@@ -255,7 +255,11 @@ export function initOverlayEditor(host, opts) {
 
   const bar = h("div", "ov-bar");
   bar.append(addBtn, saveBtn);
-  host.replaceChildren(list, bar, status, notes, h("div", "hint", "What viewers will see:"), previewHost);
+  // The preview and its label live or die together: a heading over an empty box says a broadcast
+  // will show viewers nothing, in a place where nothing is exactly what it should say instead.
+  const previewWrap = h("div", "ov-preview-wrap");
+  previewWrap.append(h("div", "hint", "What viewers will see:"), previewHost);
+  host.replaceChildren(list, bar, status, notes, previewWrap);
   redraw();
   dirty(false);
 
