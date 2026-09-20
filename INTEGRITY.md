@@ -28,17 +28,18 @@ the answer for anyone who cannot accept that; the client is static and the repos
 | File | SHA-256 |
 |---|---|
 | `/index.html` | `973a64ad9e2a98505f68ca27af4a133a7584b85e2a2a76d394abca15f82574a4` |
-| `/broadcast.html` | `f98b95c7507e7843113a7d35a4a198dc6e88f3eacbb30dab0cb4053a1bc64181` |
-| `/watch.html` | `9d16070eee57daaa6477eadbd7b3c761d1a599e090a7877150115a2f90ec3b37` |
+| `/broadcast.html` | `f2596c88594ffae3c69743b616041ab9233175a08901a09aabecf4e2577ea714` |
+| `/watch.html` | `a0a7efc01831c42bcb581078a764c9f1ea5546fe123483f64e825d20083f9fa1` |
 | `/request.html` | `45dcb5f7658babd584450570a445e37148488f5545bc3e70c27132a186201796` |
 | `/trust.html` | `a4ba2ddec362338408854b8ed8a76bfbba298105d15dca1eb3635b8cb1a5abb0` |
-| `/theme.css` | `30a9355fa3ae4037c6fe4bb091d8578c791728ed34f9e37131cc466f88c8b4ad` |
+| `/theme.css` | `dc6a86cec8b0a1487052d3d66f5579645b60e705f03156123e287804e1415343` |
 | `/custom.css` | `06ad2a5d03f2ddd43f0a742503c3f323f11445d5531664aa044e1d5eaa7b2efd` |
 | `/favicon.svg` | `adc7808e817a00c804778b8e962ba3e7f6c601fcc98be0937a053b1a19beb721` |
-| `/earthseed.js` | `efb82de12f969944565db3cb50ef8caa0f60172334905e909e887d1ee5720fd3` |
+| `/earthseed.js` | `b19f60b8b32f64ac789ed2f2c5634bd14cf6743ddc487e29fde138d5bd63c2a2` |
 | `/offline-notice.js` | `2feb7125de2d2b8c98abd26c704da241a55f04f9ec3b78772d3adf19fa7fb62e` |
 | `/audio-capture-worklet.js` | `07ab2a238f16a842bb04d31cd54e015991f9c23493763df3fe6f32ca6372c50b` |
 | `/overlay.js` | `9d564d158bc39ec73364d40b9b97d68e28f7c353d41d708ba330ac382b6e0713` |
+| `/overlay-editor.js` | `bc87c212afbd513f5862f8eca251e65750cc3e4045aad0ad1ace07767cfcccd2` |
 | `/chat.js` | `11e3f6ef838da953f0460f5d2abc75de2a9083abc7c9f37c69b0915576b0cb85` |
 | `/qr.js` | `d1c755ddd3358f98fdca2d027573017237b6ff4fc67ee85bbf5c56b962180c9b` |
 | `/compositor.js` | `91555956dfb6b30b327c604dab4ea89f8e8bb93e3750de54b7a88f892a8b2435` |

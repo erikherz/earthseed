@@ -889,6 +889,60 @@ function watchViewerCount(nodeId, tag, onCount) {
 }
 
 /**
+ * Read a broadcast's public settings — the overlay, the chat flag, the sealed watermark.
+ *
+ * Memoised per page load, because two features want it and a viewer asking the same question
+ * twice for one broadcast is one more request than the broker needs to see. Deliberately NOT
+ * refreshed while watching: the answer is only read while the page is being built, and polling
+ * it would hand the broker the per-viewer attendance record the salt poll used to.
+ *
+ * Failure is null, never a throw. Nothing that depends on this is worth interrupting a broadcast
+ * for — a missing overlay is a missing overlay.
+ *
+ * @type {Map<string, Promise<{require_auth:number, overlay_html:string, chat_enabled:number, link_enc:string|null}|null>>}
+ */
+const SETTINGS_CACHE = new Map();
+/** @param {string} nodeId */
+function streamSettings(nodeId) {
+  let p = SETTINGS_CACHE.get(nodeId);
+  if (!p) {
+    p = fetch(api(`/api/stream/${encodeURIComponent(nodeId)}/settings`))
+      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => null);
+    SETTINGS_CACHE.set(nodeId, p);
+  }
+  return p;
+}
+
+/**
+ * Put the broadcaster's overlay under the video, if they wrote one.
+ *
+ * Built by simple/overlay.js from typed blocks — never parsed from markup, because this document
+ * holds the media key and is the one place in this client where one person's content is rendered
+ * in another person's page. The module is loaded only when there is something to render, so the
+ * majority of viewings that have no overlay never fetch it.
+ *
+ * @param {string} nodeId
+ */
+async function mountViewerOverlay(nodeId) {
+  const host = $("overlay-mount");
+  if (!host) return;
+  const settings = await streamSettings(nodeId);
+  const stored = (settings?.overlay_html ?? "").trim();
+  if (!stored || stored === "[]") return;
+  try {
+    const { mountOverlay } = await import("./overlay.js");
+    const removed = mountOverlay(host, stored);
+    // Logged, not shown. A viewer can do nothing about a block the renderer refused, and a
+    // notice in the middle of someone's broadcast about their overlay would be noise; the
+    // broadcaster sees the same list, in the same words, in the editor's preview.
+    if (removed.length) console.warn("[overlay] not rendered:", removed.join("; "));
+  } catch (e) {
+    console.warn("[overlay] could not be rendered:", e);
+  }
+}
+
+/**
  * Write a per-stream setting, signed with the key the broadcast is named after.
  *
  * Ownership needs no account: the stream id IS a 52-character base32 Ed25519 public key, so
@@ -942,14 +996,8 @@ async function writeStreamSettings(node, patch) {
  * @param {() => ({salts:{global:string,stream:string,epoch:number}, pw:Uint8Array|null, fragmentKey:string}|null)} inputs
  */
 async function mountChat(nodeId, tag, inputs) {
-  let enabled = false;
-  try {
-    const r = await fetch(api(`/api/stream/${encodeURIComponent(nodeId)}/settings`));
-    enabled = r.ok && !!(await r.json()).chat_enabled;
-  } catch {
-    return;
-  }
-  if (!enabled) return;
+  const settings = await streamSettings(nodeId);
+  if (!settings?.chat_enabled) return;
 
   const mount = $("chat-mount");
   if (!mount) return;
@@ -2332,6 +2380,36 @@ export async function runBroadcast() {
     if (qrRow) qrRow.hidden = !qrToggle?.checked;
   }
 
+  // ── The overlay editor ───────────────────────────────────────────────────────────────
+  //
+  // Loaded the first time the <details> is opened, and not before: most broadcasts have no
+  // overlay, and the editor plus the renderer it previews through are no use to them. Opening it
+  // is also what reveals the stream id to this page for the first time in some flows, which is
+  // why getOrCreateNode() is in here rather than at page load.
+  const ovBox = /** @type {HTMLDetailsElement|null} */ ($("ovbox"));
+  let ovEditor = null;
+  ovBox?.addEventListener("toggle", async () => {
+    if (!ovBox.open || ovEditor) return;
+    const mount = $("ovedit");
+    if (!mount) return;
+    mount.textContent = "loading…";
+    try {
+      const node = await getOrCreateNode();
+      nodeId = node.id;
+      const settings = await streamSettings(node.id);
+      const { initOverlayEditor } = await import("./overlay-editor.js");
+      ovEditor = initOverlayEditor(mount, {
+        initial: settings?.overlay_html ?? "",
+        // Signed with the key the stream id is made of, exactly like the chat flag. The editor
+        // is told whether it landed and says so, rather than showing a saved-looking state over
+        // a write that did not happen — this signature expires, so the failure is real.
+        onSave: (json) => writeStreamSettings(node, { overlay_html: json }),
+      });
+    } catch (e) {
+      mount.textContent = `the overlay editor could not be opened: ${e instanceof Error ? e.message : e}`;
+    }
+  });
+
   // ── Flip: front camera ⇄ back camera ─────────────────────────────────────────────────
   //
   // A PHONE control, and an action rather than a toggle — it carries no on/off state and never
@@ -3012,6 +3090,14 @@ export async function runWatch() {
   const originEid = params.get("o");
   const fragmentKey = fragmentKeyFromHash();
   if (!node || !fragmentKey) return set("this link is missing its stream id or #k= key");
+
+  // The broadcaster's panel, before anything else happens. Deliberately NOT waited for and
+  // deliberately not behind placement: someone who opens the link early sits on "waiting for
+  // broadcaster…" for as long as it takes, and the notes, links and schedule the broadcaster
+  // wrote are exactly what is worth reading in that time. The settings GET is ungated by design
+  // (a viewer holds a link and nothing else), so reading it here discloses nothing that waiting
+  // would have protected.
+  void mountViewerOverlay(node);
 
   // The stretched passcode, once (and if) the viewer supplies one. Held here so the rotation poller
   // re-derives WITH it rather than silently dropping back to the no-passcode key.

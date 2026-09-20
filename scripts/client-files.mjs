@@ -21,6 +21,9 @@ export const FILES = [
   "simple/offline-notice.js",
   "simple/audio-capture-worklet.js",
   "simple/overlay.js",
+  // Where an overlay is written. Dynamic-imported the first time the editor is opened, so the
+  // watch page — and every broadcast that never uses one — never fetches it.
+  "simple/overlay-editor.js",
   "simple/chat.js",
   // Burned into the picture rather than overlaid in the DOM, so they travel inside the E2E
   // media encryption like every other pixel. qr.js is imported by compositor.js alone.

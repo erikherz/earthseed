@@ -539,6 +539,88 @@ video { min-height: 240px; }
    this palette has no warning token — same reasoning as .capture-notice above. */
 .burn-warn { color: #b8860b; }
 
+/* ── The overlay ────────────────────────────────────────────────────────────────────────────
+   What the broadcaster writes, and what viewers read under the picture. Both sides are styled
+   here, because the editor previews through the VIEWER's renderer — if the two had separate
+   styling the preview would stop being a preview. */
+
+/* The viewer's side. `:empty` rather than a hidden attribute: the mount is always in the page
+   and stays invisible until the renderer puts something in it, so a broadcast with no overlay
+   has no empty box under it and nothing has to remember to hide one. */
+.overlay-mount:empty { display: none; }
+.overlay-mount {
+  margin: 16px 0 0;
+  padding: 14px 16px;
+  background: var(--es-surface);
+  border: 1px solid var(--es-border);
+  border-radius: var(--es-radius-lg);
+  line-height: 1.55;
+}
+.overlay-mount h2 { font-size: 1.05rem; margin: 0 0 8px; }
+.overlay-mount p { margin: 0 0 10px; }
+.overlay-mount ul, .overlay-mount ol { margin: 0 0 10px; padding-left: 22px; }
+.overlay-mount li { margin: 2px 0; }
+.overlay-mount hr { border: 0; border-top: 1px solid var(--es-border); margin: 12px 0; }
+.overlay-mount img { border-radius: var(--es-radius); max-width: 100%; height: auto; }
+.overlay-mount iframe { width: 100%; border: 1px solid var(--es-border); border-radius: var(--es-radius); }
+.overlay-mount > *:last-child { margin-bottom: 0; }
+
+/* The editor. A <details> because it is the biggest control on this page and the one most
+   people will never open. */
+.overlay-box {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--es-border);
+  border-radius: var(--es-radius);
+}
+.overlay-box > summary { cursor: pointer; font-size: 0.9rem; }
+.overlay-box > .hint { margin: 8px 0 10px; }
+
+/* One row per block: what it is, what is in it, and what can be done to it. The fields column is
+   the one that grows, so a long paragraph does not push the controls off a narrow screen. */
+.ov-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: 0 0 8px;
+  padding: 8px;
+  border: 1px solid var(--es-border);
+  border-radius: var(--es-radius);
+  background: var(--es-surface);
+}
+.ov-type { flex: 0 0 auto; font-size: 0.82rem; }
+.ov-fields { flex: 1 1 auto; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.ov-field { width: 100%; box-sizing: border-box; font-size: 0.85rem; }
+textarea.ov-field { resize: vertical; font-family: inherit; }
+.ov-tools { flex: 0 0 auto; display: flex; gap: 4px; }
+.ov-tool {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  line-height: 1;
+  font-size: 0.9rem;
+  border-radius: 6px;
+}
+.ov-tool:disabled { opacity: 0.35; cursor: default; }
+.ov-bar { display: flex; gap: 8px; margin: 10px 0 6px; }
+.ov-notes { color: #b8860b; }   /* same amber as .burn-warn: a limit reached, not a fault */
+.ov-preview { margin-top: 6px; }
+
+/* The preview renders through the viewer's stylesheet above, inside the editor. Boxed and
+   slightly inset so it reads as "this is what they get" rather than as more of the form. */
+.ov-preview {
+  padding: 12px 14px;
+  border: 1px dashed var(--es-border);
+  border-radius: var(--es-radius);
+}
+.ov-preview h2 { font-size: 1.05rem; margin: 0 0 8px; }
+.ov-preview p { margin: 0 0 10px; }
+.ov-preview ul, .ov-preview ol { margin: 0 0 10px; padding-left: 22px; }
+.ov-preview hr { border: 0; border-top: 1px solid var(--es-border); margin: 12px 0; }
+.ov-preview img, .ov-preview iframe { max-width: 100%; border-radius: var(--es-radius); }
+.ov-preview iframe { width: 100%; border: 1px solid var(--es-border); }
+.ov-preview > *:last-child { margin-bottom: 0; }
+
 /* Where the compositor mounts its canvas. It has to be a positioned box: the drag handles for
    the camera inset and the QR plate are DOM elements laid over the canvas — deliberately NOT
    drawn into it, because every pixel of that canvas is published and an audience should not be

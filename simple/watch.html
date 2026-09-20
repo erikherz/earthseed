@@ -73,6 +73,11 @@
         <div id="server-panel" class="panel hidden"></div>
         <!-- The report control is appended here by earthseed.js, and only once a viewer has
              actually been placed — someone who could not watch has nothing to report. -->
+        <!-- The broadcaster's panel, if they wrote one. Built as DOM from typed blocks by
+             simple/overlay.js — nothing here is ever parsed from markup, which is what makes it
+             safe to render somebody else's content in the document holding this viewer's media
+             key. Stays empty and invisible when there is no overlay. -->
+        <div id="overlay-mount" class="overlay-mount"></div>
         <div id="report-mount"></div>
         <!-- Live chat, revealed by earthseed.js only when the broadcaster switched it on for
              this stream. END-TO-END ENCRYPTED under a key derived from the same #k= fragment as

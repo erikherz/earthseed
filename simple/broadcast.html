@@ -155,6 +155,26 @@
           <div class="hint burn-warn" id="qrwarn" hidden></div>
         </div>
 
+        <!-- The overlay: a panel of notes, links or an embed that viewers see under the video.
+             Stored as typed BLOCKS, never as markup — this origin has no route from a string to
+             DOM, by policy, so there is nothing here to sanitise and nothing that could be
+             tricked into executing in a viewer's page (which is where the media key lives).
+             See simple/overlay.js for the format and simple/overlay-editor.js for the editor.
+
+             A <details> rather than a checkbox: it is the largest control on the page and the
+             one most people will never open, and an overlay simply IS whatever blocks are
+             saved — there is no separate on/off for it to disagree with. -->
+        <details class="overlay-box" id="ovbox">
+          <summary>Panel under the video — notes, links, an embed</summary>
+          <div class="hint">
+            Shown to anyone watching, under the picture. Text is text: a <code>&lt;script&gt;</code>
+            you type is eleven characters on screen and nothing more. Saved against this
+            broadcast's identity, so only you can change it, and it takes effect for viewers the
+            next time they open the link.
+          </div>
+          <div id="ovedit"></div>
+        </details>
+
         <div class="passcode-box" id="pcrow" hidden>
           <input id="passcode" type="text" readonly aria-label="Passcode" />
           <button id="copypc" type="button">Copy</button>
