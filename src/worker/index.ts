@@ -36,6 +36,12 @@ import {
 } from "./auth/session";
 import { upsertGoogleUser, currentUser, canBroadcast } from "./auth/users";
 
+// The seeds demo. Three imports and two dispatch lines below are its entire attachment to this
+// Worker, which is the point: removing it is deleting a file. NO MONEY MOVES — there is no
+// payment processor anywhere in it, and the cash-out path is a legal question that has not been
+// answered. See src/worker/seeds.ts and migration 0014.
+import { handleSeedRoutes, handleSeedAdminRoutes, burnForStream } from "./seeds";
+
 // Per-stream live chat Durable Object. Bound in wrangler.jsonc; removing it needs a deletion
 // migration. Nothing in the shipped client uses it yet.
 export { ChatRoom } from "./chat-room";
@@ -263,6 +269,9 @@ async function handleApiRoutes(
     }
     if (url.pathname.startsWith("/api/stats/")) {
       return handleStatsRoutes(request, env, url);
+    }
+    if (url.pathname.startsWith("/api/seeds/")) {
+      return handleSeedRoutes(request, env, url);
     }
     if (url.pathname.startsWith("/api/publish-code/")) {
       return handlePublishCodeRoutes(request, env, url);
@@ -630,8 +639,24 @@ async function handleStatsRoutes(request: Request, env: Env, url: URL): Promise<
   // that into the old row would credit them for the gap.
   const beat = path.match(/^\/api\/stats\/watch\/(\d+)\/heartbeat$/);
   if (method === "POST" && beat) {
+    const id = parseInt(beat[1], 10);
     const body = await readJsonBody<{ token?: string }>(request);
-    const ok = await touchSession(env, parseInt(beat[1], 10), body?.token ?? "");
+    const ok = await touchSession(env, id, body?.token ?? "");
+
+    // SEEDS DEMO: one heartbeat is 30 viewer-seconds of delivery, charged to whichever vault
+    // this stream is attached to. The stream id is read back from the session ROW rather than
+    // taken from the request, so a viewer cannot choose whose seeds they spend.
+    //
+    // Costs one SELECT per heartbeat and returns immediately for any stream with no vault —
+    // which is every ordinary broadcast on this site, so nothing outside the demo is affected.
+    if (ok) {
+      const row = await env.DB
+        .prepare("SELECT stream_id FROM watch_events WHERE id = ?")
+        .bind(id)
+        .first<{ stream_id: string }>();
+      if (row?.stream_id) await burnForStream(env, row.stream_id);
+    }
+
     return Response.json(ok ? { ok: true } : { ok: false, reason: "unknown" });
   }
 
@@ -1669,6 +1694,18 @@ async function handleAdminRoutes(request: Request, env: Env, url: URL): Promise<
     return authed ? Response.json({ valid: true }) : Response.json({ valid: false }, { status: 401 });
   }
   if (!authed) return Response.json({ error: "Unauthorized" }, { status: 401 });
+
+  // The seeds demo's operator surface — read the vaults, credit one, reset the lot. Dispatched
+  // here, AFTER the password check above, so it inherits the same gate as everything else
+  // rather than carrying its own. A demo that can mint balances needs the strongest door in the
+  // building, not a second one somebody has to remember to lock.
+  //
+  // It answers null for a path it does not own, so an unknown /api/admin/seeds/* falls through
+  // to the 404 at the bottom of this function rather than being swallowed here.
+  if (path.startsWith("/api/admin/seeds")) {
+    const handled = await handleSeedAdminRoutes(request, env, url);
+    if (handled) return handled;
+  }
 
   // POST /api/admin/kill — terminate one stream. See "The kill switch" above for exactly what
   // this binds and when. It is deliberately the most we can do: we cannot see what was streamed,
