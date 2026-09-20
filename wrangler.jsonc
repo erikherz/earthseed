@@ -89,6 +89,24 @@
     // must not take broadcasting down, and "0"/"false" are the values someone reaches for to turn
     // it off (both of which are truthy strings, which is the bug this avoids).
     "BROADCAST_OFFLINE": "0",
+
+    // ── ACCOUNTS ─────────────────────────────────────────────────────────────────────────────
+    // "off" is the default and the shipped state. Declared here rather than left unset so the
+    // choice is visible: with accounts off there is no sign-in, and publishing is gated solely
+    // by a MAC'd publish code — which is exactly what Wallflower ships (its OAuth block sits
+    // behind OAUTH-DISABLED markers) and what earthseed.live has always done.
+    //
+    // This is a VAR and not "are the OAuth secrets set" on purpose. GOOGLE_CLIENT_ID,
+    // GOOGLE_CLIENT_SECRET and SESSION_SECRET are still on this Worker as leftovers from the
+    // retired vite client, so keying off their presence meant sign-in went live on 20 Sep
+    // without anyone choosing it — and the allow list it implied was gating nothing, which is
+    // the same defect commit ca59e58 deleted an entire client over. A capability should be on
+    // because somebody turned it on.
+    //
+    // TURNING IT ON also turns the broadcaster allow list into a real second door to publishing
+    // (see admissionVerdict). The two doors are OR: a publish code still works, so enabling
+    // accounts cannot strand anyone holding one.
+    "ACCOUNTS": "off",
     "OFFLINE_MESSAGE": "Temporarily offline. Please contact erik@vivoh.com for a demo.",
 
     "BROKER_BASE": "https://tinymoq.com",

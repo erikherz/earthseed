@@ -129,6 +129,12 @@ export interface Env {
   OFFLINE_MESSAGE?: string;
   PUBLISHER_TOKEN_TTL?: string;
 
+  // ── Accounts. "on"/"1"/"true" switches on Google sign-in AND makes the broadcaster allow list
+  // a real second door to publishing. Anything else, including unset, leaves the whole surface
+  // dormant — which is the default, and matches what Wallflower actually ships. See
+  // accountsEnabled() for why this is a var and not "are the OAuth secrets present".
+  ACCOUNTS?: string;
+
   // ── Google sign-in. All three must be set for the account path to exist at all; with any of
   // them missing /api/auth/google/login returns 503, /api/auth/me answers `{user: null}`, and
   // nothing else in this Worker changes. That is the fail-closed direction and it is also the
@@ -354,8 +360,33 @@ async function handleApiRoutes(
 // Signing in is necessary and not sufficient. Collapsing these into one function is how an auth
 // check becomes one that cannot fail, which has happened twice in this codebase's lineage.
 
+/**
+ * Are accounts in use on this deployment?
+ *
+ * DORMANT BY DEFAULT, and deliberately a VAR rather than "are the secrets present".
+ *
+ * Wallflower ships its OAuth block commented out behind OAUTH-DISABLED markers, with
+ * getAuthenticatedUser() returning an anonymous stand-in and canBroadcast() returning true.
+ * Publishing there is gated by publish codes, exactly as it is here. Earthseed is the
+ * open-source replication of Wallflower, so matching that state is the faithful thing to do.
+ *
+ * Keying it on the secrets would have been the obvious shortcut and it is the wrong one: this
+ * Worker already carried GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and SESSION_SECRET as leftovers
+ * from the retired vite client, so "secrets are set" silently meant "sign-in is live" without
+ * anybody choosing it. A capability should be on because someone turned it on.
+ *
+ * Only "on"/"1"/"true" enable it. Anything else, including unset, leaves accounts off — the
+ * opposite default from the relay vars, and correct here: an absent var must not quietly add an
+ * identity system to a service whose front page says it has none.
+ */
+function accountsEnabled(env: Env): boolean {
+  const v = (env.ACCOUNTS ?? "").trim().toLowerCase();
+  return v === "on" || v === "1" || v === "true";
+}
+
 /** All three secrets, or nothing. Returned as a tuple so the callers cannot use a partial set. */
 function oauthConfig(env: Env): { clientId: string; clientSecret: string; sessionSecret: string } | null {
+  if (!accountsEnabled(env)) return null;
   if (!env.GOOGLE_CLIENT_ID || !env.GOOGLE_CLIENT_SECRET || !env.SESSION_SECRET) return null;
   return {
     clientId: env.GOOGLE_CLIENT_ID,
@@ -373,16 +404,30 @@ async function handleAuthRoutes(request: Request, env: Env, url: URL): Promise<R
   // signed-out visitor is the ordinary case on this site, not an error, and the client renders
   // the same page either way — it only needs to know which buttons to offer.
   if (request.method === "GET" && path === "/api/auth/me") {
+    // Accounts off is the default and the ordinary answer. Reported as a fact about the
+    // DEPLOYMENT rather than about the caller, so a client can tell "you are signed out" from
+    // "there is no such thing as signing in here" — those need different interfaces.
+    if (!accountsEnabled(env)) {
+      return Response.json(
+        { accounts_enabled: false, user: null },
+        { headers: { "Cache-Control": "no-store" } }
+      );
+    }
+
     const user = await currentUser(request, env);
     if (!user) {
       return Response.json(
-        { user: null, can_broadcast: false, sign_in_available: oauthConfig(env) !== null },
+        { accounts_enabled: true, user: null, sign_in_available: oauthConfig(env) !== null },
         { headers: { "Cache-Control": "no-store" } }
       );
     }
     return Response.json(
       {
+        accounts_enabled: true,
         user: { id: user.id, email: user.email, name: user.name, avatar_url: user.avatar_url },
+        // Load-bearing: admissionVerdict() consults the same allow list on the publish path, so
+        // this field reports a real capability rather than describing one. See the note there
+        // about what happens when it does not.
         can_broadcast: await canBroadcast(env.DB, user.email),
         sign_in_available: true,
       },
@@ -966,13 +1011,49 @@ async function verifyPublishCode(env: Env, code: string): Promise<CodeVerdict> {
  * returned true unconditionally while still being called, so the code read as though it gated
  * something and the endpoint was open to anyone who knew the URL. Hence the explicit first branch.
  */
+/**
+ * May this request publish?
+ *
+ * TWO DOORS, and the second one only exists when accounts are switched on:
+ *
+ *   1. a MAC'd publish code (or PUBLISH_SECRET) — the anonymous door, always open
+ *   2. a signed-in user on the broadcaster allow list — only when ACCOUNTS=on
+ *
+ * ── Why the account door is wired in HERE rather than left for later ────────────────────────
+ *
+ * Because "later" is how this exact bug happens. Commit ca59e58 (12 Aug 2026) deleted an earlier
+ * accounts surface and recorded why:
+ *
+ *   "/api/auth/google/login still 302'd to Google with a real client id, and the session it
+ *    minted gated exactly one route the shipped client never calls, which meant the broadcaster
+ *    allow list everyone believed was gating publishing was gating nothing."
+ *
+ * That was reproduced on 20 Sep 2026 when the accounts surface came back: `canBroadcast()` was
+ * called from `/api/auth/me` and nowhere else, so a default-DENY allow list sat in front of a
+ * publish path that never consulted it. A gate that cannot refuse is worse than no gate, because
+ * people believe it. This function is the only place that can refuse, so the check belongs here.
+ *
+ * Note the doors are OR, not AND. Turning accounts on must not silently break every broadcaster
+ * holding a publish code — and the anonymous door is the one that keeps a broadcaster anonymous
+ * to this service, which is a property worth more than tidiness.
+ */
 async function admissionVerdict(
   env: Env,
-  credential: string | undefined
+  credential: string | undefined,
+  request?: Request
 ): Promise<{ ok: boolean; reason: string }> {
   if (!env.PUBLISH_SECRET && !env.ISSUE_KEY) {
     return { ok: false, reason: "publisher authorization is not configured" };
   }
+
+  // Door 2, tried first only because it needs no credential in the body.
+  if (request && accountsEnabled(env)) {
+    const user = await currentUser(request, env);
+    if (user && (await canBroadcast(env.DB, user.email))) {
+      return { ok: true, reason: "account" };
+    }
+  }
+
   if (!credential) return { ok: false, reason: "A publish key is required to broadcast." };
 
   if (env.PUBLISH_SECRET && constantTimeEqual(credential, env.PUBLISH_SECRET)) {
@@ -1349,7 +1430,7 @@ async function handlePlacementRoutes(request: Request, env: Env, url: URL): Prom
 
     // Admission BEFORE anything else: no relay is asked for, no row is written, and no work is
     // done on behalf of someone who may not publish at all.
-    const admission = await admissionVerdict(env, body?.code?.trim());
+    const admission = await admissionVerdict(env, body?.code?.trim(), request);
     if (!admission.ok) {
       return Response.json({ error: admission.reason, need_code: true }, { status: 403 });
     }
